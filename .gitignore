@@ -1,6 +1,8 @@
 .venv/
 stock_cache.db
+agent_data.db
 __pycache__/
 *.pyc
 .DS_Store
 *.pdf
+*.db

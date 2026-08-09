@@ -1,0 +1,17 @@
+services:
+  stock-quant:
+    build: .
+    container_name: stock-quant
+    ports:
+      - "8000:8000"
+      - "7860:7860"
+    volumes:
+      - ./quant/agent_data.db:/app/quant/agent_data.db
+      - ./quant/stock_cache.db:/app/quant/stock_cache.db
+    environment:
+      - HTTP_PROXY=${HTTP_PROXY:-}
+      - HTTPS_PROXY=${HTTPS_PROXY:-}
+      - NO_PROXY=localhost,127.0.0.1
+    restart: unless-stopped
+    command: >
+      sh -c "cd /app/quant && python api.py"

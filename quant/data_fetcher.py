@@ -89,6 +89,33 @@ def get_backtrader_data(code, start_date="20220101", end_date=None):
     df = df.set_index("datetime")
     return df[["open", "high", "low", "close", "volume", "openinterest"]]
 
+def fetch_realtime(codes):
+    import urllib.request
+    symbols = [sina_symbol(c) for c in codes]
+    url = "http://hq.sinajs.cn/list=" + ",".join(symbols)
+    req = urllib.request.Request(url, headers={"Referer": "https://finance.sina.com.cn/"})
+    resp = urllib.request.urlopen(req, timeout=10)
+    data = resp.read().decode("gbk")
+    results = []
+    for i, code in enumerate(codes):
+        line = data.split("\n")[i] if i < len(data.split("\n")) else ""
+        if f"hq_str_{symbols[i]}" not in line:
+            continue
+        parts = line.split('"')[1].split(",") if '"' in line else []
+        if len(parts) < 30:
+            continue
+        change = float(parts[3]) - float(parts[2])
+        pct = change / float(parts[2]) * 100 if float(parts[2]) else 0
+        results.append({
+            "code": code, "name": parts[0],
+            "price": float(parts[3]), "change": round(change, 2),
+            "pct": round(pct, 2), "high": float(parts[4]),
+            "low": float(parts[5]), "open": float(parts[1]),
+            "yclose": float(parts[2]),
+            "volume": int(parts[8]) if parts[8] else 0,
+        })
+    return results
+
 if __name__ == "__main__":
     df = get_daily_data("600789", "20240101", "20240131")
     print(f"600789: {len(df)} 条, {df.iloc[0]['date']} ~ {df.iloc[-1]['date']}")

@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>A股量化监控</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+            background: #f4f4f5;
+            color: #333;
+            min-height: 100vh;
+        }
+        .header {
+            background: #fff;
+            border-bottom: 1px solid #e5e5e5;
+            padding: 16px 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .header h1 { font-size: 20px; font-weight: 600; color: #222; }
+        .header .sub { font-size: 13px; color: #888; margin-top: 2px; }
+        .header .right { display: flex; align-items: center; gap: 12px; }
+        .time { font-size: 13px; color: #666; }
+        .btn {
+            background: #333; color: #fff; border: none; padding: 8px 16px;
+            border-radius: 6px; cursor: pointer; font-size: 13px;
+            transition: background 0.2s;
+        }
+        .btn:hover { background: #555; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 20px 24px; }
+        .toolbar {
+            display: flex; gap: 8px; margin-bottom: 16px; align-items: center;
+        }
+        .toolbar input {
+            padding: 8px 12px; border: 1px solid #d0d0d0; border-radius: 6px;
+            font-size: 13px; width: 200px; outline: none;
+        }
+        .toolbar input:focus { border-color: #888; }
+        .card {
+            background: #fff; border-radius: 8px; border: 1px solid #e5e5e5;
+            padding: 16px; margin-bottom: 16px;
+        }
+        .card-title {
+            font-size: 15px; font-weight: 600; color: #333;
+            margin-bottom: 12px; display: flex; align-items: center; gap: 8px;
+        }
+        table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        th {
+            text-align: left; padding: 10px 12px; background: #fafafa;
+            border-bottom: 1px solid #e0e0e0; color: #666; font-weight: 500;
+            white-space: nowrap;
+        }
+        td { padding: 10px 12px; border-bottom: 1px solid #f0f0f0; }
+        tr:hover td { background: #fafafa; }
+        .up { color: #d32f2f; font-weight: 600; }
+        .down { color: #2e7d32; font-weight: 600; }
+        .flat { color: #666; }
+        .badge {
+            display: inline-block; padding: 2px 8px; border-radius: 4px;
+            font-size: 12px; font-weight: 500;
+        }
+        .badge-buy { background: #e8f5e9; color: #2e7d32; }
+        .badge-sell { background: #ffebee; color: #d32f2f; }
+        .badge-neutral { background: #f5f5f5; color: #666; }
+        .charts { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+        .chart { height: 320px; }
+        @media (max-width: 768px) {
+            .charts { grid-template-columns: 1fr; }
+            .toolbar input { width: 100%; }
+        }
+        .footer { text-align: center; padding: 20px; color: #999; font-size: 12px; }
+        .empty { text-align: center; padding: 40px; color: #999; }
+        .lb { display: flex; gap: 16px; font-size: 13px; color: #666; }
+        .lb span b { color: #333; }
+    </style>
+</head>
+<body>
+<div id="app">
+    <div class="header">
+        <div>
+            <h1>📈 A股量化监控</h1>
+            <div class="sub">基于《半小时漫画股票实战法》策略知识库</div>
+        </div>
+        <div class="right">
+            <span class="time">最后更新：{{ time || '--' }}</span>
+            <button class="btn" @click="loadQuotes">🔄 刷新数据</button>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="toolbar">
+            <input v-model="codesInput" placeholder="输入股票代码，逗号分隔，如 600789,000001" @keyup.enter="loadQuotes">
+            <button class="btn" @click="loadQuotes">查询</button>
+        </div>
+
+        <div class="card">
+            <div class="card-title">📊 实时行情与策略信号</div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>代码</th><th>名称</th><th>现价</th><th>涨跌幅</th>
+                        <th>最高</th><th>最低</th><th>MA5</th><th>MACD</th><th>KDJ</th><th>建议</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr v-for="q in quotes" :key="q.code">
+                        <td>{{ q.code }}</td>
+                        <td>{{ q.name }}</td>
+                        <td><b>{{ q.price.toFixed(2) }}</b></td>
+                        <td :class="pctClass(q.pct)">{{ q.pct > 0 ? '+' : '' }}{{ q.pct.toFixed(2) }}%</td>
+                        <td>{{ q.high.toFixed(2) }}</td>
+                        <td>{{ q.low.toFixed(2) }}</td>
+                        <td>{{ q.ma5 != null ? q.ma5 : '-' }}</td>
+                        <td>
+                            <span v-if="q.macd_bull != null" :class="q.macd_bull ? 'up' : 'down'">
+                                {{ q.macd_bull ? '多头' : '空头' }}
+                            </span>
+                            <span v-else>-</span>
+                        </td>
+                        <td>
+                            <span v-if="q.kdj_signal" :class="kdjClass(q.kdj_signal)">{{ q.kdj_signal }}</span>
+                            <span v-else>-</span>
+                        </td>
+                        <td>
+                            <span class="badge" :class="signalBadge(q)">{{ signalText(q) }}</span>
+                        </td>
+                    </tr>
+                    <tr v-if="!quotes.length">
+                        <td colspan="10" class="empty">暂无数据，请点击刷新</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="card">
+            <div class="card-title">📈 走势分析</div>
+            <div class="lb">
+                <span>选择股票：</span>
+                <select v-model="selectedCode" @change="loadKline" style="padding:6px 10px;border:1px solid #d0d0d0;border-radius:6px;font-size:13px;">
+                    <option v-for="q in quotes" :key="q.code" :value="q.code">{{ q.name }} ({{ q.code }})</option>
+                </select>
+            </div>
+            <div id="klineChart" class="chart" style="margin-top:12px;"></div>
+        </div>
+
+        <div class="footer">
+            ⚠️ 本系统仅供学习研究，不构成投资建议。<br>
+            数据来源：新浪财经 | 回测框架：Backtrader
+        </div>
+    </div>
+</div>
+
+<script>
+const { createApp } = Vue;
+
+createApp({
+    data() {
+        return {
+            quotes: [],
+            time: '',
+            codesInput: '600789,000001,600519,601318,000333,002415',
+            selectedCode: '',
+            chart: null,
+        };
+    },
+    methods: {
+        async loadQuotes() {
+            try {
+                const res = await fetch('/api/quotes?codes=' + encodeURIComponent(this.codesInput));
+                const data = await res.json();
+                this.quotes = data.data;
+                this.time = data.time;
+                if (this.quotes.length && !this.selectedCode) {
+                    this.selectedCode = this.quotes[0].code;
+                }
+                this.loadKline();
+            } catch (e) {
+                console.error('加载行情失败', e);
+            }
+        },
+        async loadKline() {
+            if (!this.selectedCode) return;
+            try {
+                const res = await fetch('/api/kline/' + this.selectedCode);
+                const data = await res.json();
+                this.renderChart(data.data);
+            } catch (e) {
+                console.error('加载K线失败', e);
+            }
+        },
+        renderChart(days) {
+            const dates = days.map(d => d.date);
+            const closes = days.map(d => d.close);
+            const volumes = days.map(d => d.volume);
+            if (!this.chart) {
+                this.chart = echarts.init(document.getElementById('klineChart'));
+            }
+            this.chart.setOption({
+                tooltip: { trigger: 'axis' },
+                grid: [
+                    { left: 60, right: 20, top: 20, height: '55%' },
+                    { left: 60, right: 20, top: '72%', height: '18%' }
+                ],
+                xAxis: [
+                    { type: 'category', data: dates, boundaryGap: false, axisLine: { lineStyle: { color: '#ccc' } } },
+                    { type: 'category', data: dates, axisLabel: { show: false }, axisLine: { lineStyle: { color: '#ccc' } } }
+                ],
+                yAxis: [
+                    { type: 'value', scale: true, splitLine: { lineStyle: { color: '#f0f0f0' } } },
+                    { type: 'value', axisLabel: { show: false }, splitLine: { show: false } }
+                ],
+                dataZoom: [{ type: 'inside', xAxisIndex: [0, 1], start: 50, end: 100 }],
+                series: [
+                    {
+                        name: '收盘价', type: 'line', data: closes, smooth: true,
+                        lineStyle: { color: '#333', width: 2 },
+                        areaStyle: { color: 'rgba(51,51,51,0.08)' },
+                    },
+                    {
+                        name: '成交量', type: 'bar', xAxisIndex: 1, yAxisIndex: 1,
+                        data: volumes, itemStyle: { color: '#999' }
+                    }
+                ]
+            });
+        },
+        pctClass(pct) { return pct > 0 ? 'up' : (pct < 0 ? 'down' : 'flat'); },
+        kdjClass(s) { return s === '超买' ? 'up' : (s === '超卖' ? 'down' : ''); },
+        signalBadge(q) {
+            let score = 0;
+            if (q.ma5 != null && q.price > q.ma5) score++;
+            if (q.macd_bull) score++;
+            if (q.kdj_signal === '超卖') score++;
+            if (q.kdj_signal === '超买') score--;
+            if (score >= 2) return 'badge-buy';
+            if (score <= -1) return 'badge-sell';
+            return 'badge-neutral';
+        },
+        signalText(q) {
+            let score = 0;
+            if (q.ma5 != null && q.price > q.ma5) score++;
+            if (q.macd_bull) score++;
+            if (q.kdj_signal === '超卖') score++;
+            if (q.kdj_signal === '超买') score--;
+            if (score >= 2) return '关注';
+            if (score <= -1) return '观望';
+            return '中性';
+        }
+    },
+    mounted() {
+        this.loadQuotes();
+        setInterval(() => this.loadQuotes(), 60000);
+    }
+}).mount('#app');
+</script>
+</body>
+</html>

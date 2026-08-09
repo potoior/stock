@@ -1,0 +1,5 @@
+pandas
+backtrader
+fastapi
+uvicorn
+gradio
