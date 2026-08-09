@@ -1,0 +1,272 @@
+[
+  {
+    "stock": "600789",
+    "strategy": "MACD金叉死叉",
+    "total_return_pct": 19.95,
+    "annual_return_pct": 9.97,
+    "sharpe_ratio": 0.31,
+    "max_drawdown_pct": 26.82,
+    "final_value": 122082.15
+  },
+  {
+    "stock": "000001",
+    "strategy": "MACD金叉死叉",
+    "total_return_pct": 11.38,
+    "annual_return_pct": 5.57,
+    "sharpe_ratio": 0.2,
+    "max_drawdown_pct": 21.26,
+    "final_value": 112047.64
+  },
+  {
+    "stock": "002446",
+    "strategy": "MACD金叉死叉",
+    "total_return_pct": -24.17,
+    "annual_return_pct": -10.87,
+    "sharpe_ratio": -0.62,
+    "max_drawdown_pct": 44.39,
+    "final_value": 78532.56
+  },
+  {
+    "stock": "300750",
+    "strategy": "MACD金叉死叉",
+    "total_return_pct": -88.42,
+    "annual_return_pct": -34.37,
+    "sharpe_ratio": -1.43,
+    "max_drawdown_pct": 64.34,
+    "final_value": 41305.62
+  },
+  {
+    "stock": "600519",
+    "strategy": "MACD金叉死叉",
+    "total_return_pct": -17.18,
+    "annual_return_pct": -7.86,
+    "sharpe_ratio": -1.24,
+    "max_drawdown_pct": 19.54,
+    "final_value": 84216.17
+  },
+  {
+    "stock": "000858",
+    "strategy": "MACD金叉死叉",
+    "total_return_pct": -4.53,
+    "annual_return_pct": -2.14,
+    "sharpe_ratio": -0.32,
+    "max_drawdown_pct": 27.31,
+    "final_value": 95567.36
+  },
+  {
+    "stock": "002415",
+    "strategy": "MACD金叉死叉",
+    "total_return_pct": -20.57,
+    "annual_return_pct": -9.33,
+    "sharpe_ratio": -7.17,
+    "max_drawdown_pct": 23.61,
+    "final_value": 81410.76
+  },
+  {
+    "stock": "600036",
+    "strategy": "MACD金叉死叉",
+    "total_return_pct": 14.82,
+    "annual_return_pct": 7.31,
+    "sharpe_ratio": 0.26,
+    "max_drawdown_pct": 25.44,
+    "final_value": 115969.01
+  },
+  {
+    "stock": "601318",
+    "strategy": "MACD金叉死叉",
+    "total_return_pct": 28.0,
+    "annual_return_pct": 14.27,
+    "sharpe_ratio": 0.78,
+    "max_drawdown_pct": 22.42,
+    "final_value": 132307.84
+  },
+  {
+    "stock": "000333",
+    "strategy": "MACD金叉死叉",
+    "total_return_pct": 20.42,
+    "annual_return_pct": 10.22,
+    "sharpe_ratio": 0.58,
+    "max_drawdown_pct": 12.8,
+    "final_value": 122652.64
+  },
+  {
+    "stock": "600789",
+    "strategy": "KDJ超买超卖",
+    "total_return_pct": 0.02,
+    "annual_return_pct": 0.01,
+    "sharpe_ratio": -0.33,
+    "max_drawdown_pct": 33.44,
+    "final_value": 100017.68
+  },
+  {
+    "stock": "000001",
+    "strategy": "KDJ超买超卖",
+    "total_return_pct": -23.77,
+    "annual_return_pct": -10.7,
+    "sharpe_ratio": -0.48,
+    "max_drawdown_pct": 35.55,
+    "final_value": 78845.67
+  },
+  {
+    "stock": "002446",
+    "strategy": "KDJ超买超卖",
+    "total_return_pct": -1.09,
+    "annual_return_pct": -0.52,
+    "sharpe_ratio": -0.0,
+    "max_drawdown_pct": 46.17,
+    "final_value": 98918.46
+  },
+  {
+    "stock": "300750",
+    "strategy": "KDJ超买超卖",
+    "total_return_pct": -86.5,
+    "annual_return_pct": -33.77,
+    "sharpe_ratio": -0.74,
+    "max_drawdown_pct": 64.77,
+    "final_value": 42105.1
+  },
+  {
+    "stock": "600519",
+    "strategy": "KDJ超买超卖",
+    "total_return_pct": -42.64,
+    "annual_return_pct": -18.38,
+    "sharpe_ratio": -2.51,
+    "max_drawdown_pct": 36.6,
+    "final_value": 65285.68
+  },
+  {
+    "stock": "000858",
+    "strategy": "KDJ超买超卖",
+    "total_return_pct": -30.22,
+    "annual_return_pct": -13.41,
+    "sharpe_ratio": -1.64,
+    "max_drawdown_pct": 30.54,
+    "final_value": 73920.2
+  },
+  {
+    "stock": "002415",
+    "strategy": "KDJ超买超卖",
+    "total_return_pct": -20.18,
+    "annual_return_pct": -9.16,
+    "sharpe_ratio": -0.99,
+    "max_drawdown_pct": 21.86,
+    "final_value": 81727.74
+  },
+  {
+    "stock": "600036",
+    "strategy": "KDJ超买超卖",
+    "total_return_pct": -34.06,
+    "annual_return_pct": -14.98,
+    "sharpe_ratio": -0.65,
+    "max_drawdown_pct": 39.88,
+    "final_value": 71137.67
+  },
+  {
+    "stock": "601318",
+    "strategy": "KDJ超买超卖",
+    "total_return_pct": 0.04,
+    "annual_return_pct": 0.02,
+    "sharpe_ratio": -0.48,
+    "max_drawdown_pct": 21.61,
+    "final_value": 100037.35
+  },
+  {
+    "stock": "000333",
+    "strategy": "KDJ超买超卖",
+    "total_return_pct": -18.77,
+    "annual_return_pct": -8.55,
+    "sharpe_ratio": -0.71,
+    "max_drawdown_pct": 28.77,
+    "final_value": 82886.95
+  },
+  {
+    "stock": "600789",
+    "strategy": "5日均线止损法",
+    "total_return_pct": 40.44,
+    "annual_return_pct": 21.25,
+    "sharpe_ratio": 0.7,
+    "max_drawdown_pct": 18.94,
+    "final_value": 149842.04
+  },
+  {
+    "stock": "000001",
+    "strategy": "5日均线止损法",
+    "total_return_pct": -14.12,
+    "annual_return_pct": -6.5,
+    "sharpe_ratio": -0.69,
+    "max_drawdown_pct": 22.22,
+    "final_value": 86834.47
+  },
+  {
+    "stock": "002446",
+    "strategy": "5日均线止损法",
+    "total_return_pct": 23.0,
+    "annual_return_pct": 11.58,
+    "sharpe_ratio": 0.35,
+    "max_drawdown_pct": 40.29,
+    "final_value": 125863.73
+  },
+  {
+    "stock": "300750",
+    "strategy": "5日均线止损法",
+    "total_return_pct": -29.96,
+    "annual_return_pct": -13.3,
+    "sharpe_ratio": -0.9,
+    "max_drawdown_pct": 37.29,
+    "final_value": 74112.77
+  },
+  {
+    "stock": "600519",
+    "strategy": "5日均线止损法",
+    "total_return_pct": -10.41,
+    "annual_return_pct": -4.84,
+    "sharpe_ratio": -1.14,
+    "max_drawdown_pct": 15.47,
+    "final_value": 90116.01
+  },
+  {
+    "stock": "000858",
+    "strategy": "5日均线止损法",
+    "total_return_pct": 3.26,
+    "annual_return_pct": 1.57,
+    "sharpe_ratio": -0.6,
+    "max_drawdown_pct": 17.99,
+    "final_value": 103317.58
+  },
+  {
+    "stock": "002415",
+    "strategy": "5日均线止损法",
+    "total_return_pct": -8.61,
+    "annual_return_pct": -4.02,
+    "sharpe_ratio": -0.9,
+    "max_drawdown_pct": 16.2,
+    "final_value": 91753.59
+  },
+  {
+    "stock": "600036",
+    "strategy": "5日均线止损法",
+    "total_return_pct": -5.83,
+    "annual_return_pct": -2.74,
+    "sharpe_ratio": -0.53,
+    "max_drawdown_pct": 19.92,
+    "final_value": 94336.43
+  },
+  {
+    "stock": "601318",
+    "strategy": "5日均线止损法",
+    "total_return_pct": 2.93,
+    "annual_return_pct": 1.4,
+    "sharpe_ratio": -0.17,
+    "max_drawdown_pct": 15.42,
+    "final_value": 102971.0
+  },
+  {
+    "stock": "000333",
+    "strategy": "5日均线止损法",
+    "total_return_pct": 12.2,
+    "annual_return_pct": 5.99,
+    "sharpe_ratio": 0.34,
+    "max_drawdown_pct": 17.41,
+    "final_value": 112978.6
+  }
+]
