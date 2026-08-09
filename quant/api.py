@@ -5,13 +5,14 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
 from data_fetcher import get_daily_data, fetch_realtime
 
 app = FastAPI(title="A股量化监控系统")
+WEB_DIR = Path(__file__).parent / "web"
 DB_PATH = Path(__file__).parent / "stock_cache.db"
 
-# 默认股票池
+app.mount("/lib", StaticFiles(directory=str(WEB_DIR / "lib")), name="lib")
+
 DEFAULT_CODES = ["600789", "000001", "600519", "601318", "000333", "002415"]
 
 def compute_signals(code):
@@ -80,7 +81,7 @@ def get_kline(code: str, days: int = 120):
 
 @app.get("/")
 def index():
-    return FileResponse(str(Path(__file__).parent / "web" / "index.html"))
+    return FileResponse(str(WEB_DIR / "index.html"))
 
 if __name__ == "__main__":
     import uvicorn
