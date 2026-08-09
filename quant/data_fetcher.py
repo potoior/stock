@@ -68,6 +68,7 @@ def get_daily_data(code, start_date="20220101", end_date=None):
             return cached
     df = fetch_from_sina(code)
     if len(df) > 0:
+        conn.execute("DELETE FROM daily WHERE code=?", (code,))
         df.to_sql("daily", conn, if_exists="append", index=False)
     result = pd.read_sql(
         "SELECT * FROM daily WHERE code=? AND date>=? AND date<=? ORDER BY date",
