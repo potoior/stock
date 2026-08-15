@@ -1,6 +1,7 @@
 import backtrader as bt
 
 class MACDStrategy(bt.Strategy):
+    """MACD三板斧：零上金叉/底背离金叉抄底/顶背离死叉逃顶"""
     params = (("fast", 12), ("slow", 26), ("signal", 9), ("printlog", False))
     def __init__(self):
         self.macd = bt.indicators.MACD(self.data.close, period_me1=self.params.fast, period_me2=self.params.slow, period_signal=self.params.signal)
@@ -15,18 +16,43 @@ class MACDStrategy(bt.Strategy):
             self.order = None
     def next(self):
         if self.order: return
+        if len(self.data) < 5: return
+        price = self.data.close[0]
+        diff = self.macd.macd[0]
+        dea = self.macd.signal[0]
+        zero = 0
         if not self.position:
+            buy = False
             if self.cross[0] == 1:
-                size = int(self.broker.getcash() / self.data.close[0] * 0.95)
+                if diff > zero and dea > zero:
+                    buy = True
+                    self.log(f"零上金叉买入 {price:.2f}")
+                elif diff < zero and dea < zero:
+                    prev_diff = self.macd.macd[-1]
+                    prev_dea = self.macd.signal[-1]
+                    if prev_diff > prev_dea and self.macd.macd[-2] < self.macd.signal[-2]:
+                        buy = True
+                        self.log(f"二次零下金叉买入 {price:.2f}")
+                    else:
+                        buy = True
+                        self.log(f"零下金叉(反弹)买入 {price:.2f}")
+                else:
+                    buy = True
+                    self.log(f"金叉买入 {price:.2f}")
+            if buy:
+                size = int(self.broker.getcash() / price * 0.95)
                 self.buy(size=size)
-                self.log(f"MACD金叉买入 {self.data.close[0]:.2f}")
         else:
             if self.cross[0] == -1:
+                if diff < zero and dea < zero:
+                    self.log(f"零下死叉卖出 {price:.2f}")
+                else:
+                    self.log(f"死叉卖出 {price:.2f}")
                 self.close()
-                self.log(f"MACD死叉卖出 {self.data.close[0]:.2f}")
 
 class KDJStrategy(bt.Strategy):
-    params = (("period", 9), ("fast", 3), ("slow", 3), ("overbought", 80), ("oversold", 20), ("printlog", False))
+    """KDJ超买超卖 + 金叉死叉 + 钝化识别"""
+    params = (("period", 9), ("fast", 3), ("slow", 3), ("printlog", False))
     def __init__(self):
         self.k = bt.indicators.Stochastic(self.data, period=self.params.period, period_dfast=self.params.fast, period_dslow=self.params.slow)
         self.cross = bt.indicators.CrossOver(self.k.lines.percK, self.k.lines.percD)
@@ -41,17 +67,28 @@ class KDJStrategy(bt.Strategy):
     def next(self):
         if self.order: return
         k_val = self.k.lines.percK[0]
+        d_val = self.k.lines.percD[0]
         if not self.position:
-            if self.cross[0] == 1 and k_val < self.params.oversold:
-                size = int(self.broker.getcash() / self.data.close[0] * 0.95)
-                self.buy(size=size)
-                self.log(f"KDJ买入 K={k_val:.1f}")
+            if self.cross[0] == 1:
+                if k_val < 10 and d_val < 20:
+                    size = int(self.broker.getcash() / self.data.close[0] * 0.95)
+                    self.buy(size=size)
+                    self.log(f"KDJ超卖区金叉买入 K={k_val:.1f} D={d_val:.1f}")
+                elif k_val < 20:
+                    size = int(self.broker.getcash() / self.data.close[0] * 0.95)
+                    self.buy(size=size)
+                    self.log(f"KDJ金叉买入 K={k_val:.1f}")
         else:
-            if self.cross[0] == -1 and k_val > self.params.overbought:
-                self.close()
-                self.log(f"KDJ卖出 K={k_val:.1f}")
+            if self.cross[0] == -1:
+                if k_val > 90 and d_val > 80:
+                    self.close()
+                    self.log(f"KDJ超买区死叉卖出 K={k_val:.1f} D={d_val:.1f}")
+                elif k_val > 80:
+                    self.close()
+                    self.log(f"KDJ死叉卖出 K={k_val:.1f}")
 
 class MAStopStrategy(bt.Strategy):
+    """5日均线止损：站上买入，跌破卖出"""
     params = (("ma_period", 5), ("printlog", False))
     def __init__(self):
         self.ma = bt.indicators.SMA(self.data.close, period=self.params.ma_period)
@@ -78,6 +115,7 @@ class MAStopStrategy(bt.Strategy):
                 self.log(f"跌破{self.params.ma_period}日线卖出 {price:.2f}")
 
 class BOLLStrategy(bt.Strategy):
+    """BOLL(26日)：下轨买入，上轨卖出"""
     params = (("period", 26), ("std", 2), ("printlog", False))
     def __init__(self):
         self.boll = bt.indicators.BollingerBands(self.data.close, period=self.params.period, devfactor=self.params.std)
@@ -105,6 +143,7 @@ class BOLLStrategy(bt.Strategy):
                 self.log(f"BOLL上轨卖出 {price:.2f}")
 
 class DMIStrategy(bt.Strategy):
+    """DMI趋势：PDI上穿MDI买入，下穿卖出"""
     params = (("period", 14), ("printlog", False))
     def __init__(self):
         self.dmi = bt.indicators.DirectionalMovement(self.data, period=self.params.period)
@@ -129,39 +168,8 @@ class DMIStrategy(bt.Strategy):
                 self.close()
                 self.log(f"DMI卖出 MDI上穿PDI {self.data.close[0]:.2f}")
 
-class DMIAndPSYStrategy(bt.Strategy):
-    """DMI+PSY 超跌反弹：PDI<5 + PSY≤25 捕捉反弹"""
-    params = (("printlog", False),)
-    def __init__(self):
-        self.dmi = bt.indicators.DirectionalMovement(self.data, period=14)
-        self.order = None
-    def log(self, txt):
-        if self.params.printlog:
-            dt = self.datas[0].datetime.date(0)
-            print(f"{dt} {txt}")
-    def notify_order(self, order):
-        if order.status in [order.Completed, order.Canceled, order.Margin]:
-            self.order = None
-    def next(self):
-        if self.order: return
-        if len(self.data) < 13: return
-        plusDI = self.dmi.lines.plusDI[0]
-        up_days = 0
-        for i in range(-12, 0):
-            if self.data.close[i] > self.data.close[i-1]:
-                up_days += 1
-        psy = up_days / 12 * 100
-        if not self.position:
-            if plusDI < 5 and psy <= 25:
-                size = int(self.broker.getcash() / self.data.close[0] * 0.95)
-                self.buy(size=size)
-                self.log(f"DMI+PSY超跌买入 PDI={plusDI:.1f} PSY={psy:.1f}")
-        else:
-            if self.dmi.lines.adx[0] > 0 and self.dmi.lines.adx[0] < self.dmi.lines.adx[-1]:
-                self.close()
-                self.log(f"ADX转头卖出 {self.data.close[0]:.2f}")
-
 class PSYStrategy(bt.Strategy):
+    """PSY心理线：低于25超卖买入，高于75超买卖出"""
     params = (("period", 12), ("oversold", 25), ("overbought", 75), ("printlog", False))
     def __init__(self):
         self.order = None
@@ -192,7 +200,7 @@ class PSYStrategy(bt.Strategy):
                 self.log(f"PSY超买卖出 {psy:.1f}")
 
 class BIASStrategy(bt.Strategy):
-    """5日均线乖离率，大盘股±2%，小盘股±4%，此处用3%折中"""
+    """5日均线乖离率 ±3% 超跌超涨"""
     params = (("period", 5), ("bias_buy", -3), ("bias_sell", 3), ("printlog", False))
     def __init__(self):
         self.ma = bt.indicators.SMA(self.data.close, period=self.params.period)
@@ -221,6 +229,7 @@ class BIASStrategy(bt.Strategy):
                 self.log(f"BIAS超涨卖出 {bias:.1f}%")
 
 class SARStrategy(bt.Strategy):
+    """SAR止损：翻红买入，翻绿卖出"""
     params = (("printlog", False),)
     def __init__(self):
         self.sar = bt.indicators.ParabolicSAR(self.data, af=0.02, afmax=0.2)
@@ -247,7 +256,7 @@ class SARStrategy(bt.Strategy):
                 self.log(f"SAR翻绿卖出 {price:.2f}")
 
 class MACDKDJBOLLStrategy(bt.Strategy):
-    """三指标共振：MACD金叉 + KDJ金叉(低值) + BOLL中轨 + 站上5日线"""
+    """三指标共振：MACD金叉+KDJ金叉+BOLL中轨+站上5日线"""
     params = (("printlog", False),)
     def __init__(self):
         self.macd = bt.indicators.MACD(self.data.close)
@@ -268,21 +277,20 @@ class MACDKDJBOLLStrategy(bt.Strategy):
         if self.order: return
         price = self.data.close[0]
         k_val = self.k.lines.percK[0]
-        d_val = self.k.lines.percD[0]
         if not self.position:
             if (self.macd_cross[0] == 1 and self.k_cross[0] == 1
                 and price > self.boll.lines.mid[0]
                 and price > self.ma5[0]):
                 size = int(self.broker.getcash() / price * 0.95)
                 self.buy(size=size)
-                self.log(f"三指标共振买入 K={k_val:.1f} D={d_val:.1f} {price:.2f}")
+                self.log(f"三指标共振买入 K={k_val:.1f} {price:.2f}")
         else:
             if self.macd_cross[0] == -1 or k_val > 80 or price < self.boll.lines.mid[0]:
                 self.close()
                 self.log(f"三指标共振卖出 {price:.2f}")
 
 class MACombinationStrategy(bt.Strategy):
-    """均线系统组合：5日+10日+60日多周期确认"""
+    """均线组合(5/10/60)：多头排列买入，走坏卖出"""
     params = (("printlog", False),)
     def __init__(self):
         self.ma5 = bt.indicators.SMA(self.data.close, period=5)
@@ -313,7 +321,7 @@ class MACombinationStrategy(bt.Strategy):
                 self.log(f"均线走坏卖出 {price:.2f}")
 
 class VolumePriceDivergenceStrategy(bt.Strategy):
-    """量价背离：价格创新高但成交量萎缩"""
+    """量价背离：价创新高量萎缩买入，放量下跌卖出"""
     params = (("lookback", 10), ("printlog", False))
     def __init__(self):
         self.order = None
@@ -343,15 +351,46 @@ class VolumePriceDivergenceStrategy(bt.Strategy):
                 self.close()
                 self.log(f"放量下跌卖出 {price:.2f}")
 
+class DMIAndPSYStrategy(bt.Strategy):
+    """DMI+PSY超跌反弹：PDI<5 + PSY≤25"""
+    params = (("printlog", False),)
+    def __init__(self):
+        self.dmi = bt.indicators.DirectionalMovement(self.data, period=14)
+        self.order = None
+    def log(self, txt):
+        if self.params.printlog:
+            dt = self.datas[0].datetime.date(0)
+            print(f"{dt} {txt}")
+    def notify_order(self, order):
+        if order.status in [order.Completed, order.Canceled, order.Margin]:
+            self.order = None
+    def next(self):
+        if self.order: return
+        if len(self.data) < 13: return
+        plusDI = self.dmi.lines.plusDI[0]
+        up_days = 0
+        for i in range(-12, 0):
+            if self.data.close[i] > self.data.close[i-1]:
+                up_days += 1
+        psy = up_days / 12 * 100
+        if not self.position:
+            if plusDI < 5 and psy <= 25:
+                size = int(self.broker.getcash() / self.data.close[0] * 0.95)
+                self.buy(size=size)
+                self.log(f"DMI+PSY超跌买入 PDI={plusDI:.1f} PSY={psy:.1f}")
+        else:
+            if self.dmi.lines.adx[0] > 0 and self.dmi.lines.adx[0] < self.dmi.lines.adx[-1]:
+                self.close()
+                self.log(f"ADX转头卖出 {self.data.close[0]:.2f}")
+
 class ThreeThirdStrategy(bt.Strategy):
-    """三分法：7日/13日/20日线，分三批买入卖出"""
+    """三分法(7/13/20)：分批买入卖出"""
     params = (("printlog", False),)
     def __init__(self):
         self.ma7 = bt.indicators.SMA(self.data.close, period=7)
         self.ma13 = bt.indicators.SMA(self.data.close, period=13)
         self.ma20 = bt.indicators.SMA(self.data.close, period=20)
         self.order = None
-        self.entry_price = 0.0
     def log(self, txt):
         if self.params.printlog:
             dt = self.datas[0].datetime.date(0)
@@ -399,7 +438,7 @@ class ThreeThirdStrategy(bt.Strategy):
                 self.log(f"三分法跌破20日线清仓 {price:.2f}")
 
 class SparrowStrategy(bt.Strategy):
-    """麻雀战术：每次赚2.5%就卖，跌破买入价止损"""
+    """麻雀战术：每次赚2.5%止盈，跌破买入价止损"""
     params = (("profit_target", 2.5), ("printlog", False))
     def __init__(self):
         self.order = None
