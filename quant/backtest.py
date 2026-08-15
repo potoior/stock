@@ -7,6 +7,7 @@ from strategies import (
     BOLLStrategy, DMIStrategy, PSYStrategy, BIASStrategy, SARStrategy,
     MACDKDJBOLLStrategy, MACombinationStrategy, VolumePriceDivergenceStrategy,
     DMIAndPSYStrategy, ThreeThirdStrategy, SparrowStrategy, BounceStrategy,
+    TwoLineStrategy, LifeLine60Strategy,
 )
 
 STOCKS = [
@@ -87,6 +88,8 @@ def main():
         (ThreeThirdStrategy, "三分法7/13/20"),
         (SparrowStrategy, "麻雀战术2.5%"),
         (BounceStrategy, "反弹量化"),
+        (TwoLineStrategy, "二线法5/10"),
+        (LifeLine60Strategy, "60日生命线"),
     ]
 
     all_results = []

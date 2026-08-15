@@ -1,12 +1,13 @@
 import backtrader as bt
 
 class MACDStrategy(bt.Strategy):
-    """MACD三板斧：零上金叉/底背离金叉抄底/顶背离死叉逃顶"""
-    params = (("fast", 12), ("slow", 26), ("signal", 9), ("printlog", False))
+    """MACD三板斧：零上金叉/底背离抄底/顶背离逃顶/零下死叉卖"""
+    params = (("fast", 12), ("slow", 26), ("signal", 9), ("lookback", 20), ("printlog", False))
     def __init__(self):
         self.macd = bt.indicators.MACD(self.data.close, period_me1=self.params.fast, period_me2=self.params.slow, period_signal=self.params.signal)
         self.cross = bt.indicators.CrossOver(self.macd.macd, self.macd.signal)
         self.order = None
+        self.last_golden_cross = -999
     def log(self, txt):
         if self.params.printlog:
             dt = self.datas[0].datetime.date(0)
@@ -16,39 +17,63 @@ class MACDStrategy(bt.Strategy):
             self.order = None
     def next(self):
         if self.order: return
-        if len(self.data) < 5: return
+        if len(self.data) < self.params.lookback + 5: return
         price = self.data.close[0]
         diff = self.macd.macd[0]
         dea = self.macd.signal[0]
         zero = 0
+        recent_low = min(self.data.close.get(size=self.params.lookback))
+        recent_high = max(self.data.close.get(size=self.params.lookback))
+        diff_low = min(self.macd.macd.get(size=self.params.lookback))
+        diff_high = max(self.macd.macd.get(size=self.params.lookback))
         if not self.position:
-            buy = False
             if self.cross[0] == 1:
+                self.last_golden_cross = len(self.data)
                 if diff > zero and dea > zero:
-                    buy = True
-                    self.log(f"零上金叉买入 {price:.2f}")
+                    size = int(self.broker.getcash() / price * 0.95)
+                    self.buy(size=size)
+                    self.log(f"零上金叉买入(锦上添花) {price:.2f}")
                 elif diff < zero and dea < zero:
-                    prev_diff = self.macd.macd[-1]
-                    prev_dea = self.macd.signal[-1]
-                    if prev_diff > prev_dea and self.macd.macd[-2] < self.macd.signal[-2]:
-                        buy = True
-                        self.log(f"二次零下金叉买入 {price:.2f}")
+                    prev_cross = 0
+                    for i in range(-5, 0):
+                        if self.macd.macd[i] > self.macd.signal[i] and self.macd.macd[i-1] < self.macd.signal[i-1]:
+                            prev_cross += 1
+                    if prev_cross >= 1:
+                        size = int(self.broker.getcash() / price * 0.95)
+                        self.buy(size=size)
+                        self.log(f"多次零下金叉买入(可靠) {price:.2f}")
                     else:
-                        buy = True
-                        self.log(f"零下金叉(反弹)买入 {price:.2f}")
+                        size = int(self.broker.getcash() / price * 0.95)
+                        self.buy(size=size)
+                        self.log(f"零下金叉买入(反弹) {price:.2f}")
                 else:
-                    buy = True
+                    size = int(self.broker.getcash() / price * 0.95)
+                    self.buy(size=size)
                     self.log(f"金叉买入 {price:.2f}")
-            if buy:
+            elif price <= recent_low and diff > diff_low:
                 size = int(self.broker.getcash() / price * 0.95)
                 self.buy(size=size)
+                self.log(f"底背离买入 {price:.2f}")
+            elif diff > zero and dea > zero and price > self.data.close[-1] * 1.01:
+                prev_low = min(self.data.close.get(size=self.params.lookback // 2))
+                if prev_low >= self.data.close[-self.params.lookback]:
+                    self.last_golden_cross = len(self.data)
+                    size = int(self.broker.getcash() / price * 0.95)
+                    self.buy(size=size)
+                    self.log(f"主升浪买入 {price:.2f}")
         else:
             if self.cross[0] == -1:
                 if diff < zero and dea < zero:
-                    self.log(f"零下死叉卖出 {price:.2f}")
+                    self.close()
+                    self.log(f"零下死叉卖出(继续跌) {price:.2f}")
+                elif diff > zero and dea > zero:
+                    self.log(f"零上死叉(回调不卖) {price:.2f}")
                 else:
+                    self.close()
                     self.log(f"死叉卖出 {price:.2f}")
+            elif price >= recent_high and diff <= diff_high and self.cross[0] == -1:
                 self.close()
+                self.log(f"顶背离死叉卖出 {price:.2f}")
 
 class KDJStrategy(bt.Strategy):
     """KDJ超买超卖 + 金叉死叉 + 钝化识别"""
@@ -132,6 +157,7 @@ class BOLLStrategy(bt.Strategy):
         price = self.data.close[0]
         top = self.boll.lines.top[0]
         bot = self.boll.lines.bot[0]
+        mid = self.boll.lines.mid[0]
         if not self.position:
             if price <= bot:
                 size = int(self.broker.getcash() / price * 0.95)
@@ -158,11 +184,15 @@ class DMIStrategy(bt.Strategy):
             self.order = None
     def next(self):
         if self.order: return
+        if len(self.data) < 5: return
+        pdi = self.dmi.lines.plusDI[0]
+        mdi = self.dmi.lines.minusDI[0]
+        adx = self.dmi.lines.adx[0]
         if not self.position:
-            if self.cross[0] == 1:
+            if self.cross[0] == 1 and pdi > mdi:
                 size = int(self.broker.getcash() / self.data.close[0] * 0.95)
                 self.buy(size=size)
-                self.log(f"DMI买入 PDI上穿MDI {self.data.close[0]:.2f}")
+                self.log(f"DMI买入 PDI上穿MDI ADX={adx:.1f}")
         else:
             if self.cross[0] == -1:
                 self.close()
@@ -502,3 +532,57 @@ class BounceStrategy(bt.Strategy):
             if today_change < -5:
                 self.close()
                 self.log(f"反弹止损 {price:.2f}")
+
+class TwoLineStrategy(bt.Strategy):
+    """二线法：5日线下穿10日线清仓，上穿短线操作"""
+    params = (("printlog", False),)
+    def __init__(self):
+        self.ma5 = bt.indicators.SMA(self.data.close, period=5)
+        self.ma10 = bt.indicators.SMA(self.data.close, period=10)
+        self.cross = bt.indicators.CrossOver(self.ma5, self.ma10)
+        self.order = None
+    def log(self, txt):
+        if self.params.printlog:
+            dt = self.datas[0].datetime.date(0)
+            print(f"{dt} {txt}")
+    def notify_order(self, order):
+        if order.status in [order.Completed, order.Canceled, order.Margin]:
+            self.order = None
+    def next(self):
+        if self.order: return
+        if not self.position:
+            if self.cross[0] == 1:
+                size = int(self.broker.getcash() / self.data.close[0] * 0.95)
+                self.buy(size=size)
+                self.log(f"二线法5日上穿10日买入 {self.data.close[0]:.2f}")
+        else:
+            if self.cross[0] == -1:
+                self.close()
+                self.log(f"二线法5日下穿10日清仓 {self.data.close[0]:.2f}")
+
+class LifeLine60Strategy(bt.Strategy):
+    """60日生命线：站上60日线做多，跌破空仓"""
+    params = (("printlog", False),)
+    def __init__(self):
+        self.ma60 = bt.indicators.SMA(self.data.close, period=60)
+        self.order = None
+    def log(self, txt):
+        if self.params.printlog:
+            dt = self.datas[0].datetime.date(0)
+            print(f"{dt} {txt}")
+    def notify_order(self, order):
+        if order.status in [order.Completed, order.Canceled, order.Margin]:
+            self.order = None
+    def next(self):
+        if self.order: return
+        price = self.data.close[0]
+        m60 = self.ma60[0]
+        if not self.position:
+            if price > m60:
+                size = int(self.broker.getcash() / price * 0.95)
+                self.buy(size=size)
+                self.log(f"60日生命线站上买入 {price:.2f}")
+        else:
+            if price < m60:
+                self.close()
+                self.log(f"60日生命线跌破卖出 {price:.2f}")

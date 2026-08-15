@@ -2,92 +2,92 @@
   {
     "stock": "600789",
     "strategy": "MACD金叉死叉",
-    "total_return_pct": 19.95,
-    "annual_return_pct": 9.97,
-    "sharpe_ratio": 0.31,
-    "max_drawdown_pct": 26.82,
-    "final_value": 122082.15
+    "total_return_pct": 1.43,
+    "annual_return_pct": 0.69,
+    "sharpe_ratio": -0.19,
+    "max_drawdown_pct": 36.78,
+    "final_value": 101444.16
   },
   {
     "stock": "000001",
     "strategy": "MACD金叉死叉",
-    "total_return_pct": 11.38,
-    "annual_return_pct": 5.57,
-    "sharpe_ratio": 0.2,
-    "max_drawdown_pct": 21.26,
-    "final_value": 112047.64
+    "total_return_pct": -10.89,
+    "annual_return_pct": -5.05,
+    "sharpe_ratio": -0.34,
+    "max_drawdown_pct": 33.89,
+    "final_value": 89685.61
   },
   {
     "stock": "002446",
     "strategy": "MACD金叉死叉",
-    "total_return_pct": -24.17,
-    "annual_return_pct": -10.87,
-    "sharpe_ratio": -0.62,
-    "max_drawdown_pct": 44.39,
-    "final_value": 78532.56
+    "total_return_pct": -15.46,
+    "annual_return_pct": -7.1,
+    "sharpe_ratio": -0.31,
+    "max_drawdown_pct": 56.96,
+    "final_value": 85678.39
   },
   {
     "stock": "300750",
     "strategy": "MACD金叉死叉",
-    "total_return_pct": -88.42,
-    "annual_return_pct": -34.37,
-    "sharpe_ratio": -1.43,
-    "max_drawdown_pct": 64.34,
-    "final_value": 41305.62
+    "total_return_pct": -96.28,
+    "annual_return_pct": -36.79,
+    "sharpe_ratio": -1.13,
+    "max_drawdown_pct": 69.1,
+    "final_value": 38182.77
   },
   {
     "stock": "600519",
     "strategy": "MACD金叉死叉",
-    "total_return_pct": -17.18,
-    "annual_return_pct": -7.86,
-    "sharpe_ratio": -1.24,
-    "max_drawdown_pct": 19.54,
-    "final_value": 84216.17
+    "total_return_pct": -27.97,
+    "annual_return_pct": -12.47,
+    "sharpe_ratio": -1.04,
+    "max_drawdown_pct": 30.36,
+    "final_value": 75601.48
   },
   {
     "stock": "000858",
     "strategy": "MACD金叉死叉",
-    "total_return_pct": -4.53,
-    "annual_return_pct": -2.14,
-    "sharpe_ratio": -0.32,
-    "max_drawdown_pct": 27.31,
-    "final_value": 95567.36
+    "total_return_pct": -34.84,
+    "annual_return_pct": -15.29,
+    "sharpe_ratio": -0.76,
+    "max_drawdown_pct": 47.02,
+    "final_value": 70582.47
   },
   {
     "stock": "002415",
     "strategy": "MACD金叉死叉",
-    "total_return_pct": -20.57,
-    "annual_return_pct": -9.33,
-    "sharpe_ratio": -7.17,
-    "max_drawdown_pct": 23.61,
-    "final_value": 81410.76
+    "total_return_pct": -9.35,
+    "annual_return_pct": -4.36,
+    "sharpe_ratio": -0.49,
+    "max_drawdown_pct": 35.97,
+    "final_value": 91073.08
   },
   {
     "stock": "600036",
     "strategy": "MACD金叉死叉",
-    "total_return_pct": 14.82,
-    "annual_return_pct": 7.31,
-    "sharpe_ratio": 0.26,
-    "max_drawdown_pct": 25.44,
-    "final_value": 115969.01
+    "total_return_pct": -3.75,
+    "annual_return_pct": -1.77,
+    "sharpe_ratio": -0.09,
+    "max_drawdown_pct": 34.29,
+    "final_value": 96316.04
   },
   {
     "stock": "601318",
     "strategy": "MACD金叉死叉",
-    "total_return_pct": 28.0,
-    "annual_return_pct": 14.27,
-    "sharpe_ratio": 0.78,
-    "max_drawdown_pct": 22.42,
-    "final_value": 132307.84
+    "total_return_pct": 1.27,
+    "annual_return_pct": 0.61,
+    "sharpe_ratio": -0.11,
+    "max_drawdown_pct": 28.37,
+    "final_value": 101281.23
   },
   {
     "stock": "000333",
     "strategy": "MACD金叉死叉",
-    "total_return_pct": 20.42,
-    "annual_return_pct": 10.22,
-    "sharpe_ratio": 0.58,
-    "max_drawdown_pct": 12.8,
-    "final_value": 122652.64
+    "total_return_pct": 18.05,
+    "annual_return_pct": 8.98,
+    "sharpe_ratio": 0.56,
+    "max_drawdown_pct": 27.24,
+    "final_value": 119776.27
   },
   {
     "stock": "600789",
@@ -1348,5 +1348,185 @@
     "sharpe_ratio": -0.53,
     "max_drawdown_pct": 7.24,
     "final_value": 103068.27
+  },
+  {
+    "stock": "600789",
+    "strategy": "二线法5/10",
+    "total_return_pct": 17.35,
+    "annual_return_pct": 8.61,
+    "sharpe_ratio": 0.3,
+    "max_drawdown_pct": 24.55,
+    "final_value": 118941.87
+  },
+  {
+    "stock": "000001",
+    "strategy": "二线法5/10",
+    "total_return_pct": 6.66,
+    "annual_return_pct": 3.22,
+    "sharpe_ratio": 0.07,
+    "max_drawdown_pct": 22.38,
+    "final_value": 106886.2
+  },
+  {
+    "stock": "002446",
+    "strategy": "二线法5/10",
+    "total_return_pct": -10.45,
+    "annual_return_pct": -4.86,
+    "sharpe_ratio": -0.06,
+    "max_drawdown_pct": 45.53,
+    "final_value": 90076.87
+  },
+  {
+    "stock": "300750",
+    "strategy": "二线法5/10",
+    "total_return_pct": -81.42,
+    "annual_return_pct": -32.15,
+    "sharpe_ratio": -1.07,
+    "max_drawdown_pct": 66.4,
+    "final_value": 44297.84
+  },
+  {
+    "stock": "600519",
+    "strategy": "二线法5/10",
+    "total_return_pct": -25.19,
+    "annual_return_pct": -11.31,
+    "sharpe_ratio": -3.09,
+    "max_drawdown_pct": 22.93,
+    "final_value": 77731.61
+  },
+  {
+    "stock": "000858",
+    "strategy": "二线法5/10",
+    "total_return_pct": -17.71,
+    "annual_return_pct": -8.09,
+    "sharpe_ratio": -1.15,
+    "max_drawdown_pct": 24.95,
+    "final_value": 83768.13
+  },
+  {
+    "stock": "002415",
+    "strategy": "二线法5/10",
+    "total_return_pct": -46.81,
+    "annual_return_pct": -19.99,
+    "sharpe_ratio": -2.65,
+    "max_drawdown_pct": 42.25,
+    "final_value": 62617.18
+  },
+  {
+    "stock": "600036",
+    "strategy": "二线法5/10",
+    "total_return_pct": 19.49,
+    "annual_return_pct": 9.73,
+    "sharpe_ratio": 0.67,
+    "max_drawdown_pct": 18.52,
+    "final_value": 121514.14
+  },
+  {
+    "stock": "601318",
+    "strategy": "二线法5/10",
+    "total_return_pct": 11.96,
+    "annual_return_pct": 5.86,
+    "sharpe_ratio": 0.69,
+    "max_drawdown_pct": 13.59,
+    "final_value": 112708.05
+  },
+  {
+    "stock": "000333",
+    "strategy": "二线法5/10",
+    "total_return_pct": 39.28,
+    "annual_return_pct": 20.57,
+    "sharpe_ratio": 1.43,
+    "max_drawdown_pct": 11.33,
+    "final_value": 148105.79
+  },
+  {
+    "stock": "600789",
+    "strategy": "60日生命线",
+    "total_return_pct": -3.95,
+    "annual_return_pct": -1.86,
+    "sharpe_ratio": -0.2,
+    "max_drawdown_pct": 31.53,
+    "final_value": 96131.54
+  },
+  {
+    "stock": "000001",
+    "strategy": "60日生命线",
+    "total_return_pct": -0.14,
+    "annual_return_pct": -0.07,
+    "sharpe_ratio": -0.19,
+    "max_drawdown_pct": 24.45,
+    "final_value": 99861.39
+  },
+  {
+    "stock": "002446",
+    "strategy": "60日生命线",
+    "total_return_pct": -53.5,
+    "annual_return_pct": -22.5,
+    "sharpe_ratio": -1.34,
+    "max_drawdown_pct": 52.49,
+    "final_value": 58564.38
+  },
+  {
+    "stock": "300750",
+    "strategy": "60日生命线",
+    "total_return_pct": -0.48,
+    "annual_return_pct": -0.23,
+    "sharpe_ratio": -0.12,
+    "max_drawdown_pct": 16.61,
+    "final_value": 99521.55
+  },
+  {
+    "stock": "600519",
+    "strategy": "60日生命线",
+    "total_return_pct": -10.62,
+    "annual_return_pct": -4.93,
+    "sharpe_ratio": -0.99,
+    "max_drawdown_pct": 21.87,
+    "final_value": 89926.15
+  },
+  {
+    "stock": "000858",
+    "strategy": "60日生命线",
+    "total_return_pct": 19.4,
+    "annual_return_pct": 9.68,
+    "sharpe_ratio": 0.71,
+    "max_drawdown_pct": 18.23,
+    "final_value": 121412.93
+  },
+  {
+    "stock": "002415",
+    "strategy": "60日生命线",
+    "total_return_pct": -12.65,
+    "annual_return_pct": -5.85,
+    "sharpe_ratio": -0.59,
+    "max_drawdown_pct": 38.46,
+    "final_value": 88115.69
+  },
+  {
+    "stock": "600036",
+    "strategy": "60日生命线",
+    "total_return_pct": -0.03,
+    "annual_return_pct": -0.02,
+    "sharpe_ratio": -0.14,
+    "max_drawdown_pct": 24.26,
+    "final_value": 99965.79
+  },
+  {
+    "stock": "601318",
+    "strategy": "60日生命线",
+    "total_return_pct": -20.2,
+    "annual_return_pct": -9.17,
+    "sharpe_ratio": -0.68,
+    "max_drawdown_pct": 33.19,
+    "final_value": 81709.32
+  },
+  {
+    "stock": "000333",
+    "strategy": "60日生命线",
+    "total_return_pct": 8.07,
+    "annual_return_pct": 3.92,
+    "sharpe_ratio": 0.12,
+    "max_drawdown_pct": 22.44,
+    "final_value": 108403.37
   }
 ]
