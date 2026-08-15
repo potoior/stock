@@ -37,6 +37,23 @@ def compute_bias(df, period=5):
     ma = df["close"].rolling(period).mean()
     return (df["close"] - ma) / ma * 100
 
+def compute_bbiboll(df, m1=3, m2=6, m3=12, m4=24, period=6, std=2):
+    ma1 = df["close"].rolling(m1).mean()
+    ma2 = df["close"].rolling(m2).mean()
+    ma3 = df["close"].rolling(m3).mean()
+    ma4 = df["close"].rolling(m4).mean()
+    bbi = (ma1 + ma2 + ma3 + ma4) / 4
+    sd = df["close"].rolling(period).std()
+    upr = bbi + sd * std
+    dwn = bbi - sd * std
+    return upr, bbi, dwn
+
+def compute_tower(df):
+    up = (df["close"] > df["close"].shift(1)).astype(int)
+    down = (df["close"] < df["close"].shift(1)).astype(int)
+    tower = up - down
+    return tower
+
 def compute_dmi(df, period=14):
     high = df["high"]
     low = df["low"]
@@ -139,6 +156,8 @@ def analyze_stock(code):
     bias = compute_bias(df)
     pdi, mdi, adx = compute_dmi(df)
     sar, trend = compute_sar(df)
+    bbiboll_u, bbiboll_m, bbiboll_l = compute_bbiboll(df)
+    tower = compute_tower(df)
     df["ma5"] = close.rolling(5).mean()
     df["ma10"] = close.rolling(10).mean()
     df["ma20"] = close.rolling(20).mean()
@@ -255,6 +274,34 @@ def analyze_stock(code):
                 add("SAR止损", "buy", f"价格({price:.2f})>SAR({sar_v:.2f})，翻红")
             else:
                 add("SAR止损", "sell", f"价格({price:.2f})<SAR({sar_v:.2f})，翻绿")
+    except Exception:
+        pass
+    try:
+        bu = bbiboll_u.iloc[i]
+        bm = bbiboll_m.iloc[i]
+        bl = bbiboll_l.iloc[i]
+        if pd.notna(bm):
+            if price >= bu:
+                add("BBIBOLL", "sell", f"价格({price:.2f})突破上轨({bu:.2f})，大概率回调")
+            elif price <= bl:
+                add("BBIBOLL", "buy", f"价格({price:.2f})跌破下轨({bl:.2f})，大概率反弹")
+            elif price > bm:
+                add("BBIBOLL", "buy", f"价格({price:.2f})在BBI中轨({bm:.2f})上方，多方强势")
+            else:
+                add("BBIBOLL", "sell", f"价格({price:.2f})在BBI中轨({bm:.2f})下方，空方强势")
+    except Exception:
+        pass
+    try:
+        tw = tower.iloc[i]
+        pre = tower.iloc[i - 1] if i > 0 else 0
+        if tw == 1 and pre == -1:
+            add("宝塔线", "buy", f"翻红，价格站上前收盘，买入")
+        elif tw == -1 and pre == 1:
+            add("宝塔线", "sell", f"翻绿，价格跌破前收盘，卖出")
+        elif tw == 1:
+            add("宝塔线", "buy", f"连续红柱，持仓")
+        elif tw == -1:
+            add("宝塔线", "sell", f"连续绿柱，持续下跌")
     except Exception:
         pass
     try:
@@ -394,6 +441,10 @@ def analyze_stock(code):
             "mdi": round(mdi.iloc[i], 1) if pd.notna(mdi.iloc[i]) else 0,
             "adx": round(adx.iloc[i], 1) if pd.notna(adx.iloc[i]) else 0,
             "sar": round(sar[i], 2) if sar[i] > 0 else 0,
+            "bbiboll_u": round(bbiboll_u.iloc[i], 2) if pd.notna(bbiboll_u.iloc[i]) else 0,
+            "bbiboll_m": round(bbiboll_m.iloc[i], 2) if pd.notna(bbiboll_m.iloc[i]) else 0,
+            "bbiboll_l": round(bbiboll_l.iloc[i], 2) if pd.notna(bbiboll_l.iloc[i]) else 0,
+            "tower": int(tower.iloc[i]) if pd.notna(tower.iloc[i]) else 0,
         },
         "signals": signals,
         "summary": {"buy": buy_count, "sell": sell_count, "hold": hold_count},
@@ -434,11 +485,15 @@ def print_analysis(result):
     print(f"  KDJ:  K {ind['k']:.1f}  D {ind['d']:.1f}  J {ind['j']:.1f}  ({kdj_status})")
     boll_pos = "上轨" if r['price'] >= ind["boll_u"] else ("中轨" if r['price'] >= ind["boll_m"] else "下轨")
     print(f"  BOLL: 上 {ind['boll_u']:.2f}  中 {ind['boll_m']:.2f}  下 {ind['boll_l']:.2f}  ({boll_pos})")
+    bbiboll_pos = "上轨" if r['price'] >= ind["bbiboll_u"] else ("中轨" if r['price'] >= ind["bbiboll_m"] else "下轨")
+    print(f"  BBIBOLL: 上 {ind['bbiboll_u']:.2f}  中 {ind['bbiboll_m']:.2f}  下 {ind['bbiboll_l']:.2f}  ({bbiboll_pos})")
     ma_status = "多头排列" if r['price'] > ind["ma5"] > ind["ma10"] > ind["ma60"] else "空头排列" if r['price'] < ind["ma5"] < ind["ma10"] < ind["ma60"] else "交叉"
     print(f"  均线:  MA5 {ind['ma5']:.2f}  MA10 {ind['ma10']:.2f}  MA60 {ind['ma60']:.2f}  ({ma_status})")
     print(f"  DMI:  PDI {ind['pdi']:.1f}  MDI {ind['mdi']:.1f}  ADX {ind['adx']:.1f}")
-    print(f"  PSY:  {ind['psy']:.0f}  BIAS: {ind['bias']:.1f}%  SAR: {ind['sar']:.2f}")
-    print(f"\n 策略信号 ({s['buy'] + s['sell'] + s['hold']}/17)")
+    tower_txt = "红" if ind["tower"] > 0 else ("绿" if ind["tower"] < 0 else "平")
+    print(f"  PSY:  {ind['psy']:.0f}  BIAS: {ind['bias']:.1f}%  SAR: {ind['sar']:.2f}  宝塔: {tower_txt}")
+    total = s['buy'] + s['sell'] + s['hold']
+    print(f"\n 策略信号 ({total}/19)")
     print(f"  买入: {s['buy']}  |  卖出: {s['sell']}  |  观望: {s['hold']}")
     if result["buy_reasons"]:
         print(f"\n 触发买入 ({len(result['buy_reasons'])})")
