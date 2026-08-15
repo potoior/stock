@@ -394,7 +394,7 @@ createApp({
             // watchlist
             watchlist: [], newCode: '',
             // market
-            quotes: [], codesInput: '600789,000001,600519,601318,000333,002415',
+            quotes: [], codesInput: '',
             time: '', timer: null,
             // analyze
             analyzeCode: '', analysis: null, analysisList: [], analyzing: false,
@@ -489,7 +489,12 @@ createApp({
 
         // ---------- market ----------
         async loadQuotes() {
-            const codes = this.codesInput.replace(/\s+/g, '').replace(/，/g, ',');
+            let codes = this.codesInput.replace(/\s+/g, '').replace(/，/g, ',');
+            if (!codes && this.watchlist.length) {
+                codes = this.watchlist.map(w => w.code).join(',');
+                this.codesInput = codes;
+            }
+            if (!codes) { this.toastMsg('自选股为空，请先添加自选股'); return; }
             try {
                 const res = await fetch('/api/quotes?codes=' + encodeURIComponent(codes));
                 const data = await res.json();
@@ -664,8 +669,7 @@ createApp({
         },
     },
     mounted() {
-        this.loadWatchlist();
-        this.loadQuotes();
+        this.loadWatchlist().then(() => this.loadQuotes());
         this.loadStrategies();
         this.timer = setInterval(() => {
             if (this.tab === 'watchlist') this.loadWatchlist();
