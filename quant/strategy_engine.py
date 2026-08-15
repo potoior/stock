@@ -247,6 +247,69 @@ def _save_config(cfg):
     CONFIG_PATH.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+# ---------------- AI 判定缓存（当日） ----------------
+
+def _ai_cache_db():
+    conn = sqlite3.connect(str(CACHE_DB))
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS ai_cache (
+            code TEXT, date TEXT, content TEXT, PRIMARY KEY (code, date)
+        )""")
+    conn.commit()
+    return conn
+
+
+def _ai_cache_get(code, date):
+    try:
+        conn = _ai_cache_db()
+        row = conn.execute("SELECT content FROM ai_cache WHERE code=? AND date=?",
+                           (code, date)).fetchone()
+        conn.close()
+        return row[0] if row else None
+    except Exception:
+        return None
+
+
+def _ai_cache_set(code, date, content):
+    try:
+        conn = _ai_cache_db()
+        conn.execute("INSERT OR REPLACE INTO ai_cache(code, date, content) VALUES(?,?,?)",
+                     (code, date, content))
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+
+def _rule_to_text(lt):
+    """旧式条件数组 [{metric,op,threshold}] → 人类可读规则文本"""
+    parts = []
+    for c in lt:
+        m, op, t = c.get("metric", ""), c.get("op", ">"), c.get("threshold", 0)
+        label = CONDITION_METRIC_META.get(m, m)
+        opmap = {">": "大于", ">=": "大于等于", "<": "小于", "<=": "小于等于", "==": "等于", "is_true": ""}
+        if op == "is_true":
+            parts.append(f"{label}成立")
+        else:
+            parts.append(f"{label} {opmap.get(op, op)} {t}")
+    return " 且 ".join(parts)
+
+
+def migrate_custom_strategies(strategies):
+    """旧 {buy:[conds], sell:[conds]} → 新 {buy_rule, sell_rule}"""
+    migrated = False
+    for s in strategies:
+        if s.get("type") == "custom" and not s.get("buy_rule"):
+            buy_text = _rule_to_text(s.get("buy", [])) if s.get("buy") else ""
+            sell_text = _rule_to_text(s.get("sell", [])) if s.get("sell") else ""
+            s["buy_rule"] = buy_text or f"{s.get('name','自定义策略')}的买入规则"
+            s["sell_rule"] = sell_text or "价格明显走弱时卖出"
+            migrated = True
+    if migrated:
+        _save_config(_load_config())
+    return strategies
+
+
 def get_watchlist():
     return _load_config().get("watchlist", [])
 
@@ -671,7 +734,7 @@ def eval_condition(ctx, cond):
 
 
 def eval_custom_strategy(ctx, strat):
-    """自定义策略：{name, buy:[conds], sell:[conds]} buy/sell 均为 AND 关系"""
+    """离线兜底：{name, buy:[conds], sell:[conds]} buy/sell 均为 AND 关系"""
     sig = "hold"
     reason = ""
     buy_conds = strat.get("buy", [])
@@ -687,9 +750,120 @@ def eval_custom_strategy(ctx, strat):
     return sig, reason
 
 
+def _fmt_num(v, nd=2):
+    if v is None or pd.isna(v):
+        return "-"
+    return f"{float(v):.{nd}f}"
+
+
+def format_indicators(ctx):
+    i = ctx["i"]
+    ind = ctx["indicators"]
+    rt = ctx.get("realtime") or {}
+    lines = [
+        f"- 现价 {rt.get('price', ind['close'])}，涨跌幅 {rt.get('pct', '-')}%",
+        f"- MACD: DIFF {ind['macd_diff']}，DEA {ind['macd_dea']}，柱 {ind['macd_bar']}",
+        f"- KDJ: K={ind['k']} D={ind['d']} J={ind['j']}",
+        f"- BOLL(上/中/下): {ind['boll_u']}/{ind['boll_m']}/{ind['boll_l']}",
+        f"- BBIBOLL(上/中/下): {ind['bbiboll_u']}/{ind['bbiboll_m']}/{ind['bbiboll_l']}",
+        f"- 均线: MA5={ind['ma5']} MA10={ind['ma10']} MA20={ind['ma20']} MA60={ind['ma60']}",
+        f"- PSY={ind['psy']}，BIAS6={ind['bias1']}% BIAS12={ind['bias2']}% BIAS24={ind['bias3']}%",
+        f"- DMI: PDI={ind['pdi']} MDI={ind['mdi']} ADX={ind['adx']}",
+        f"- SAR={ind['sar']}，宝塔线={'红' if ind['tower']>0 else ('绿' if ind['tower']<0 else '平')}",
+    ]
+    dfs = ctx.get("df")
+    if dfs is not None and i > 0:
+        cur_v = float(dfs["volume"].iloc[i])
+        avg_v = float(dfs["volume"].iloc[max(0, i - 5):i].mean())
+        lines.append(f"- 今日成交量 {cur_v:.0f}，5日均量 {avg_v:.0f}，量比 {cur_v/avg_v:.2f}倍" if avg_v else "- 今日成交量 " + f"{cur_v:.0f}" + "（5日均量不足）")
+    return "\n".join(lines)
+
+
+def judge_custom_with_ai(code, ctx, custom_strats, use_ai=True):
+    """用 AI 判定自定义策略。返回 [{key,name,builtin:False,buy_rule,sell_rule,signal,reason,ai:bool}]"""
+    if not custom_strats:
+        return []
+    today = datetime.now().strftime("%Y%m%d")
+    out = []
+    if use_ai:
+        try:
+            from ai_decider import AIDecider
+            decider = AIDecider()
+        except Exception:
+            decider = None
+    else:
+        decider = None
+
+    if decider is not None:
+        cache_key = json.dumps(
+            [{"id": s["id"], "n": s.get("name"), "b": s.get("buy_rule"), "s": s.get("sell_rule")} for s in custom_strats],
+            ensure_ascii=False
+        )
+        # 先查整包缓存（所有自定义规则一次AI调用）
+        cached_text = _ai_cache_get(code, today)
+        results = None
+        if cached_text:
+            try:
+                cache_payload = json.loads(cached_text)
+                if cache_payload.get("rules") == cache_key and cache_payload.get("indicators") == hash(ctx["i"]):
+                    results = [{"id": r["id"], "signal": r["signal"], "reason": r["reason"] + "（当日缓存）"} for r in cache_payload.get("results", [])]
+            except Exception:
+                results = None
+
+        if results is None or len(results) != len(custom_strats):
+            ind_text = format_indicators(ctx)
+            try:
+                resp = decider.judge_code(code, ctx.get("realtime") and ctx["realtime"].get("name") or code,
+                                          ind_text,
+                                          [{"id": s["id"], "name": s.get("name", ""),
+                                            "buy_rule": s.get("buy_rule", ""), "sell_rule": s.get("sell_rule", "")}
+                                           for s in custom_strats])
+            except Exception:
+                resp = {"results": []}
+            results = resp.get("results", [])
+            # 仅当AI正常返回(未因限流/失败降级)才写缓存
+            ok_results = [r for r in results if r.get("signal") in ("buy", "sell", "hold")
+                          and not str(r.get("reason", "")).startswith("AI判定不可用")
+                          and "AI解析失败" not in str(r.get("reason", ""))]
+            if len(ok_results) == len(custom_strats):
+                try:
+                    _ai_cache_set(code, today, json.dumps({
+                        "rules": cache_key, "indicators": hash(ctx["i"]),
+                        "results": [{"id": r["id"], "signal": r["signal"], "reason": r["reason"]} for r in results],
+                    }, ensure_ascii=False))
+                except Exception:
+                    pass
+
+        result_map = {r["id"]: r for r in results}
+        for s in custom_strats:
+            r = result_map.get(s["id"])
+            if r and r.get("signal") in ("buy", "sell", "hold"):
+                sig = r["signal"]
+                reason = f"🤖AI: {r.get('reason', '')}"
+            else:
+                sig, reason = "hold", "AI未返回该规则结果"
+            out.append({"key": s["id"], "name": s.get("name", "自定义策略"),
+                        "signal": sig, "reason": reason,
+                        "builtin": False, "ai": True,
+                        "buy_rule": s.get("buy_rule", ""), "sell_rule": s.get("sell_rule", "")})
+        return out
+
+    # 无 AI → 离线兜底（旧条件 or 规则文本不可用则 hold）
+    for s in custom_strats:
+        if s.get("buy") or s.get("sell"):
+            sg, rsn = eval_custom_strategy(ctx, s)
+            reason = f"离线判定: {rsn}" if sg != "hold" else "AI不可用，离线规则未触发"
+        else:
+            sg, rsn = "hold", "AI不可用，无法按自然语言规则判定"
+        out.append({"key": s["id"], "name": s.get("name", "自定义策略"),
+                    "signal": sg, "reason": rsn, "builtin": False, "ai": False,
+                    "buy_rule": s.get("buy_rule", ""), "sell_rule": s.get("sell_rule", "")})
+    return out
+
+
 # ---------------- 主分析入口 ----------------
 
-def analyze(code):
+def analyze(code, use_ai=True):
     rt = fetch_realtime([code])
     realtime = rt[0] if rt else None
     df = get_daily_data(code)
@@ -716,8 +890,25 @@ def analyze(code):
     df["ma7"] = close.rolling(7).mean()
     df["ma13"] = close.rolling(13).mean()
 
+    indicators = {
+        "close": round(close.iloc[i], 2),
+        "macd_diff": round(macd_diff.iloc[i], 3), "macd_dea": round(macd_dea.iloc[i], 3),
+        "macd_bar": round(macd_bar.iloc[i], 3),
+        "k": round(k.iloc[i], 1), "d": round(d.iloc[i], 1), "j": round(j.iloc[i], 1),
+        "boll_u": round(boll_u.iloc[i], 2), "boll_m": round(boll_m.iloc[i], 2), "boll_l": round(boll_l.iloc[i], 2),
+        "bbiboll_u": round(bbiboll_u.iloc[i], 2), "bbiboll_m": round(bbiboll_m.iloc[i], 2), "bbiboll_l": round(bbiboll_l.iloc[i], 2),
+        "ma5": round(df["ma5"].iloc[i], 2), "ma10": round(df["ma10"].iloc[i], 2),
+        "ma20": round(df["ma20"].iloc[i], 2), "ma60": round(df["ma60"].iloc[i], 2),
+        "psy": round(psy.iloc[i], 0),
+        "bias1": round(bias1.iloc[i], 1), "bias2": round(bias2.iloc[i], 1), "bias3": round(bias3.iloc[i], 1),
+        "pdi": round(pdi.iloc[i], 1), "mdi": round(mdi.iloc[i], 1), "adx": round(adx.iloc[i], 1),
+        "sar": round(sar[i], 2) if sar[i] > 0 else 0,
+        "tower": int(tower.iloc[i]) if pd.notna(tower.iloc[i]) else 0,
+    }
+
     ctx = {
         "i": i, "price": price, "df": df, "close": close,
+        "realtime": realtime, "indicators": indicators,
         "macd_diff": macd_diff, "macd_dea": macd_dea, "macd_bar": macd_bar,
         "k": k, "d": d, "j": j,
         "boll_u": boll_u, "boll_m": boll_m, "boll_l": boll_l,
@@ -769,13 +960,10 @@ def analyze(code):
             sg, rsn = "hold", "计算异常"
         signals.append({"key": sid, "name": name, "signal": sg, "reason": rsn, "builtin": True})
 
-    for s in strategies_cfg:
-        if s.get("type") == "custom":
-            if not s.get("enabled", True):
-                continue
-            sg, rsn = eval_custom_strategy(ctx, s)
-            signals.append({"key": s["id"], "name": s.get("name", "自定义策略"),
-                            "signal": sg, "reason": rsn, "builtin": False})
+    custom_strats = [s for s in strategies_cfg
+                     if s.get("type") == "custom" and s.get("enabled", True)]
+    custom_strats = migrate_custom_strategies(custom_strats)
+    signals.extend(judge_custom_with_ai(code, ctx, custom_strats, use_ai=use_ai))
 
     buy_sigs = [s for s in signals if s["signal"] == "buy"]
     sell_sigs = [s for s in signals if s["signal"] == "sell"]
@@ -788,21 +976,6 @@ def analyze(code):
         verdict, icon = "卖出", "⬇"
     else:
         verdict, icon = "观望", "⏸"
-
-    indicators = {
-        "macd_diff": round(macd_diff.iloc[i], 3), "macd_dea": round(macd_dea.iloc[i], 3),
-        "macd_bar": round(macd_bar.iloc[i], 3),
-        "k": round(k.iloc[i], 1), "d": round(d.iloc[i], 1), "j": round(j.iloc[i], 1),
-        "boll_u": round(boll_u.iloc[i], 2), "boll_m": round(boll_m.iloc[i], 2), "boll_l": round(boll_l.iloc[i], 2),
-        "bbiboll_u": round(bbiboll_u.iloc[i], 2), "bbiboll_m": round(bbiboll_m.iloc[i], 2), "bbiboll_l": round(bbiboll_l.iloc[i], 2),
-        "ma5": round(df["ma5"].iloc[i], 2), "ma10": round(df["ma10"].iloc[i], 2),
-        "ma20": round(df["ma20"].iloc[i], 2), "ma60": round(df["ma60"].iloc[i], 2),
-        "psy": round(psy.iloc[i], 0),
-        "bias1": round(bias1.iloc[i], 1), "bias2": round(bias2.iloc[i], 1), "bias3": round(bias3.iloc[i], 1),
-        "pdi": round(pdi.iloc[i], 1), "mdi": round(mdi.iloc[i], 1), "adx": round(adx.iloc[i], 1),
-        "sar": round(sar[i], 2) if sar[i] > 0 else 0,
-        "tower": int(tower.iloc[i]) if pd.notna(tower.iloc[i]) else 0,
-    }
 
     kdf = df.tail(120)[["date", "open", "close", "high", "low", "volume"]].copy()
     kdf["date"] = kdf["date"].dt.strftime("%Y-%m-%d")

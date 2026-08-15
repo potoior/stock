@@ -19,6 +19,9 @@
     {"id": "bounce", "name": "反弹量化", "type": "builtin", "enabled": true, "params": {}},
     {"id": "volume_div", "name": "量价背离", "type": "builtin", "enabled": true, "params": {}},
     {"id": "resonance", "name": "三指标共振", "type": "builtin", "enabled": true, "params": {}},
-    {"id": "dmi_psy", "name": "DMI+PSY超跌", "type": "builtin", "enabled": true, "params": {}}
+    {"id": "dmi_psy", "name": "DMI+PSY超跌", "type": "builtin", "enabled": true, "params": {}},
+    {"id": "custom_ai_demo", "name": "放量突破(示例,AI判定)", "type": "custom", "enabled": true,
+     "buy_rule": "MACD出现金叉且当日成交量大于5日均量1.5倍，并且收盘价站在MA5上方时买入",
+     "sell_rule": "收盘价跌破MA10，或者KDJ出现死叉时卖出"}
   ]
 }

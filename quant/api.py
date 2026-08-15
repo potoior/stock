@@ -177,6 +177,7 @@ def get_strategies():
         })
     for s in se.get_strategies():
         if s.get("type") == "custom":
+            s = {**s, "builtin": False}
             result.append(s)
     return {"strategies": result}
 
@@ -185,17 +186,19 @@ def get_strategies():
 async def create_strategy(body: dict):
     strategies = se.get_strategies()
     sid = "custom_" + str(len([s for s in strategies if s.get("type") == "custom"]) + 1)
-    strat = {
+    strategy = {
         "id": sid,
         "name": body.get("name") or "自定义策略" + sid,
         "type": "custom",
         "enabled": body.get("enabled", True),
+        "buy_rule": body.get("buy_rule", "") or "",
+        "sell_rule": body.get("sell_rule", "") or "",
         "buy": body.get("buy", []),
         "sell": body.get("sell", []),
     }
-    strategies.append(strat)
+    strategies.append(strategy)
     se.save_strategies(strategies)
-    return {"ok": True, "strategy": strat}
+    return {"ok": True, "strategy": strategy}
 
 
 @app.put("/api/strategies/{sid}")
@@ -231,8 +234,8 @@ def strategy_metrics():
 # ---------------- 分析 ----------------
 
 @app.get("/api/analyze/{code}")
-def analyze(code: str):
-    return se.analyze(code)
+def analyze(code: str, ai: int = 1):
+    return se.analyze(code, use_ai=bool(ai))
 
 
 @app.get("/")

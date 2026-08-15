@@ -291,7 +291,8 @@
                     <div class="signal-card" v-for="s in (mode==='buy'?analysis.buyReasons:mode==='sell'?analysis.sellReasons:analysis.holdReasons)" :key="s.key">
                         <span class="tag" :class="'tag-' + mode">{{ s.name }}</span>
                         <span style="color:#666;">{{ s.reason }}</span>
-                        <span v-if="!s.builtin" class="badge badge-neutral" style="margin-left:6px;">自定义</span>
+                        <span v-if="s.ai" class="badge badge-neutral" style="margin-left:6px;">🤖 AI判定</span>
+                        <span v-else-if="!s.builtin" class="badge badge-neutral" style="margin-left:6px;">自定义</span>
                     </div>
                     <div v-if="!(mode==='buy'?analysis.buyReasons:mode==='sell'?analysis.sellReasons:analysis.holdReasons).length" class="signal-card">
                         <span class="tag tag-hold">无 {{ modeLabel(mode) }} 信号</span>
@@ -306,8 +307,8 @@
     <!-- ============ 策略管理 ============ -->
     <div v-show="tab === 'strategies'" class="container">
         <div class="toolbar">
-            <button class="button" @click="openRuleEditor()">➕ 添加策略（规则组合）</button>
-            <span class="hint">修改后自动保存，下次分析立即生效</span>
+            <button class="button" @click="openRuleEditor()">➕ 添加策略（自然语言规则）</button>
+            <span class="hint">修改后自动保存，下次分析立即生效 | 自定义策略由 AI 根据规则+指标判定</span>
         </div>
 
         <div class="card">
@@ -338,9 +339,10 @@
                 </label>
                 <span class="strategy-name">{{ s.name }}</span>
                 <span class="strategy-desc" style="color:#555;">
-                    <span v-if="s.buy && s.buy.length">买: {{ s.buy.map(c => metricName(c.metric) + ' ' + opText(c.op) + ' ' + c.threshold).join(' 且 ') }}</span>
-                    <span v-if="s.sell && s.sell.length" style="color:#d32f2f;"></span>
+                    <div style="font-size:12px;"><span style="color:#2e7d32;">买:</span> {{ s.buy_rule || (s.buy && s.buy.length ? s.buy.map(c => metricName(c.metric) + ' ' + opText(c.op) + ' ' + c.threshold).join(' 且 ') : '-') }}</div>
+                    <div style="font-size:12px;"><span style="color:#d32f2f;">卖:</span> {{ s.sell_rule || (s.sell && s.sell.length ? s.sell.map(c => metricName(c.metric) + ' ' + opText(c.op) + ' ' + c.threshold).join(' 且 ') : '-') }}</div>
                 </span>
+                <span class="badge badge-neutral">🤖 AI判定</span>
                 <button class="button sm ghost" @click="openRuleEditor(s)">编辑</button>
                 <button class="button sm danger" @click="deleteStrategy(s)">删除</button>
             </div>
@@ -355,51 +357,23 @@
     <!-- 自定义策略编辑弹窗 -->
     <div class="modal" v-if="showEditor">
         <div class="modal-box">
-            <div class="modal-title">✍️ {{ editorId ? '编辑' : '新建' }}自定义策略</div>
+            <div class="modal-title">✍️ {{ editorId ? '编辑' : '新建' }}自定义策略（AI判定）</div>
             <div class="toolbar">
                 <label style="font-size:13px;">策略名称:</label>
-                <input class="input" v-model="editor.name" placeholder="如：放量突破策略">
+                <input class="input" v-model="editor.name" placeholder="如：放量突破策略" style="flex:1;">
             </div>
 
-            <div style="margin:16px 0 8px;font-weight:600;font-size:13px;">📗 买入条件（全部满足才发出买入）</div>
-            <div class="rule-editor" v-for="(c, idx) in editor.buy" :key="'b' + idx">
-                <div class="row">
-                    <select v-model="c.metric">
-                        <option v-for="(label, key) in metrics" :key="key" :value="key">{{ label }}</option>
-                    </select>
-                    <select v-model="c.op">
-                        <option value=">">大于</option>
-                        <option value=">=">大于等于</option>
-                        <option value="<">小于</option>
-                        <option value="<=">小于等于</option>
-                        <option value="==">等于</option>
-                        <option value="is_true">为真</option>
-                    </select>
-                    <input class="input sm" v-model.number="c.threshold" placeholder="阈值" style="width:80px;">
-                    <button class="button sm danger" @click="editor.buy.splice(idx, 1)">×</button>
-                </div>
-            </div>
-            <button class="button sm ghost" @click="editor.buy.push({metric:'macd_diff_vs_dea', op:'>', threshold:0})">+ 添加买入条件</button>
+            <div style="margin:16px 0 8px;font-weight:600;font-size:13px;">📗 买入规则（自然语言描述）</div>
+            <textarea class="input" v-model="editor.buy_rule" rows="3"
+                      placeholder="例如：MACD出现金叉，且当日成交量大于5日均量的1.5倍，并且收盘价站在MA5上方时买入"
+                      style="width:100%;resize:vertical;min-height:70px;font-family:inherit;"></textarea>
 
-            <div style="margin:16px 0 8px;font-weight:600;font-size:13px;">📕 卖出条件（全部满足才发出卖出）</div>
-            <div class="rule-editor" v-for="(c, idx) in editor.sell" :key="'s' + idx">
-                <div class="row">
-                    <select v-model="c.metric">
-                        <option v-for="(label, key) in metrics" :key="key" :value="key">{{ label }}</option>
-                    </select>
-                    <select v-model="c.op">
-                        <option value=">">大于</option>
-                        <option value=">=">大于等于</option>
-                        <option value="<">小于</option>
-                        <option value="<=">小于等于</option>
-                        <option value="==">等于</option>
-                        <option value="is_true">为真</option>
-                    </select>
-                    <input class="input sm" v-model.number="c.threshold" placeholder="阈值" style="width:80px;">
-                    <button class="button sm danger" @click="editor.sell.splice(idx, 1)">×</button>
-                </div>
-            </div>
-            <button class="button sm ghost" @click="editor.sell.push({metric:'price_vs_ma5', op:'<', threshold:0})">+ 添加卖出条件</button>
+            <div style="margin:16px 0 8px;font-weight:600;font-size:13px;">📕 卖出规则（自然语言描述）</div>
+            <textarea class="input" v-model="editor.sell_rule" rows="3"
+                      placeholder="例如：收盘价跌破MA10，或者KDJ出现死叉时卖出"
+                      style="width:100%;resize:vertical;min-height:70px;font-family:inherit;"></textarea>
+
+            <div class="hint" style="margin-top:8px;">💡 提示：可参考这些指标值——现价、涨跌幅、MACD(DIFF/DEA)、KDJ(K/D/J)、BOLL上下中轨、BBIBOLL、MA5/10/20/60、PSY、BIAS6/12/24、DMI(PDI/MDI/ADX)、SAR、宝塔线、成交量与5日均量对比。</div>
 
             <div class="toolbar" style="justify-content:flex-end;margin-top:20px;">
                 <button class="button ghost" @click="showEditor=false">取消</button>
@@ -427,7 +401,7 @@ createApp({
             analyzeChart: null,
             // strategies
             strategies: [], metrics: {},
-            showEditor: false, editor: { name: '', buy: [], sell: [] }, editorId: '',
+            showEditor: false, editor: { name: '', buy_rule: '', sell_rule: '' }, editorId: '',
             toast: '',
         };
     },
@@ -655,10 +629,10 @@ createApp({
         openRuleEditor(s) {
             this.editorId = s ? s.id : '';
             this.editor = s ? {
-                name: s.name, buy: (s.buy || []).map(c => ({ ...c })), sell: (s.sell || []).map(c => ({ ...c }))
-            } : { name: '', buy: [], sell: [] };
-            if (!this.editor.buy.length) this.editor.buy.push({ metric: 'macd_diff_vs_dea', op: '>', threshold: 0 });
-            if (!this.editor.sell.length) this.editor.sell.push({ metric: 'price_vs_ma5', op: '<', threshold: 0 });
+                name: s.name,
+                buy_rule: s.buy_rule || (s.buy && s.buy.length ? s.buy.map(c => metricName(c.metric) + ' ' + opText(c.op) + ' ' + c.threshold).join(' 且 ') : ''),
+                sell_rule: s.sell_rule || (s.sell && s.sell.length ? s.sell.map(c => metricName(c.metric) + ' ' + opText(c.op) + ' ' + c.threshold).join(' 且 ') : ''),
+            } : { name: '', buy_rule: '', sell_rule: '' };
             this.showEditor = true;
         },
         async saveStrategy() {
@@ -666,8 +640,8 @@ createApp({
                 id: this.editorId || undefined,
                 name: this.editor.name.trim() || '未命名策略',
                 type: 'custom', enabled: true,
-                buy: this.editor.buy.filter(c => c.metric),
-                sell: this.editor.sell.filter(c => c.metric),
+                buy_rule: (this.editor.buy_rule || '').trim(),
+                sell_rule: (this.editor.sell_rule || '').trim(),
             };
             if (this.editorId) {
                 await fetch('/api/strategies/' + this.editorId, {
