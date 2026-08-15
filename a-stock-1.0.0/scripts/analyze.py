@@ -33,19 +33,25 @@ def compute_psy(df, period=12):
     up_days = ((df["close"] > df["close"].shift(1))).rolling(period).sum()
     return up_days / period * 100
 
-def compute_bias(df, period=5):
-    ma = df["close"].rolling(period).mean()
-    return (df["close"] - ma) / ma * 100
+def compute_bias(df, p1=6, p2=12, p3=24):
+    close = df["close"]
+    ma6 = close.rolling(p1).mean()
+    ma12 = close.rolling(p2).mean()
+    ma24 = close.rolling(p3).mean()
+    b1 = (close - ma6) / ma6 * 100
+    b2 = (close - ma12) / ma12 * 100
+    b3 = (close - ma24) / ma24 * 100
+    return b1, b2, b3
 
-def compute_bbiboll(df, m1=3, m2=6, m3=12, m4=24, period=6, std=2):
+def compute_bbiboll(df, m1=3, m2=6, m3=12, m4=24, n=11, m=6):
     ma1 = df["close"].rolling(m1).mean()
     ma2 = df["close"].rolling(m2).mean()
     ma3 = df["close"].rolling(m3).mean()
     ma4 = df["close"].rolling(m4).mean()
     bbi = (ma1 + ma2 + ma3 + ma4) / 4
-    sd = df["close"].rolling(period).std()
-    upr = bbi + sd * std
-    dwn = bbi - sd * std
+    sd = bbi.rolling(n).std(ddof=0)
+    upr = bbi + sd * m
+    dwn = bbi - sd * m
     return upr, bbi, dwn
 
 def compute_tower(df):
@@ -54,7 +60,7 @@ def compute_tower(df):
     tower = up - down
     return tower
 
-def compute_dmi(df, period=14):
+def compute_dmi(df, n=14, m=6):
     high = df["high"]
     low = df["low"]
     close = df["close"]
@@ -62,27 +68,17 @@ def compute_dmi(df, period=14):
     prev_low = low.shift(1)
     prev_close = close.shift(1)
     tr = pd.concat([high - low, (high - prev_close).abs(), (low - prev_close).abs()], axis=1).max(axis=1)
-    up_move = high - prev_high
-    down_move = prev_low - low
-    pdm = pd.Series(np.where((up_move > down_move) & (up_move > 0), up_move, 0), index=df.index)
-    mdm = pd.Series(np.where((down_move > up_move) & (down_move > 0), down_move, 0), index=df.index)
-    def wilder_smooth(series, period):
-        smoothed = series.copy()
-        cum_sum = series.iloc[:period].sum()
-        if cum_sum == 0 or period == 0:
-            return smoothed
-        for i in range(period):
-            smoothed.iloc[i] = cum_sum / period
-        for i in range(period, len(series)):
-            smoothed.iloc[i] = smoothed.iloc[i - 1] - smoothed.iloc[i - 1] / period + series.iloc[i]
-        return smoothed
-    tr_s = wilder_smooth(tr, period)
-    pdm_s = wilder_smooth(pdm, period)
-    mdm_s = wilder_smooth(mdm, period)
-    pdi = pd.Series(np.where(tr_s > 0, 100 * pdm_s / tr_s, 0), index=df.index)
-    mdi = pd.Series(np.where(tr_s > 0, 100 * mdm_s / tr_s, 0), index=df.index)
+    hd = high - prev_high
+    ld = prev_low - low
+    dmp = pd.Series(np.where((hd > 0) & (hd > ld), hd, 0), index=df.index)
+    dmm = pd.Series(np.where((ld > 0) & (ld > hd), ld, 0), index=df.index)
+    mtr = tr.rolling(n).sum()
+    dmp_s = dmp.rolling(n).sum()
+    dmm_s = dmm.rolling(n).sum()
+    pdi = pd.Series(np.where(mtr > 0, 100 * dmp_s / mtr, 0), index=df.index)
+    mdi = pd.Series(np.where(mtr > 0, 100 * dmm_s / mtr, 0), index=df.index)
     dx = pd.Series(np.where(pdi + mdi > 0, 100 * (pdi - mdi).abs() / (pdi + mdi), 0), index=df.index)
-    adx = dx.rolling(period).mean()
+    adx = dx.rolling(m).mean()
     return pdi, mdi, adx
 
 def compute_sar(df, af_init=0.02, af_max=0.2):
@@ -153,7 +149,7 @@ def analyze_stock(code):
     k, d, j, rsv = compute_kdj(df)
     boll_u, boll_m, boll_l = compute_boll(df)
     psy = compute_psy(df)
-    bias = compute_bias(df)
+    bias1, bias2, bias3 = compute_bias(df)
     pdi, mdi, adx = compute_dmi(df)
     sar, trend = compute_sar(df)
     bbiboll_u, bbiboll_m, bbiboll_l = compute_bbiboll(df)
@@ -282,16 +278,18 @@ def analyze_stock(code):
     except Exception:
         add("PSY心理线", "hold", "数据不足")
 
-    # 7. BIAS乖离率
+    # 7. BIAS乖离率(6/12/24三线)
     try:
-        bias_v = bias.iloc[i]
-        if pd.notna(bias_v):
-            if bias_v <= -3:
-                add("BIAS乖离率", "buy", f"BIAS={bias_v:.1f}%，超跌")
-            elif bias_v >= 3:
-                add("BIAS乖离率", "sell", f"BIAS={bias_v:.1f}%，超涨，注意回调")
+        b1 = bias1.iloc[i]
+        b2 = bias2.iloc[i]
+        b3 = bias3.iloc[i]
+        if pd.notna(b1) and pd.notna(b2) and pd.notna(b3):
+            if b1 <= -3 or b2 <= -5:
+                add("BIAS乖离率", "buy", f"BIAS6={b1:.1f}% BIAS12={b2:.1f}% BIAS24={b3:.1f}%，超跌")
+            elif b1 >= 3 or b2 >= 5:
+                add("BIAS乖离率", "sell", f"BIAS6={b1:.1f}% BIAS12={b2:.1f}% BIAS24={b3:.1f}%，超涨，注意回调")
             else:
-                add("BIAS乖离率", "hold", f"BIAS={bias_v:.1f}%，±3%内正常")
+                add("BIAS乖离率", "hold", f"BIAS6={b1:.1f}% BIAS12={b2:.1f}% BIAS24={b3:.1f}%，正常区间")
         else:
             add("BIAS乖离率", "hold", "BIAS数据不足")
     except Exception:
@@ -527,7 +525,9 @@ def analyze_stock(code):
             "ma10": round(df["ma10"].iloc[i], 2) if pd.notna(df["ma10"].iloc[i]) else 0,
             "ma60": round(df["ma60"].iloc[i], 2) if pd.notna(df["ma60"].iloc[i]) else 0,
             "psy": round(psy.iloc[i], 0) if pd.notna(psy.iloc[i]) else 0,
-            "bias": round(bias.iloc[i], 1) if pd.notna(bias.iloc[i]) else 0,
+            "bias1": round(bias1.iloc[i], 1) if pd.notna(bias1.iloc[i]) else 0,
+            "bias2": round(bias2.iloc[i], 1) if pd.notna(bias2.iloc[i]) else 0,
+            "bias3": round(bias3.iloc[i], 1) if pd.notna(bias3.iloc[i]) else 0,
             "pdi": round(pdi.iloc[i], 1) if pd.notna(pdi.iloc[i]) else 0,
             "mdi": round(mdi.iloc[i], 1) if pd.notna(mdi.iloc[i]) else 0,
             "adx": round(adx.iloc[i], 1) if pd.notna(adx.iloc[i]) else 0,
@@ -582,7 +582,7 @@ def print_analysis(result):
     print(f"  均线:  MA5 {ind['ma5']:.2f}  MA10 {ind['ma10']:.2f}  MA60 {ind['ma60']:.2f}  ({ma_status})")
     print(f"  DMI:  PDI {ind['pdi']:.1f}  MDI {ind['mdi']:.1f}  ADX {ind['adx']:.1f}")
     tower_txt = "红" if ind["tower"] > 0 else ("绿" if ind["tower"] < 0 else "平")
-    print(f"  PSY:  {ind['psy']:.0f}  BIAS: {ind['bias']:.1f}%  SAR: {ind['sar']:.2f}  宝塔: {tower_txt}")
+    print(f"  PSY:  {ind['psy']:.0f}  BIAS: {ind['bias1']:.1f}/{ind['bias2']:.1f}/{ind['bias3']:.1f}%  SAR: {ind['sar']:.2f}  宝塔: {tower_txt}")
     total = s['buy'] + s['sell'] + s['hold']
     print(f"\n 策略信号 ({total}/19)")
     print(f"  买入: {s['buy']}  |  卖出: {s['sell']}  |  观望: {s['hold']}")
@@ -599,9 +599,11 @@ def print_analysis(result):
         for sig in result["hold_reasons"]:
             print(f"    [{sig['name']}] {sig['reason']}")
     print(f"\n 综合建议: {result['verdict']} {result['verdict_icon']}")
+    if result["buy_reasons"]:
+        tops = " + ".join(sig['name'] for sig in result["buy_reasons"][:3])
+        print(f"  核心逻辑: {tops}")
     if result["verdict"] == "买入":
         ma5 = ind["ma5"]
-        print(f"  核心逻辑: MACD零上金叉 + 均线多头排列 + BOLL中轨上方")
         print(f"  {s['buy']}个策略看多 vs {s['sell']}个看空，多头占优")
         print(f"  建议买入，止损位设在MA5={ma5:.2f}，跌破离场")
     elif result["verdict"] == "卖出":

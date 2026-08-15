@@ -53,6 +53,32 @@ def fetch_from_sina(code, datalen=240):
         })
     return pd.DataFrame(rows)
 
+def fetch_qfq_tencent(code, datalen=320):
+    """腾讯前复权日K线，与同花顺/通达信数值一致"""
+    symbol = sina_symbol(code)
+    url = (f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?"
+           f"param={symbol},day,,,{datalen},qfq")
+    req = urllib.request.Request(url, headers={"Referer": "https://gu.qq.com/"})
+    try:
+        resp = urllib.request.urlopen(req, timeout=15)
+        raw = json.loads(resp.read().decode("utf-8", errors="replace"))
+    except Exception:
+        return pd.DataFrame()
+    node = raw.get("data", {}).get(symbol, {})
+    rows_raw = node.get("qfqday") or node.get("day") or []
+    rows = []
+    for item in rows_raw:
+        d = item[0].replace("-", "")
+        # 腾讯volume单位为「手」，×100换算为股
+        vol = (float(item[5]) * 100) if len(item) > 5 and item[5] else 0
+        rows.append({
+            "code": code, "date": d,
+            "open": float(item[1]), "close": float(item[2]),
+            "high": float(item[3]), "low": float(item[4]),
+            "volume": vol,
+        })
+    return pd.DataFrame(rows)
+
 def get_daily_data(code, days=180):
     end_date = datetime.now().strftime("%Y%m%d")
     start = (datetime.now() - timedelta(days=days * 2)).strftime("%Y%m%d")
@@ -67,7 +93,7 @@ def get_daily_data(code, days=180):
             conn.close()
             cached["date"] = pd.to_datetime(cached["date"])
             return cached
-    df = fetch_from_sina(code)
+    df = fetch_qfq_tencent(code)
     if len(df) > 0:
         conn.execute("DELETE FROM daily WHERE code=?", (code,))
         df.to_sql("daily", conn, if_exists="append", index=False)
