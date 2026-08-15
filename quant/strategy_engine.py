@@ -290,7 +290,7 @@ def _rule_to_text(lt):
 
 
 def migrate_custom_strategies(strategies):
-    """旧 {buy:[conds], sell:[conds]} → 新 {buy_rule, sell_rule}"""
+    """旧 {buy:[conds], sell:[conds]} → 新 {buy_rule, sell_rule}，持久化保存"""
     migrated = False
     for s in strategies:
         if s.get("type") == "custom" and not s.get("buy_rule"):
@@ -300,7 +300,16 @@ def migrate_custom_strategies(strategies):
             s["sell_rule"] = sell_text or "价格明显走弱时卖出"
             migrated = True
     if migrated:
-        _save_config(_load_config())
+        cfg = _load_config()
+        full = cfg.get("strategies", [])
+        for s in full:
+            if s.get("type") == "custom" and not s.get("buy_rule"):
+                match = next((c for c in strategies if c.get("id") == s.get("id")), None)
+                if match:
+                    s["buy_rule"] = match.get("buy_rule", "")
+                    s["sell_rule"] = match.get("sell_rule", "")
+        cfg["strategies"] = full
+        _save_config(cfg)
     return strategies
 
 
@@ -714,7 +723,7 @@ def eval_condition(ctx, cond):
     metric = cond.get("metric")
     op = cond.get("op", ">")
     val = _eval_metric(ctx, metric)
-    if pd.isna(val) if isinstance(val, float) else False:
+    if pd.isna(val):
         return False
     threshold = cond.get("threshold", 0)
     if op == "is_true":
@@ -752,18 +761,12 @@ def eval_custom_strategy(ctx, strat):
     return sig, reason
 
 
-def _fmt_num(v, nd=2):
-    if v is None or pd.isna(v):
-        return "-"
-    return f"{float(v):.{nd}f}"
-
-
 def format_indicators(ctx):
     i = ctx["i"]
     ind = ctx["indicators"]
     rt = ctx.get("realtime") or {}
     lines = [
-        f"- 现价 {rt.get('price', ind['close'])}，涨跌幅 {rt.get('pct', '-')}%",
+        f"- 现价 {rt.get('price') or ctx['price']}，涨跌幅 {rt.get('pct', '-')}%",
         f"- MACD: DIFF {ind['macd_diff']}，DEA {ind['macd_dea']}，柱 {ind['macd_bar']}",
         f"- KDJ: K={ind['k']} D={ind['d']} J={ind['j']}",
         f"- BOLL(上/中/下): {ind['boll_u']}/{ind['boll_m']}/{ind['boll_l']}",
@@ -777,7 +780,10 @@ def format_indicators(ctx):
     if dfs is not None and i > 0:
         cur_v = float(dfs["volume"].iloc[i])
         avg_v = float(dfs["volume"].iloc[max(0, i - 5):i].mean())
-        lines.append(f"- 今日成交量 {cur_v:.0f}，5日均量 {avg_v:.0f}，量比 {cur_v/avg_v:.2f}倍" if avg_v else "- 今日成交量 " + f"{cur_v:.0f}" + "（5日均量不足）")
+        if avg_v and avg_v > 0:
+            lines.append(f"- 今日成交量 {cur_v:.0f}，5日均量 {avg_v:.0f}，量比 {cur_v/avg_v:.2f}倍")
+        else:
+            lines.append(f"- 今日成交量 {cur_v:.0f}（5日均量不足）")
     return "\n".join(lines)
 
 
@@ -893,7 +899,6 @@ def analyze(code, use_ai=True):
     df["ma13"] = close.rolling(13).mean()
 
     indicators = {
-        "close": round(close.iloc[i], 2),
         "macd_diff": round(macd_diff.iloc[i], 3), "macd_dea": round(macd_dea.iloc[i], 3),
         "macd_bar": round(macd_bar.iloc[i], 3),
         "k": round(k.iloc[i], 1), "d": round(d.iloc[i], 1), "j": round(j.iloc[i], 1),
