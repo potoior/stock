@@ -2,7 +2,11 @@ import backtrader as bt
 from pathlib import Path
 from datetime import datetime
 from data_fetcher import get_backtrader_data
-from strategies import MACDStrategy, KDJStrategy, MAStopStrategy
+from strategies import (
+    MACDStrategy, KDJStrategy, MAStopStrategy,
+    BOLLStrategy, DMIStrategy, PSYStrategy, BIASStrategy, SARStrategy,
+    MACDKDJBOLLStrategy, MACombinationStrategy, VolumePriceDivergenceStrategy,
+)
 
 STOCKS = [
     "600789", "000001", "002446", "300750", "600519",
@@ -69,7 +73,15 @@ def main():
     strategies = [
         (MACDStrategy, "MACD金叉死叉"),
         (KDJStrategy, "KDJ超买超卖"),
-        (MAStopStrategy, "5日均线止损法"),
+        (MAStopStrategy, "5日均线止损"),
+        (BOLLStrategy, "BOLL布林线"),
+        (DMIStrategy, "DMI趋势"),
+        (PSYStrategy, "PSY心理线"),
+        (BIASStrategy, "乖离率BIAS"),
+        (SARStrategy, "SAR止损"),
+        (MACDKDJBOLLStrategy, "三指标共振"),
+        (MACombinationStrategy, "均线组合"),
+        (VolumePriceDivergenceStrategy, "量价背离"),
     ]
 
     all_results = []

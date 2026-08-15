@@ -181,7 +181,7 @@
   },
   {
     "stock": "600789",
-    "strategy": "5日均线止损法",
+    "strategy": "5日均线止损",
     "total_return_pct": 40.44,
     "annual_return_pct": 21.25,
     "sharpe_ratio": 0.7,
@@ -190,7 +190,7 @@
   },
   {
     "stock": "000001",
-    "strategy": "5日均线止损法",
+    "strategy": "5日均线止损",
     "total_return_pct": -14.12,
     "annual_return_pct": -6.5,
     "sharpe_ratio": -0.69,
@@ -199,7 +199,7 @@
   },
   {
     "stock": "002446",
-    "strategy": "5日均线止损法",
+    "strategy": "5日均线止损",
     "total_return_pct": 23.0,
     "annual_return_pct": 11.58,
     "sharpe_ratio": 0.35,
@@ -208,7 +208,7 @@
   },
   {
     "stock": "300750",
-    "strategy": "5日均线止损法",
+    "strategy": "5日均线止损",
     "total_return_pct": -29.96,
     "annual_return_pct": -13.3,
     "sharpe_ratio": -0.9,
@@ -217,7 +217,7 @@
   },
   {
     "stock": "600519",
-    "strategy": "5日均线止损法",
+    "strategy": "5日均线止损",
     "total_return_pct": -10.41,
     "annual_return_pct": -4.84,
     "sharpe_ratio": -1.14,
@@ -226,7 +226,7 @@
   },
   {
     "stock": "000858",
-    "strategy": "5日均线止损法",
+    "strategy": "5日均线止损",
     "total_return_pct": 3.26,
     "annual_return_pct": 1.57,
     "sharpe_ratio": -0.6,
@@ -235,7 +235,7 @@
   },
   {
     "stock": "002415",
-    "strategy": "5日均线止损法",
+    "strategy": "5日均线止损",
     "total_return_pct": -8.61,
     "annual_return_pct": -4.02,
     "sharpe_ratio": -0.9,
@@ -244,7 +244,7 @@
   },
   {
     "stock": "600036",
-    "strategy": "5日均线止损法",
+    "strategy": "5日均线止损",
     "total_return_pct": -5.83,
     "annual_return_pct": -2.74,
     "sharpe_ratio": -0.53,
@@ -253,7 +253,7 @@
   },
   {
     "stock": "601318",
-    "strategy": "5日均线止损法",
+    "strategy": "5日均线止损",
     "total_return_pct": 2.93,
     "annual_return_pct": 1.4,
     "sharpe_ratio": -0.17,
@@ -262,11 +262,551 @@
   },
   {
     "stock": "000333",
-    "strategy": "5日均线止损法",
+    "strategy": "5日均线止损",
     "total_return_pct": 12.2,
     "annual_return_pct": 5.99,
     "sharpe_ratio": 0.34,
     "max_drawdown_pct": 17.41,
     "final_value": 112978.6
+  },
+  {
+    "stock": "600789",
+    "strategy": "BOLL布林线",
+    "total_return_pct": 41.97,
+    "annual_return_pct": 22.13,
+    "sharpe_ratio": 4.55,
+    "max_drawdown_pct": 20.21,
+    "final_value": 152155.6
+  },
+  {
+    "stock": "000001",
+    "strategy": "BOLL布林线",
+    "total_return_pct": -6.53,
+    "annual_return_pct": -3.06,
+    "sharpe_ratio": -0.55,
+    "max_drawdown_pct": 20.92,
+    "final_value": 93678.78
+  },
+  {
+    "stock": "002446",
+    "strategy": "BOLL布林线",
+    "total_return_pct": 26.82,
+    "annual_return_pct": 13.63,
+    "sharpe_ratio": 0.5,
+    "max_drawdown_pct": 43.51,
+    "final_value": 130755.1
+  },
+  {
+    "stock": "300750",
+    "strategy": "BOLL布林线",
+    "total_return_pct": -96.72,
+    "annual_return_pct": -36.92,
+    "sharpe_ratio": -1.11,
+    "max_drawdown_pct": 65.69,
+    "final_value": 38014.33
+  },
+  {
+    "stock": "600519",
+    "strategy": "BOLL布林线",
+    "total_return_pct": -17.3,
+    "annual_return_pct": -7.91,
+    "sharpe_ratio": -1.14,
+    "max_drawdown_pct": 28.34,
+    "final_value": 84116.9
+  },
+  {
+    "stock": "000858",
+    "strategy": "BOLL布林线",
+    "total_return_pct": -22.34,
+    "annual_return_pct": -10.09,
+    "sharpe_ratio": -0.68,
+    "max_drawdown_pct": 29.91,
+    "final_value": 79982.47
+  },
+  {
+    "stock": "002415",
+    "strategy": "BOLL布林线",
+    "total_return_pct": -2.05,
+    "annual_return_pct": -0.97,
+    "sharpe_ratio": -0.36,
+    "max_drawdown_pct": 20.12,
+    "final_value": 97974.14
+  },
+  {
+    "stock": "600036",
+    "strategy": "BOLL布林线",
+    "total_return_pct": -7.21,
+    "annual_return_pct": -3.38,
+    "sharpe_ratio": -1.92,
+    "max_drawdown_pct": 19.84,
+    "final_value": 93041.65
+  },
+  {
+    "stock": "601318",
+    "strategy": "BOLL布林线",
+    "total_return_pct": 5.56,
+    "annual_return_pct": 2.68,
+    "sharpe_ratio": 0.03,
+    "max_drawdown_pct": 26.68,
+    "final_value": 105719.28
+  },
+  {
+    "stock": "000333",
+    "strategy": "BOLL布林线",
+    "total_return_pct": 13.64,
+    "annual_return_pct": 6.71,
+    "sharpe_ratio": 0.43,
+    "max_drawdown_pct": 18.9,
+    "final_value": 114616.18
+  },
+  {
+    "stock": "600789",
+    "strategy": "PSY心理线",
+    "total_return_pct": 32.24,
+    "annual_return_pct": 16.6,
+    "sharpe_ratio": 1.99,
+    "max_drawdown_pct": 36.78,
+    "final_value": 138041.99
+  },
+  {
+    "stock": "000001",
+    "strategy": "PSY心理线",
+    "total_return_pct": -17.29,
+    "annual_return_pct": -7.91,
+    "sharpe_ratio": -0.53,
+    "max_drawdown_pct": 35.13,
+    "final_value": 84121.75
+  },
+  {
+    "stock": "002446",
+    "strategy": "PSY心理线",
+    "total_return_pct": -27.62,
+    "annual_return_pct": -12.33,
+    "sharpe_ratio": -0.91,
+    "max_drawdown_pct": 48.05,
+    "final_value": 75864.72
+  },
+  {
+    "stock": "300750",
+    "strategy": "PSY心理线",
+    "total_return_pct": -85.88,
+    "annual_return_pct": -33.57,
+    "sharpe_ratio": -0.86,
+    "max_drawdown_pct": 68.6,
+    "final_value": 42368.27
+  },
+  {
+    "stock": "600519",
+    "strategy": "PSY心理线",
+    "total_return_pct": -33.02,
+    "annual_return_pct": -14.55,
+    "sharpe_ratio": -2.09,
+    "max_drawdown_pct": 30.7,
+    "final_value": 71878.73
+  },
+  {
+    "stock": "000858",
+    "strategy": "PSY心理线",
+    "total_return_pct": -35.46,
+    "annual_return_pct": -15.54,
+    "sharpe_ratio": -1.26,
+    "max_drawdown_pct": 31.99,
+    "final_value": 70148.18
+  },
+  {
+    "stock": "002415",
+    "strategy": "PSY心理线",
+    "total_return_pct": -7.07,
+    "annual_return_pct": -3.31,
+    "sharpe_ratio": -0.81,
+    "max_drawdown_pct": 33.1,
+    "final_value": 93171.66
+  },
+  {
+    "stock": "600036",
+    "strategy": "PSY心理线",
+    "total_return_pct": -10.61,
+    "annual_return_pct": -4.93,
+    "sharpe_ratio": -0.32,
+    "max_drawdown_pct": 26.79,
+    "final_value": 89934.37
+  },
+  {
+    "stock": "601318",
+    "strategy": "PSY心理线",
+    "total_return_pct": 29.43,
+    "annual_return_pct": 15.05,
+    "sharpe_ratio": 3.37,
+    "max_drawdown_pct": 18.86,
+    "final_value": 134215.4
+  },
+  {
+    "stock": "000333",
+    "strategy": "PSY心理线",
+    "total_return_pct": 7.4,
+    "annual_return_pct": 3.59,
+    "sharpe_ratio": 0.15,
+    "max_drawdown_pct": 18.74,
+    "final_value": 107679.44
+  },
+  {
+    "stock": "600789",
+    "strategy": "乖离率BIAS",
+    "total_return_pct": 5.29,
+    "annual_return_pct": 2.55,
+    "sharpe_ratio": 0.08,
+    "max_drawdown_pct": 29.17,
+    "final_value": 105435.92
+  },
+  {
+    "stock": "000001",
+    "strategy": "乖离率BIAS",
+    "total_return_pct": -11.0,
+    "annual_return_pct": -5.11,
+    "sharpe_ratio": -0.94,
+    "max_drawdown_pct": 22.33,
+    "final_value": 89579.41
+  },
+  {
+    "stock": "002446",
+    "strategy": "乖离率BIAS",
+    "total_return_pct": -29.58,
+    "annual_return_pct": -13.14,
+    "sharpe_ratio": -1.16,
+    "max_drawdown_pct": 57.69,
+    "final_value": 74396.64
+  },
+  {
+    "stock": "300750",
+    "strategy": "乖离率BIAS",
+    "total_return_pct": -14.19,
+    "annual_return_pct": -6.54,
+    "sharpe_ratio": -0.24,
+    "max_drawdown_pct": 47.68,
+    "final_value": 86770.88
+  },
+  {
+    "stock": "600519",
+    "strategy": "乖离率BIAS",
+    "total_return_pct": -6.08,
+    "annual_return_pct": -2.85,
+    "sharpe_ratio": -0.22,
+    "max_drawdown_pct": 26.38,
+    "final_value": 94101.32
+  },
+  {
+    "stock": "000858",
+    "strategy": "乖离率BIAS",
+    "total_return_pct": -6.15,
+    "annual_return_pct": -2.89,
+    "sharpe_ratio": -1.42,
+    "max_drawdown_pct": 15.28,
+    "final_value": 94037.77
+  },
+  {
+    "stock": "002415",
+    "strategy": "乖离率BIAS",
+    "total_return_pct": -12.48,
+    "annual_return_pct": -5.77,
+    "sharpe_ratio": -1.07,
+    "max_drawdown_pct": 19.82,
+    "final_value": 88263.08
+  },
+  {
+    "stock": "600036",
+    "strategy": "乖离率BIAS",
+    "total_return_pct": -7.06,
+    "annual_return_pct": -3.31,
+    "sharpe_ratio": -1.33,
+    "max_drawdown_pct": 24.0,
+    "final_value": 93185.59
+  },
+  {
+    "stock": "601318",
+    "strategy": "乖离率BIAS",
+    "total_return_pct": 9.33,
+    "annual_return_pct": 4.54,
+    "sharpe_ratio": 0.27,
+    "max_drawdown_pct": 3.94,
+    "final_value": 109774.31
+  },
+  {
+    "stock": "000333",
+    "strategy": "乖离率BIAS",
+    "total_return_pct": 35.37,
+    "annual_return_pct": 18.35,
+    "sharpe_ratio": 3.7,
+    "max_drawdown_pct": 17.95,
+    "final_value": 142435.37
+  },
+  {
+    "stock": "600789",
+    "strategy": "三指标共振",
+    "total_return_pct": 0.0,
+    "annual_return_pct": 0.0,
+    "sharpe_ratio": null,
+    "max_drawdown_pct": 0.0,
+    "final_value": 100000.0
+  },
+  {
+    "stock": "000001",
+    "strategy": "三指标共振",
+    "total_return_pct": 0.0,
+    "annual_return_pct": 0.0,
+    "sharpe_ratio": null,
+    "max_drawdown_pct": 0.0,
+    "final_value": 100000.0
+  },
+  {
+    "stock": "002446",
+    "strategy": "三指标共振",
+    "total_return_pct": 0.0,
+    "annual_return_pct": 0.0,
+    "sharpe_ratio": null,
+    "max_drawdown_pct": 0.0,
+    "final_value": 100000.0
+  },
+  {
+    "stock": "300750",
+    "strategy": "三指标共振",
+    "total_return_pct": 0.0,
+    "annual_return_pct": 0.0,
+    "sharpe_ratio": null,
+    "max_drawdown_pct": 0.0,
+    "final_value": 100000.0
+  },
+  {
+    "stock": "600519",
+    "strategy": "三指标共振",
+    "total_return_pct": 0.0,
+    "annual_return_pct": 0.0,
+    "sharpe_ratio": null,
+    "max_drawdown_pct": 0.0,
+    "final_value": 100000.0
+  },
+  {
+    "stock": "000858",
+    "strategy": "三指标共振",
+    "total_return_pct": 0.0,
+    "annual_return_pct": 0.0,
+    "sharpe_ratio": null,
+    "max_drawdown_pct": 0.0,
+    "final_value": 100000.0
+  },
+  {
+    "stock": "002415",
+    "strategy": "三指标共振",
+    "total_return_pct": 0.0,
+    "annual_return_pct": 0.0,
+    "sharpe_ratio": null,
+    "max_drawdown_pct": 0.0,
+    "final_value": 100000.0
+  },
+  {
+    "stock": "600036",
+    "strategy": "三指标共振",
+    "total_return_pct": 0.0,
+    "annual_return_pct": 0.0,
+    "sharpe_ratio": null,
+    "max_drawdown_pct": 0.0,
+    "final_value": 100000.0
+  },
+  {
+    "stock": "601318",
+    "strategy": "三指标共振",
+    "total_return_pct": 0.0,
+    "annual_return_pct": 0.0,
+    "sharpe_ratio": null,
+    "max_drawdown_pct": 0.0,
+    "final_value": 100000.0
+  },
+  {
+    "stock": "000333",
+    "strategy": "三指标共振",
+    "total_return_pct": 0.0,
+    "annual_return_pct": 0.0,
+    "sharpe_ratio": null,
+    "max_drawdown_pct": 0.0,
+    "final_value": 100000.0
+  },
+  {
+    "stock": "600789",
+    "strategy": "均线组合",
+    "total_return_pct": 9.89,
+    "annual_return_pct": 4.83,
+    "sharpe_ratio": 0.17,
+    "max_drawdown_pct": 21.46,
+    "final_value": 110398.79
+  },
+  {
+    "stock": "000001",
+    "strategy": "均线组合",
+    "total_return_pct": 7.78,
+    "annual_return_pct": 3.77,
+    "sharpe_ratio": 0.43,
+    "max_drawdown_pct": 8.24,
+    "final_value": 108085.97
+  },
+  {
+    "stock": "002446",
+    "strategy": "均线组合",
+    "total_return_pct": 14.96,
+    "annual_return_pct": 7.39,
+    "sharpe_ratio": 0.31,
+    "max_drawdown_pct": 22.79,
+    "final_value": 116142.75
+  },
+  {
+    "stock": "300750",
+    "strategy": "均线组合",
+    "total_return_pct": -3.66,
+    "annual_return_pct": -1.73,
+    "sharpe_ratio": -0.2,
+    "max_drawdown_pct": 15.97,
+    "final_value": 96406.49
+  },
+  {
+    "stock": "600519",
+    "strategy": "均线组合",
+    "total_return_pct": -8.69,
+    "annual_return_pct": -4.06,
+    "sharpe_ratio": -1.71,
+    "max_drawdown_pct": 10.71,
+    "final_value": 91675.15
+  },
+  {
+    "stock": "000858",
+    "strategy": "均线组合",
+    "total_return_pct": 4.99,
+    "annual_return_pct": 2.4,
+    "sharpe_ratio": -0.04,
+    "max_drawdown_pct": 14.01,
+    "final_value": 105112.38
+  },
+  {
+    "stock": "002415",
+    "strategy": "均线组合",
+    "total_return_pct": -0.35,
+    "annual_return_pct": -0.17,
+    "sharpe_ratio": -0.44,
+    "max_drawdown_pct": 14.86,
+    "final_value": 99647.74
+  },
+  {
+    "stock": "600036",
+    "strategy": "均线组合",
+    "total_return_pct": -0.76,
+    "annual_return_pct": -0.36,
+    "sharpe_ratio": -0.8,
+    "max_drawdown_pct": 9.84,
+    "final_value": 99240.57
+  },
+  {
+    "stock": "601318",
+    "strategy": "均线组合",
+    "total_return_pct": -2.29,
+    "annual_return_pct": -1.09,
+    "sharpe_ratio": -0.97,
+    "max_drawdown_pct": 14.65,
+    "final_value": 97735.55
+  },
+  {
+    "stock": "000333",
+    "strategy": "均线组合",
+    "total_return_pct": 5.25,
+    "annual_return_pct": 2.53,
+    "sharpe_ratio": -0.03,
+    "max_drawdown_pct": 10.14,
+    "final_value": 105390.15
+  },
+  {
+    "stock": "600789",
+    "strategy": "量价背离",
+    "total_return_pct": -7.6,
+    "annual_return_pct": -3.56,
+    "sharpe_ratio": -1.29,
+    "max_drawdown_pct": 11.28,
+    "final_value": 92681.84
+  },
+  {
+    "stock": "000001",
+    "strategy": "量价背离",
+    "total_return_pct": 6.66,
+    "annual_return_pct": 3.22,
+    "sharpe_ratio": 0.07,
+    "max_drawdown_pct": 2.83,
+    "final_value": 106884.64
+  },
+  {
+    "stock": "002446",
+    "strategy": "量价背离",
+    "total_return_pct": 0.0,
+    "annual_return_pct": 0.0,
+    "sharpe_ratio": null,
+    "max_drawdown_pct": 0.0,
+    "final_value": 100000.0
+  },
+  {
+    "stock": "300750",
+    "strategy": "量价背离",
+    "total_return_pct": -6.44,
+    "annual_return_pct": -3.02,
+    "sharpe_ratio": -1.39,
+    "max_drawdown_pct": 12.05,
+    "final_value": 93765.93
+  },
+  {
+    "stock": "600519",
+    "strategy": "量价背离",
+    "total_return_pct": 13.21,
+    "annual_return_pct": 6.49,
+    "sharpe_ratio": 0.44,
+    "max_drawdown_pct": 9.31,
+    "final_value": 114117.6
+  },
+  {
+    "stock": "000858",
+    "strategy": "量价背离",
+    "total_return_pct": 22.31,
+    "annual_return_pct": 11.22,
+    "sharpe_ratio": 0.92,
+    "max_drawdown_pct": 16.75,
+    "final_value": 125000.57
+  },
+  {
+    "stock": "002415",
+    "strategy": "量价背离",
+    "total_return_pct": 16.95,
+    "annual_return_pct": 8.41,
+    "sharpe_ratio": 0.48,
+    "max_drawdown_pct": 10.34,
+    "final_value": 118469.83
+  },
+  {
+    "stock": "600036",
+    "strategy": "量价背离",
+    "total_return_pct": 21.82,
+    "annual_return_pct": 10.95,
+    "sharpe_ratio": 0.97,
+    "max_drawdown_pct": 11.52,
+    "final_value": 124382.74
+  },
+  {
+    "stock": "601318",
+    "strategy": "量价背离",
+    "total_return_pct": -0.85,
+    "annual_return_pct": -0.4,
+    "sharpe_ratio": -1.15,
+    "max_drawdown_pct": 9.82,
+    "final_value": 99158.06
+  },
+  {
+    "stock": "000333",
+    "strategy": "量价背离",
+    "total_return_pct": -16.7,
+    "annual_return_pct": -7.65,
+    "sharpe_ratio": -8.81,
+    "max_drawdown_pct": 16.58,
+    "final_value": 84617.78
   }
 ]
