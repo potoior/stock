@@ -561,9 +561,9 @@ def print_analysis(result):
     pct_str = f"+{r['pct']}%" if r['pct'] >= 0 else f"{r['pct']}%"
     change_str = f"+{r['change']}" if r['change'] >= 0 else f"{r['change']}"
     print(f"\n 实时行情")
-    print(f"  现价: {r['price']:.2f}  |  涨跌: {change_str} ({pct_str})")
-    print(f"  开: {r['open']:.2f}  高: {r['high']:.2f}  低: {r['low']:.2f}  昨收: {r['yclose']:.2f}")
-    print(f"  成交量: {r['volume']}")
+    print(f"  现价: {r['price']:.2f}   涨跌: {change_str} ({pct_str})")
+    print(f"  开/高/低/昨收: {r['open']:.2f} / {r['high']:.2f} / {r['low']:.2f} / {r['yclose']:.2f}")
+    print(f"  成交量: {int(r['volume']):,}")
     print(f"\n 技术指标")
     macd_trend = "↑" if ind["macd_bar"] > 0 else "↓"
     macd_status = ""
@@ -571,18 +571,26 @@ def print_analysis(result):
         macd_status = "零上金叉" if ind["macd_diff"] > ind["macd_dea"] else "零上"
     elif ind["macd_diff"] < 0 and ind["macd_dea"] < 0:
         macd_status = "零下" if ind["macd_diff"] < ind["macd_dea"] else "零下金叉"
-    print(f"  MACD: DIFF {ind['macd_diff']:.3f}  DEA {ind['macd_dea']:.3f}  红柱 {macd_trend}  {macd_status}")
     kdj_status = "超买" if ind["k"] > 80 else ("超卖" if ind["k"] < 20 else "中位")
-    print(f"  KDJ:  K {ind['k']:.1f}  D {ind['d']:.1f}  J {ind['j']:.1f}  ({kdj_status})")
     boll_pos = "上轨" if r['price'] >= ind["boll_u"] else ("中轨" if r['price'] >= ind["boll_m"] else "下轨")
-    print(f"  BOLL: 上 {ind['boll_u']:.2f}  中 {ind['boll_m']:.2f}  下 {ind['boll_l']:.2f}  ({boll_pos})")
     bbiboll_pos = "上轨" if r['price'] >= ind["bbiboll_u"] else ("中轨" if r['price'] >= ind["bbiboll_m"] else "下轨")
-    print(f"  BBIBOLL: 上 {ind['bbiboll_u']:.2f}  中 {ind['bbiboll_m']:.2f}  下 {ind['bbiboll_l']:.2f}  ({bbiboll_pos})")
     ma_status = "多头排列" if r['price'] > ind["ma5"] > ind["ma10"] > ind["ma60"] else "空头排列" if r['price'] < ind["ma5"] < ind["ma10"] < ind["ma60"] else "交叉"
-    print(f"  均线:  MA5 {ind['ma5']:.2f}  MA10 {ind['ma10']:.2f}  MA60 {ind['ma60']:.2f}  ({ma_status})")
-    print(f"  DMI:  PDI {ind['pdi']:.1f}  MDI {ind['mdi']:.1f}  ADX {ind['adx']:.1f}")
     tower_txt = "红" if ind["tower"] > 0 else ("绿" if ind["tower"] < 0 else "平")
-    print(f"  PSY:  {ind['psy']:.0f}  BIAS: {ind['bias1']:.1f}/{ind['bias2']:.1f}/{ind['bias3']:.1f}%  SAR: {ind['sar']:.2f}  宝塔: {tower_txt}")
+    rows = [
+        ("MACD", f"DIFF {ind['macd_diff']:.3f}  DEA {ind['macd_dea']:.3f}  红柱 {macd_trend}  {macd_status}"),
+        ("KDJ", f"K {ind['k']:.1f}  D {ind['d']:.1f}  J {ind['j']:.1f}  ({kdj_status})"),
+        ("BOLL", f"上 {ind['boll_u']:.2f}  中 {ind['boll_m']:.2f}  下 {ind['boll_l']:.2f}  ({boll_pos})"),
+        ("BBIBOLL", f"上 {ind['bbiboll_u']:.2f}  中 {ind['bbiboll_m']:.2f}  下 {ind['bbiboll_l']:.2f}  ({bbiboll_pos})"),
+        ("均线", f"MA5 {ind['ma5']:.2f}  MA10 {ind['ma10']:.2f}  MA60 {ind['ma60']:.2f}  ({ma_status})"),
+        ("DMI", f"PDI {ind['pdi']:.1f}  MDI {ind['mdi']:.1f}  ADX {ind['adx']:.1f}"),
+        ("PSY", f"{ind['psy']:.0f}"),
+        ("BIAS", f"{ind['bias1']:.1f}% / {ind['bias2']:.1f}% / {ind['bias3']:.1f}%  (6/12/24日)"),
+        ("SAR", f"{ind['sar']:.2f}"),
+        ("宝塔线", tower_txt),
+    ]
+    for name, val in rows:
+        print(f"  {name:<8} {val}")
+    print()
     total = s['buy'] + s['sell'] + s['hold']
     print(f"\n 策略信号 ({total}/19)")
     print(f"  买入: {s['buy']}  |  卖出: {s['sell']}  |  观望: {s['hold']}")
