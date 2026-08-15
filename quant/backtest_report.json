@@ -271,93 +271,183 @@
   },
   {
     "stock": "600789",
-    "strategy": "BOLL布林线",
-    "total_return_pct": 41.97,
-    "annual_return_pct": 22.13,
-    "sharpe_ratio": 4.55,
-    "max_drawdown_pct": 20.21,
-    "final_value": 152155.6
+    "strategy": "BOLL布林线(26日)",
+    "total_return_pct": 28.29,
+    "annual_return_pct": 14.43,
+    "sharpe_ratio": 6.03,
+    "max_drawdown_pct": 19.18,
+    "final_value": 132703.06
   },
   {
     "stock": "000001",
-    "strategy": "BOLL布林线",
-    "total_return_pct": -6.53,
+    "strategy": "BOLL布林线(26日)",
+    "total_return_pct": -6.52,
     "annual_return_pct": -3.06,
     "sharpe_ratio": -0.55,
-    "max_drawdown_pct": 20.92,
-    "final_value": 93678.78
+    "max_drawdown_pct": 17.71,
+    "final_value": 93689.75
   },
   {
     "stock": "002446",
-    "strategy": "BOLL布林线",
-    "total_return_pct": 26.82,
-    "annual_return_pct": 13.63,
-    "sharpe_ratio": 0.5,
-    "max_drawdown_pct": 43.51,
-    "final_value": 130755.1
+    "strategy": "BOLL布林线(26日)",
+    "total_return_pct": 29.51,
+    "annual_return_pct": 15.09,
+    "sharpe_ratio": 0.65,
+    "max_drawdown_pct": 43.0,
+    "final_value": 134328.39
   },
   {
     "stock": "300750",
-    "strategy": "BOLL布林线",
-    "total_return_pct": -96.72,
-    "annual_return_pct": -36.92,
-    "sharpe_ratio": -1.11,
-    "max_drawdown_pct": 65.69,
-    "final_value": 38014.33
+    "strategy": "BOLL布林线(26日)",
+    "total_return_pct": -92.15,
+    "annual_return_pct": -35.53,
+    "sharpe_ratio": -1.13,
+    "max_drawdown_pct": 64.08,
+    "final_value": 39793.0
   },
   {
     "stock": "600519",
-    "strategy": "BOLL布林线",
-    "total_return_pct": -17.3,
-    "annual_return_pct": -7.91,
-    "sharpe_ratio": -1.14,
+    "strategy": "BOLL布林线(26日)",
+    "total_return_pct": -17.86,
+    "annual_return_pct": -8.16,
+    "sharpe_ratio": -2.87,
     "max_drawdown_pct": 28.34,
-    "final_value": 84116.9
+    "final_value": 83645.14
   },
   {
     "stock": "000858",
-    "strategy": "BOLL布林线",
-    "total_return_pct": -22.34,
-    "annual_return_pct": -10.09,
-    "sharpe_ratio": -0.68,
-    "max_drawdown_pct": 29.91,
-    "final_value": 79982.47
+    "strategy": "BOLL布林线(26日)",
+    "total_return_pct": -37.42,
+    "annual_return_pct": -16.33,
+    "sharpe_ratio": -4.43,
+    "max_drawdown_pct": 31.82,
+    "final_value": 68780.96
   },
   {
     "stock": "002415",
-    "strategy": "BOLL布林线",
-    "total_return_pct": -2.05,
-    "annual_return_pct": -0.97,
-    "sharpe_ratio": -0.36,
-    "max_drawdown_pct": 20.12,
-    "final_value": 97974.14
+    "strategy": "BOLL布林线(26日)",
+    "total_return_pct": 16.03,
+    "annual_return_pct": 7.94,
+    "sharpe_ratio": 0.49,
+    "max_drawdown_pct": 18.35,
+    "final_value": 117387.52
   },
   {
     "stock": "600036",
-    "strategy": "BOLL布林线",
-    "total_return_pct": -7.21,
-    "annual_return_pct": -3.38,
-    "sharpe_ratio": -1.92,
-    "max_drawdown_pct": 19.84,
-    "final_value": 93041.65
+    "strategy": "BOLL布林线(26日)",
+    "total_return_pct": -4.32,
+    "annual_return_pct": -2.04,
+    "sharpe_ratio": -1.64,
+    "max_drawdown_pct": 19.75,
+    "final_value": 95771.07
   },
   {
     "stock": "601318",
-    "strategy": "BOLL布林线",
-    "total_return_pct": 5.56,
-    "annual_return_pct": 2.68,
-    "sharpe_ratio": 0.03,
-    "max_drawdown_pct": 26.68,
-    "final_value": 105719.28
+    "strategy": "BOLL布林线(26日)",
+    "total_return_pct": 8.8,
+    "annual_return_pct": 4.28,
+    "sharpe_ratio": 0.14,
+    "max_drawdown_pct": 16.9,
+    "final_value": 109194.34
   },
   {
     "stock": "000333",
-    "strategy": "BOLL布林线",
-    "total_return_pct": 13.64,
-    "annual_return_pct": 6.71,
-    "sharpe_ratio": 0.43,
-    "max_drawdown_pct": 18.9,
-    "final_value": 114616.18
+    "strategy": "BOLL布林线(26日)",
+    "total_return_pct": 16.29,
+    "annual_return_pct": 8.07,
+    "sharpe_ratio": 0.66,
+    "max_drawdown_pct": 17.63,
+    "final_value": 117691.33
+  },
+  {
+    "stock": "600789",
+    "strategy": "DMI趋势",
+    "total_return_pct": -19.08,
+    "annual_return_pct": -8.69,
+    "sharpe_ratio": -0.44,
+    "max_drawdown_pct": 36.25,
+    "final_value": 82627.45
+  },
+  {
+    "stock": "000001",
+    "strategy": "DMI趋势",
+    "total_return_pct": -4.22,
+    "annual_return_pct": -1.99,
+    "sharpe_ratio": -0.86,
+    "max_drawdown_pct": 22.5,
+    "final_value": 95866.59
+  },
+  {
+    "stock": "002446",
+    "strategy": "DMI趋势",
+    "total_return_pct": -20.83,
+    "annual_return_pct": -9.45,
+    "sharpe_ratio": -0.29,
+    "max_drawdown_pct": 46.56,
+    "final_value": 81195.71
+  },
+  {
+    "stock": "300750",
+    "strategy": "DMI趋势",
+    "total_return_pct": -77.53,
+    "annual_return_pct": -30.88,
+    "sharpe_ratio": -1.15,
+    "max_drawdown_pct": 57.81,
+    "final_value": 46055.83
+  },
+  {
+    "stock": "600519",
+    "strategy": "DMI趋势",
+    "total_return_pct": -15.35,
+    "annual_return_pct": -7.05,
+    "sharpe_ratio": -2.42,
+    "max_drawdown_pct": 18.78,
+    "final_value": 85766.93
+  },
+  {
+    "stock": "000858",
+    "strategy": "DMI趋势",
+    "total_return_pct": 2.62,
+    "annual_return_pct": 1.26,
+    "sharpe_ratio": -0.24,
+    "max_drawdown_pct": 21.67,
+    "final_value": 102655.71
+  },
+  {
+    "stock": "002415",
+    "strategy": "DMI趋势",
+    "total_return_pct": -5.44,
+    "annual_return_pct": -2.56,
+    "sharpe_ratio": -0.44,
+    "max_drawdown_pct": 23.85,
+    "final_value": 94709.13
+  },
+  {
+    "stock": "600036",
+    "strategy": "DMI趋势",
+    "total_return_pct": 2.17,
+    "annual_return_pct": 1.04,
+    "sharpe_ratio": -0.05,
+    "max_drawdown_pct": 24.41,
+    "final_value": 102194.98
+  },
+  {
+    "stock": "601318",
+    "strategy": "DMI趋势",
+    "total_return_pct": -14.69,
+    "annual_return_pct": -6.76,
+    "sharpe_ratio": -0.51,
+    "max_drawdown_pct": 29.65,
+    "final_value": 86338.44
+  },
+  {
+    "stock": "000333",
+    "strategy": "DMI趋势",
+    "total_return_pct": -11.37,
+    "annual_return_pct": -5.27,
+    "sharpe_ratio": -0.54,
+    "max_drawdown_pct": 28.05,
+    "final_value": 89253.61
   },
   {
     "stock": "600789",
@@ -451,138 +541,228 @@
   },
   {
     "stock": "600789",
-    "strategy": "乖离率BIAS",
-    "total_return_pct": 5.29,
-    "annual_return_pct": 2.55,
-    "sharpe_ratio": 0.08,
-    "max_drawdown_pct": 29.17,
-    "final_value": 105435.92
+    "strategy": "乖离率BIAS(±3%)",
+    "total_return_pct": 0.45,
+    "annual_return_pct": 0.22,
+    "sharpe_ratio": -0.03,
+    "max_drawdown_pct": 28.84,
+    "final_value": 100452.89
   },
   {
     "stock": "000001",
-    "strategy": "乖离率BIAS",
-    "total_return_pct": -11.0,
-    "annual_return_pct": -5.11,
-    "sharpe_ratio": -0.94,
-    "max_drawdown_pct": 22.33,
-    "final_value": 89579.41
+    "strategy": "乖离率BIAS(±3%)",
+    "total_return_pct": -10.78,
+    "annual_return_pct": -5.01,
+    "sharpe_ratio": -1.49,
+    "max_drawdown_pct": 16.81,
+    "final_value": 89776.59
   },
   {
     "stock": "002446",
-    "strategy": "乖离率BIAS",
-    "total_return_pct": -29.58,
-    "annual_return_pct": -13.14,
-    "sharpe_ratio": -1.16,
-    "max_drawdown_pct": 57.69,
-    "final_value": 74396.64
+    "strategy": "乖离率BIAS(±3%)",
+    "total_return_pct": -14.68,
+    "annual_return_pct": -6.75,
+    "sharpe_ratio": -0.5,
+    "max_drawdown_pct": 46.36,
+    "final_value": 86345.49
   },
   {
     "stock": "300750",
-    "strategy": "乖离率BIAS",
-    "total_return_pct": -14.19,
-    "annual_return_pct": -6.54,
-    "sharpe_ratio": -0.24,
-    "max_drawdown_pct": 47.68,
-    "final_value": 86770.88
+    "strategy": "乖离率BIAS(±3%)",
+    "total_return_pct": -14.46,
+    "annual_return_pct": -6.66,
+    "sharpe_ratio": -1.1,
+    "max_drawdown_pct": 33.38,
+    "final_value": 86533.6
   },
   {
     "stock": "600519",
-    "strategy": "乖离率BIAS",
-    "total_return_pct": -6.08,
-    "annual_return_pct": -2.85,
-    "sharpe_ratio": -0.22,
-    "max_drawdown_pct": 26.38,
-    "final_value": 94101.32
+    "strategy": "乖离率BIAS(±3%)",
+    "total_return_pct": -10.42,
+    "annual_return_pct": -4.84,
+    "sharpe_ratio": -0.33,
+    "max_drawdown_pct": 23.29,
+    "final_value": 90103.26
   },
   {
     "stock": "000858",
-    "strategy": "乖离率BIAS",
-    "total_return_pct": -6.15,
-    "annual_return_pct": -2.89,
-    "sharpe_ratio": -1.42,
-    "max_drawdown_pct": 15.28,
-    "final_value": 94037.77
+    "strategy": "乖离率BIAS(±3%)",
+    "total_return_pct": -18.77,
+    "annual_return_pct": -8.55,
+    "sharpe_ratio": -0.42,
+    "max_drawdown_pct": 24.82,
+    "final_value": 82887.57
   },
   {
     "stock": "002415",
-    "strategy": "乖离率BIAS",
-    "total_return_pct": -12.48,
-    "annual_return_pct": -5.77,
-    "sharpe_ratio": -1.07,
-    "max_drawdown_pct": 19.82,
-    "final_value": 88263.08
+    "strategy": "乖离率BIAS(±3%)",
+    "total_return_pct": 0.63,
+    "annual_return_pct": 0.3,
+    "sharpe_ratio": -0.48,
+    "max_drawdown_pct": 24.23,
+    "final_value": 100635.0
   },
   {
     "stock": "600036",
-    "strategy": "乖离率BIAS",
-    "total_return_pct": -7.06,
-    "annual_return_pct": -3.31,
-    "sharpe_ratio": -1.33,
-    "max_drawdown_pct": 24.0,
-    "final_value": 93185.59
+    "strategy": "乖离率BIAS(±3%)",
+    "total_return_pct": -22.13,
+    "annual_return_pct": -10.01,
+    "sharpe_ratio": -0.93,
+    "max_drawdown_pct": 29.44,
+    "final_value": 80147.34
   },
   {
     "stock": "601318",
-    "strategy": "乖离率BIAS",
-    "total_return_pct": 9.33,
-    "annual_return_pct": 4.54,
-    "sharpe_ratio": 0.27,
-    "max_drawdown_pct": 3.94,
-    "final_value": 109774.31
+    "strategy": "乖离率BIAS(±3%)",
+    "total_return_pct": 16.39,
+    "annual_return_pct": 8.12,
+    "sharpe_ratio": 0.32,
+    "max_drawdown_pct": 16.87,
+    "final_value": 117814.62
   },
   {
     "stock": "000333",
-    "strategy": "乖离率BIAS",
-    "total_return_pct": 35.37,
-    "annual_return_pct": 18.35,
-    "sharpe_ratio": 3.7,
-    "max_drawdown_pct": 17.95,
-    "final_value": 142435.37
+    "strategy": "乖离率BIAS(±3%)",
+    "total_return_pct": -13.0,
+    "annual_return_pct": -6.0,
+    "sharpe_ratio": -0.45,
+    "max_drawdown_pct": 28.14,
+    "final_value": 87813.14
+  },
+  {
+    "stock": "600789",
+    "strategy": "SAR止损",
+    "total_return_pct": 21.72,
+    "annual_return_pct": 10.9,
+    "sharpe_ratio": 0.36,
+    "max_drawdown_pct": 30.5,
+    "final_value": 124257.96
+  },
+  {
+    "stock": "000001",
+    "strategy": "SAR止损",
+    "total_return_pct": -7.45,
+    "annual_return_pct": -3.49,
+    "sharpe_ratio": -0.55,
+    "max_drawdown_pct": 24.63,
+    "final_value": 92823.31
+  },
+  {
+    "stock": "002446",
+    "strategy": "SAR止损",
+    "total_return_pct": -3.01,
+    "annual_return_pct": -1.42,
+    "sharpe_ratio": 0.06,
+    "max_drawdown_pct": 47.05,
+    "final_value": 97035.1
+  },
+  {
+    "stock": "300750",
+    "strategy": "SAR止损",
+    "total_return_pct": -34.63,
+    "annual_return_pct": -15.21,
+    "sharpe_ratio": -1.45,
+    "max_drawdown_pct": 44.5,
+    "final_value": 70727.66
+  },
+  {
+    "stock": "600519",
+    "strategy": "SAR止损",
+    "total_return_pct": -21.63,
+    "annual_return_pct": -9.79,
+    "sharpe_ratio": -0.86,
+    "max_drawdown_pct": 28.32,
+    "final_value": 80547.84
+  },
+  {
+    "stock": "000858",
+    "strategy": "SAR止损",
+    "total_return_pct": 2.28,
+    "annual_return_pct": 1.09,
+    "sharpe_ratio": -0.06,
+    "max_drawdown_pct": 23.86,
+    "final_value": 102307.02
+  },
+  {
+    "stock": "002415",
+    "strategy": "SAR止损",
+    "total_return_pct": -42.58,
+    "annual_return_pct": -18.36,
+    "sharpe_ratio": -1.48,
+    "max_drawdown_pct": 38.44,
+    "final_value": 65325.34
+  },
+  {
+    "stock": "600036",
+    "strategy": "SAR止损",
+    "total_return_pct": 8.25,
+    "annual_return_pct": 4.01,
+    "sharpe_ratio": 0.13,
+    "max_drawdown_pct": 23.73,
+    "final_value": 108603.4
+  },
+  {
+    "stock": "601318",
+    "strategy": "SAR止损",
+    "total_return_pct": 18.82,
+    "annual_return_pct": 9.38,
+    "sharpe_ratio": 0.42,
+    "max_drawdown_pct": 17.0,
+    "final_value": 120711.68
+  },
+  {
+    "stock": "000333",
+    "strategy": "SAR止损",
+    "total_return_pct": 33.45,
+    "annual_return_pct": 17.27,
+    "sharpe_ratio": 1.02,
+    "max_drawdown_pct": 12.86,
+    "final_value": 139718.3
   },
   {
     "stock": "600789",
     "strategy": "三指标共振",
-    "total_return_pct": 0.0,
-    "annual_return_pct": 0.0,
-    "sharpe_ratio": null,
-    "max_drawdown_pct": 0.0,
-    "final_value": 100000.0
+    "total_return_pct": 1.13,
+    "annual_return_pct": 0.54,
+    "sharpe_ratio": -3.04,
+    "max_drawdown_pct": 0.45,
+    "final_value": 101133.25
   },
   {
     "stock": "000001",
     "strategy": "三指标共振",
-    "total_return_pct": 0.0,
-    "annual_return_pct": 0.0,
-    "sharpe_ratio": null,
+    "total_return_pct": 0.16,
+    "annual_return_pct": 0.08,
+    "sharpe_ratio": -25.6,
     "max_drawdown_pct": 0.0,
-    "final_value": 100000.0
+    "final_value": 100161.3
   },
   {
     "stock": "002446",
     "strategy": "三指标共振",
-    "total_return_pct": 0.0,
-    "annual_return_pct": 0.0,
-    "sharpe_ratio": null,
-    "max_drawdown_pct": 0.0,
-    "final_value": 100000.0
+    "total_return_pct": 2.63,
+    "annual_return_pct": 1.26,
+    "sharpe_ratio": -0.89,
+    "max_drawdown_pct": 0.11,
+    "final_value": 102661.01
   },
   {
     "stock": "300750",
     "strategy": "三指标共振",
-    "total_return_pct": 0.0,
-    "annual_return_pct": 0.0,
-    "sharpe_ratio": null,
-    "max_drawdown_pct": 0.0,
-    "final_value": 100000.0
+    "total_return_pct": 0.76,
+    "annual_return_pct": 0.36,
+    "sharpe_ratio": -4.84,
+    "max_drawdown_pct": 0.52,
+    "final_value": 100765.42
   },
   {
     "stock": "600519",
     "strategy": "三指标共振",
-    "total_return_pct": 0.0,
-    "annual_return_pct": 0.0,
-    "sharpe_ratio": null,
-    "max_drawdown_pct": 0.0,
-    "final_value": 100000.0
+    "total_return_pct": -1.19,
+    "annual_return_pct": -0.57,
+    "sharpe_ratio": -4.57,
+    "max_drawdown_pct": 1.56,
+    "final_value": 98816.82
   },
   {
     "stock": "000858",
@@ -596,38 +776,38 @@
   {
     "stock": "002415",
     "strategy": "三指标共振",
-    "total_return_pct": 0.0,
-    "annual_return_pct": 0.0,
-    "sharpe_ratio": null,
-    "max_drawdown_pct": 0.0,
-    "final_value": 100000.0
+    "total_return_pct": 1.88,
+    "annual_return_pct": 0.9,
+    "sharpe_ratio": -1.17,
+    "max_drawdown_pct": 5.86,
+    "final_value": 101901.99
   },
   {
     "stock": "600036",
     "strategy": "三指标共振",
-    "total_return_pct": 0.0,
-    "annual_return_pct": 0.0,
-    "sharpe_ratio": null,
-    "max_drawdown_pct": 0.0,
-    "final_value": 100000.0
+    "total_return_pct": -0.13,
+    "annual_return_pct": -0.06,
+    "sharpe_ratio": -1.56,
+    "max_drawdown_pct": 1.65,
+    "final_value": 99865.21
   },
   {
     "stock": "601318",
     "strategy": "三指标共振",
-    "total_return_pct": 0.0,
-    "annual_return_pct": 0.0,
-    "sharpe_ratio": null,
-    "max_drawdown_pct": 0.0,
-    "final_value": 100000.0
+    "total_return_pct": -1.83,
+    "annual_return_pct": -0.87,
+    "sharpe_ratio": -2.05,
+    "max_drawdown_pct": 3.35,
+    "final_value": 98190.86
   },
   {
     "stock": "000333",
     "strategy": "三指标共振",
-    "total_return_pct": 0.0,
-    "annual_return_pct": 0.0,
-    "sharpe_ratio": null,
-    "max_drawdown_pct": 0.0,
-    "final_value": 100000.0
+    "total_return_pct": 1.98,
+    "annual_return_pct": 0.95,
+    "sharpe_ratio": -1.45,
+    "max_drawdown_pct": 1.62,
+    "final_value": 101997.4
   },
   {
     "stock": "600789",
@@ -808,5 +988,365 @@
     "sharpe_ratio": -8.81,
     "max_drawdown_pct": 16.58,
     "final_value": 84617.78
+  },
+  {
+    "stock": "600789",
+    "strategy": "DMI+PSY超跌反弹",
+    "total_return_pct": 0.0,
+    "annual_return_pct": 0.0,
+    "sharpe_ratio": null,
+    "max_drawdown_pct": 0.0,
+    "final_value": 100000.0
+  },
+  {
+    "stock": "000001",
+    "strategy": "DMI+PSY超跌反弹",
+    "total_return_pct": 0.0,
+    "annual_return_pct": 0.0,
+    "sharpe_ratio": null,
+    "max_drawdown_pct": 0.0,
+    "final_value": 100000.0
+  },
+  {
+    "stock": "002446",
+    "strategy": "DMI+PSY超跌反弹",
+    "total_return_pct": 0.0,
+    "annual_return_pct": 0.0,
+    "sharpe_ratio": null,
+    "max_drawdown_pct": 0.0,
+    "final_value": 100000.0
+  },
+  {
+    "stock": "300750",
+    "strategy": "DMI+PSY超跌反弹",
+    "total_return_pct": 0.0,
+    "annual_return_pct": 0.0,
+    "sharpe_ratio": null,
+    "max_drawdown_pct": 0.0,
+    "final_value": 100000.0
+  },
+  {
+    "stock": "600519",
+    "strategy": "DMI+PSY超跌反弹",
+    "total_return_pct": 0.0,
+    "annual_return_pct": 0.0,
+    "sharpe_ratio": null,
+    "max_drawdown_pct": 0.0,
+    "final_value": 100000.0
+  },
+  {
+    "stock": "000858",
+    "strategy": "DMI+PSY超跌反弹",
+    "total_return_pct": 0.0,
+    "annual_return_pct": 0.0,
+    "sharpe_ratio": null,
+    "max_drawdown_pct": 0.0,
+    "final_value": 100000.0
+  },
+  {
+    "stock": "002415",
+    "strategy": "DMI+PSY超跌反弹",
+    "total_return_pct": 0.0,
+    "annual_return_pct": 0.0,
+    "sharpe_ratio": null,
+    "max_drawdown_pct": 0.0,
+    "final_value": 100000.0
+  },
+  {
+    "stock": "600036",
+    "strategy": "DMI+PSY超跌反弹",
+    "total_return_pct": 0.0,
+    "annual_return_pct": 0.0,
+    "sharpe_ratio": null,
+    "max_drawdown_pct": 0.0,
+    "final_value": 100000.0
+  },
+  {
+    "stock": "601318",
+    "strategy": "DMI+PSY超跌反弹",
+    "total_return_pct": 0.0,
+    "annual_return_pct": 0.0,
+    "sharpe_ratio": null,
+    "max_drawdown_pct": 0.0,
+    "final_value": 100000.0
+  },
+  {
+    "stock": "000333",
+    "strategy": "DMI+PSY超跌反弹",
+    "total_return_pct": 0.0,
+    "annual_return_pct": 0.0,
+    "sharpe_ratio": null,
+    "max_drawdown_pct": 0.0,
+    "final_value": 100000.0
+  },
+  {
+    "stock": "600789",
+    "strategy": "三分法7/13/20",
+    "total_return_pct": 10.9,
+    "annual_return_pct": 5.33,
+    "sharpe_ratio": 0.27,
+    "max_drawdown_pct": 7.31,
+    "final_value": 111513.61
+  },
+  {
+    "stock": "000001",
+    "strategy": "三分法7/13/20",
+    "total_return_pct": -0.6,
+    "annual_return_pct": -0.28,
+    "sharpe_ratio": -0.8,
+    "max_drawdown_pct": 6.88,
+    "final_value": 99402.86
+  },
+  {
+    "stock": "002446",
+    "strategy": "三分法7/13/20",
+    "total_return_pct": 11.38,
+    "annual_return_pct": 5.57,
+    "sharpe_ratio": 0.6,
+    "max_drawdown_pct": 5.75,
+    "final_value": 112053.16
+  },
+  {
+    "stock": "300750",
+    "strategy": "三分法7/13/20",
+    "total_return_pct": -3.02,
+    "annual_return_pct": -1.43,
+    "sharpe_ratio": -1.53,
+    "max_drawdown_pct": 6.71,
+    "final_value": 97027.99
+  },
+  {
+    "stock": "600519",
+    "strategy": "三分法7/13/20",
+    "total_return_pct": 0.68,
+    "annual_return_pct": 0.32,
+    "sharpe_ratio": -1.33,
+    "max_drawdown_pct": 3.35,
+    "final_value": 100681.29
+  },
+  {
+    "stock": "000858",
+    "strategy": "三分法7/13/20",
+    "total_return_pct": 1.72,
+    "annual_return_pct": 0.82,
+    "sharpe_ratio": -0.87,
+    "max_drawdown_pct": 8.66,
+    "final_value": 101735.27
+  },
+  {
+    "stock": "002415",
+    "strategy": "三分法7/13/20",
+    "total_return_pct": -5.1,
+    "annual_return_pct": -2.4,
+    "sharpe_ratio": -2.8,
+    "max_drawdown_pct": 8.55,
+    "final_value": 95025.56
+  },
+  {
+    "stock": "600036",
+    "strategy": "三分法7/13/20",
+    "total_return_pct": 1.22,
+    "annual_return_pct": 0.58,
+    "sharpe_ratio": -0.58,
+    "max_drawdown_pct": 4.51,
+    "final_value": 101231.35
+  },
+  {
+    "stock": "601318",
+    "strategy": "三分法7/13/20",
+    "total_return_pct": -2.88,
+    "annual_return_pct": -1.36,
+    "sharpe_ratio": -2.44,
+    "max_drawdown_pct": 6.25,
+    "final_value": 97158.87
+  },
+  {
+    "stock": "000333",
+    "strategy": "三分法7/13/20",
+    "total_return_pct": -5.69,
+    "annual_return_pct": -2.67,
+    "sharpe_ratio": -1.34,
+    "max_drawdown_pct": 6.98,
+    "final_value": 94472.37
+  },
+  {
+    "stock": "600789",
+    "strategy": "麻雀战术2.5%",
+    "total_return_pct": 21.45,
+    "annual_return_pct": 10.76,
+    "sharpe_ratio": 0.53,
+    "max_drawdown_pct": 26.46,
+    "final_value": 123928.12
+  },
+  {
+    "stock": "000001",
+    "strategy": "麻雀战术2.5%",
+    "total_return_pct": -45.38,
+    "annual_return_pct": -19.44,
+    "sharpe_ratio": -5.11,
+    "max_drawdown_pct": 42.38,
+    "final_value": 63520.93
+  },
+  {
+    "stock": "002446",
+    "strategy": "麻雀战术2.5%",
+    "total_return_pct": 58.26,
+    "annual_return_pct": 31.99,
+    "sharpe_ratio": 1.01,
+    "max_drawdown_pct": 40.79,
+    "final_value": 179074.37
+  },
+  {
+    "stock": "300750",
+    "strategy": "麻雀战术2.5%",
+    "total_return_pct": -79.28,
+    "annual_return_pct": -31.45,
+    "sharpe_ratio": -2.79,
+    "max_drawdown_pct": 63.53,
+    "final_value": 45258.17
+  },
+  {
+    "stock": "600519",
+    "strategy": "麻雀战术2.5%",
+    "total_return_pct": -14.92,
+    "annual_return_pct": -6.86,
+    "sharpe_ratio": -0.42,
+    "max_drawdown_pct": 31.92,
+    "final_value": 86141.21
+  },
+  {
+    "stock": "000858",
+    "strategy": "麻雀战术2.5%",
+    "total_return_pct": -25.29,
+    "annual_return_pct": -11.35,
+    "sharpe_ratio": -0.79,
+    "max_drawdown_pct": 37.14,
+    "final_value": 77656.21
+  },
+  {
+    "stock": "002415",
+    "strategy": "麻雀战术2.5%",
+    "total_return_pct": 6.16,
+    "annual_return_pct": 2.98,
+    "sharpe_ratio": 0.07,
+    "max_drawdown_pct": 31.34,
+    "final_value": 106356.27
+  },
+  {
+    "stock": "600036",
+    "strategy": "麻雀战术2.5%",
+    "total_return_pct": -31.71,
+    "annual_return_pct": -14.02,
+    "sharpe_ratio": -0.61,
+    "max_drawdown_pct": 38.63,
+    "final_value": 72825.96
+  },
+  {
+    "stock": "601318",
+    "strategy": "麻雀战术2.5%",
+    "total_return_pct": -15.65,
+    "annual_return_pct": -7.18,
+    "sharpe_ratio": -7.41,
+    "max_drawdown_pct": 31.34,
+    "final_value": 85514.08
+  },
+  {
+    "stock": "000333",
+    "strategy": "麻雀战术2.5%",
+    "total_return_pct": 7.25,
+    "annual_return_pct": 3.51,
+    "sharpe_ratio": 0.1,
+    "max_drawdown_pct": 20.21,
+    "final_value": 107515.54
+  },
+  {
+    "stock": "600789",
+    "strategy": "反弹量化",
+    "total_return_pct": -4.54,
+    "annual_return_pct": -2.14,
+    "sharpe_ratio": -0.89,
+    "max_drawdown_pct": 11.24,
+    "final_value": 95565.47
+  },
+  {
+    "stock": "000001",
+    "strategy": "反弹量化",
+    "total_return_pct": -5.74,
+    "annual_return_pct": -2.7,
+    "sharpe_ratio": -1.45,
+    "max_drawdown_pct": 8.5,
+    "final_value": 94424.65
+  },
+  {
+    "stock": "002446",
+    "strategy": "反弹量化",
+    "total_return_pct": -5.14,
+    "annual_return_pct": -2.42,
+    "sharpe_ratio": -0.49,
+    "max_drawdown_pct": 19.5,
+    "final_value": 94992.98
+  },
+  {
+    "stock": "300750",
+    "strategy": "反弹量化",
+    "total_return_pct": -18.51,
+    "annual_return_pct": -8.44,
+    "sharpe_ratio": -1.09,
+    "max_drawdown_pct": 24.96,
+    "final_value": 83099.02
+  },
+  {
+    "stock": "600519",
+    "strategy": "反弹量化",
+    "total_return_pct": -4.42,
+    "annual_return_pct": -2.08,
+    "sharpe_ratio": -1.64,
+    "max_drawdown_pct": 7.07,
+    "final_value": 95674.44
+  },
+  {
+    "stock": "000858",
+    "strategy": "反弹量化",
+    "total_return_pct": -6.36,
+    "annual_return_pct": -2.99,
+    "sharpe_ratio": -1.45,
+    "max_drawdown_pct": 11.96,
+    "final_value": 93835.93
+  },
+  {
+    "stock": "002415",
+    "strategy": "反弹量化",
+    "total_return_pct": -4.96,
+    "annual_return_pct": -2.34,
+    "sharpe_ratio": -2.68,
+    "max_drawdown_pct": 10.72,
+    "final_value": 95160.52
+  },
+  {
+    "stock": "600036",
+    "strategy": "反弹量化",
+    "total_return_pct": -4.4,
+    "annual_return_pct": -2.07,
+    "sharpe_ratio": -0.87,
+    "max_drawdown_pct": 9.44,
+    "final_value": 95697.19
+  },
+  {
+    "stock": "601318",
+    "strategy": "反弹量化",
+    "total_return_pct": -0.8,
+    "annual_return_pct": -0.38,
+    "sharpe_ratio": -1.16,
+    "max_drawdown_pct": 7.38,
+    "final_value": 99205.76
+  },
+  {
+    "stock": "000333",
+    "strategy": "反弹量化",
+    "total_return_pct": 3.02,
+    "annual_return_pct": 1.45,
+    "sharpe_ratio": -0.53,
+    "max_drawdown_pct": 7.24,
+    "final_value": 103068.27
   }
 ]

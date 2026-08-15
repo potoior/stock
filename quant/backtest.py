@@ -6,6 +6,7 @@ from strategies import (
     MACDStrategy, KDJStrategy, MAStopStrategy,
     BOLLStrategy, DMIStrategy, PSYStrategy, BIASStrategy, SARStrategy,
     MACDKDJBOLLStrategy, MACombinationStrategy, VolumePriceDivergenceStrategy,
+    DMIAndPSYStrategy, ThreeThirdStrategy, SparrowStrategy, BounceStrategy,
 )
 
 STOCKS = [
@@ -74,14 +75,18 @@ def main():
         (MACDStrategy, "MACD金叉死叉"),
         (KDJStrategy, "KDJ超买超卖"),
         (MAStopStrategy, "5日均线止损"),
-        (BOLLStrategy, "BOLL布林线"),
+        (BOLLStrategy, "BOLL布林线(26日)"),
         (DMIStrategy, "DMI趋势"),
         (PSYStrategy, "PSY心理线"),
-        (BIASStrategy, "乖离率BIAS"),
+        (BIASStrategy, "乖离率BIAS(±3%)"),
         (SARStrategy, "SAR止损"),
         (MACDKDJBOLLStrategy, "三指标共振"),
         (MACombinationStrategy, "均线组合"),
         (VolumePriceDivergenceStrategy, "量价背离"),
+        (DMIAndPSYStrategy, "DMI+PSY超跌反弹"),
+        (ThreeThirdStrategy, "三分法7/13/20"),
+        (SparrowStrategy, "麻雀战术2.5%"),
+        (BounceStrategy, "反弹量化"),
     ]
 
     all_results = []
