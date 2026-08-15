@@ -93,7 +93,9 @@ def compute_macd(df, fast=12, slow=26, signal=9):
 def compute_kdj(df, n=9, k1=3, d1=3):
     low_n = df["low"].rolling(n).min()
     high_n = df["high"].rolling(n).max()
-    rsv = (df["close"] - low_n) / (high_n - low_n) * 100
+    spread = (high_n - low_n).replace(0, np.nan)
+    rsv = (df["close"] - low_n) / spread * 100
+    rsv = rsv.fillna(50)
     k = rsv.ewm(com=k1 - 1, adjust=False).mean()
     d = k.ewm(com=d1 - 1, adjust=False).mean()
     j = 3 * k - 2 * d
@@ -163,17 +165,9 @@ def compute_sar(df, af_init=0.02, af_max=0.2):
     ep = np.zeros(n)
     sar[0] = close[0]
     trend[0] = 1 if close[0] >= close[min(4, n - 1)] else -1
-    for i in range(1, min(5, n)):
-        trend[i] = trend[0]
-        sar[i] = sar[0]
-        af[i] = af_init
-        ep[i] = close[0]
+    af[0] = af_init
+    ep[0] = high[0] if trend[0] >= 0 else low[0]
     for i in range(1, n):
-        if i == 1:
-            trend[1] = trend[0]
-            sar[1] = sar[0]
-            af[1] = af_init
-            ep[1] = close[0]
         if trend[i - 1] >= 0:
             sar[i] = sar[i - 1] + af[i - 1] * (ep[i - 1] - sar[i - 1])
             if i > 0:
@@ -442,15 +436,15 @@ def strategy_dmi(ctx, params):
     pdi, mdi, adx = ctx["pdi"].iloc[ctx["i"]], ctx["mdi"].iloc[ctx["i"]], ctx["adx"].iloc[ctx["i"]]
     if pd.isna(pdi):
         return "hold", "DMI数据不足"
-    if pdi < 50 and mdi < 50 and adx < 50:
-        return "hold", f"PDI({pdi:.0f}) MDI({mdi:.0f}) ADX({adx:.0f})均低于50，盘整观望"
+    if adx < 20:
+        return "hold", f"ADX({adx:.0f})<20，无明确趋势，盘整观望"
     if adx > 40 and pdi > mdi:
         return "buy", f"ADX({adx:.0f})高+PDI({pdi:.0f})>MDI({mdi:.0f})，强多头"
     if adx > 40 and pdi < mdi:
         return "sell", f"ADX({adx:.0f})高+MDI({mdi:.0f})>PDI({pdi:.0f})，强空头"
     if pdi > mdi:
-        return "buy", f"PDI({pdi:.1f})>MDI({mdi:.1f})，多方主导"
-    return "sell", f"MDI({mdi:.1f})>PDI({pdi:.1f})，空方主导"
+        return "buy", f"PDI({pdi:.1f})>MDI({mdi:.1f})，多方主导(ADX={adx:.0f})"
+    return "sell", f"MDI({mdi:.1f})>PDI({pdi:.1f})，空方主导(ADX={adx:.0f})"
 
 
 def strategy_psy(ctx, params):
