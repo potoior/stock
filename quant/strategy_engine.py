@@ -352,9 +352,9 @@ def save_strategies(strategies):
 # ---------------- 每个策略一个可独立开关/调参的评估函数 ----------------
 
 def _cross_series(series):
-    diff = series.diff()
-    golden = (diff > 0) & (diff.shift(1) <= 0)
-    death = (diff < 0) & (diff.shift(1) >= 0)
+    prev = series.shift(1)
+    golden = (series > 0) & (prev <= 0)
+    death = (series < 0) & (prev >= 0)
     return golden, death
 
 
@@ -365,9 +365,11 @@ def strategy_macd(ctx, params):
     d, e = diff.iloc[i], dea.iloc[i]
     pd_, pe = diff.iloc[i - 1], dea.iloc[i - 1]
     g, dth = _cross_series(diff - dea)
-    if g.iloc[i] and d > 0 and e > 0:
+    below_zero = d < 0 and e < 0
+    above_zero = d > 0 and e > 0
+    if g.iloc[i] and above_zero:
         return "buy", f"零上金叉，DIFF({d:.2f})上穿DEA({e:.2f})，锦上添花"
-    if g.iloc[i] and d < 0 and e < 0:
+    if g.iloc[i] and below_zero:
         pc = 0
         for t in range(i - 20, i):
             if t >= 1 and diff.iloc[t] > dea.iloc[t] and diff.iloc[t - 1] < dea.iloc[t - 1]:
@@ -376,15 +378,21 @@ def strategy_macd(ctx, params):
         return "buy", f"零下金叉，DIFF({d:.2f})上穿DEA({e:.2f}){more}"
     if g.iloc[i]:
         return "buy", f"金叉，DIFF({d:.2f})上穿DEA({e:.2f})"
-    if dth.iloc[i] and d < 0 and e < 0:
+    if dth.iloc[i] and below_zero:
         return "sell", f"零下死叉，DIFF({d:.2f})下穿DEA({e:.2f})，继续下跌"
-    if dth.iloc[i]:
+    if dth.iloc[i] and above_zero:
         return "hold", f"零上死叉，多头回调，观望"
-    if pd_ <= pe and d > e:
-        return "buy", f"DIFF({d:.2f})在DEA({e:.2f})上方，多头运行"
-    if pd_ >= pe and d < e:
-        return "sell", f"DIFF({d:.2f})在DEA({e:.2f})下方，空头运行"
-    return "hold", f"DIFF({d:.2f}) DEA({e:.2f})，方向不明"
+    if dth.iloc[i]:
+        return "sell", f"死叉，DIFF({d:.2f})下穿DEA({e:.2f})"
+    if d > e:
+        if below_zero:
+            return "buy", f"零下金叉后运行，DIFF({d:.2f})>DEA({e:.2f})，多头排列"
+        return "buy", f"DIFF({d:.2f})>DEA({e:.2f})，多头运行"
+    if d < e:
+        if below_zero:
+            return "sell", f"零下空头，DIFF({d:.2f})<DEA({e:.2f})"
+        return "sell", f"DIFF({d:.2f})<DEA({e:.2f})，空头运行"
+    return "hold", f"DIFF({d:.2f})≈DEA({e:.2f})，方向不明"
 
 
 def strategy_kdj(ctx, params):
