@@ -169,11 +169,9 @@ def analyze_stock(code):
     signals = []
     def add(name, signal, reason):
         signals.append({"name": name, "signal": signal, "reason": reason})
+
+    # 1. MACD金叉死叉
     try:
-        _ = macd_diff.iloc[i]
-        _ = macd_diff.iloc[i - 1]
-        _ = macd_dea.iloc[i]
-        _ = macd_dea.iloc[i - 1]
         diff = macd_diff.iloc[i]
         dea = macd_dea.iloc[i]
         prev_diff = macd_diff.iloc[i - 1]
@@ -183,40 +181,45 @@ def analyze_stock(code):
         above_zero = diff > 0 and dea > 0
         below_zero = diff < 0 and dea < 0
         if golden and above_zero:
-            add("MACD金叉", "buy", f"零上金叉，DIFF({diff:.2f})上穿DEA({dea:.2f})，锦上添花")
+            add("MACD金叉死叉", "buy", f"零上金叉，DIFF({diff:.2f})上穿DEA({dea:.2f})，锦上添花")
         elif golden and below_zero:
             prev_cross = 0
             for t in range(i - 20, i):
                 if t >= 1 and macd_diff.iloc[t] > macd_dea.iloc[t] and macd_diff.iloc[t - 1] < macd_dea.iloc[t - 1]:
                     prev_cross += 1
             if prev_cross >= 1:
-                add("MACD金叉", "buy", f"多次零下金叉，DIFF({diff:.2f})上穿DEA({dea:.2f})，可靠性高")
+                add("MACD金叉死叉", "buy", f"多次零下金叉，DIFF({diff:.2f})上穿DEA({dea:.2f})，可靠性高")
             else:
-                add("MACD金叉", "buy", f"零下金叉，DIFF({diff:.2f})上穿DEA({dea:.2f})，可能反弹")
+                add("MACD金叉死叉", "buy", f"零下金叉，DIFF({diff:.2f})上穿DEA({dea:.2f})，可能反弹")
         elif golden:
-            add("MACD金叉", "buy", f"金叉，DIFF({diff:.2f})上穿DEA({dea:.2f})")
-        if death and above_zero:
-            add("MACD死叉", "hold", f"零上死叉，多头回调，幅度不会太大，观望")
-        if death and below_zero:
-            add("MACD死叉", "sell", f"零下死叉，DIFF({diff:.2f})下穿DEA({dea:.2f})，继续下跌")
+            add("MACD金叉死叉", "buy", f"金叉，DIFF({diff:.2f})上穿DEA({dea:.2f})")
+        elif death and below_zero:
+            add("MACD金叉死叉", "sell", f"零下死叉，DIFF({diff:.2f})下穿DEA({dea:.2f})，继续下跌")
+        elif death and above_zero:
+            add("MACD金叉死叉", "hold", f"零上死叉，多头回调，幅度不会太大，观望")
+        else:
+            add("MACD金叉死叉", "hold", f"无金叉死叉，DIFF({diff:.2f}) DEA({dea:.2f})")
     except Exception:
-        pass
+        add("MACD金叉死叉", "hold", "数据不足")
+
+    # 2. KDJ超买超卖
     try:
         k_val = k.iloc[i]
         d_val = d.iloc[i]
         if k_val < 10 and d_val < 20:
-            add("KDJ超卖", "buy", f"超卖区金叉，K={k_val:.1f} D={d_val:.1f}，超卖严重")
-    except Exception:
-        pass
-    try:
-        k_val = k.iloc[i]
-        d_val = d.iloc[i]
-        if k_val > 90 and d_val > 80:
-            add("KDJ超买", "sell", f"超买区死叉，K={k_val:.1f} D={d_val:.1f}，超买严重")
+            add("KDJ超买超卖", "buy", f"超卖区金叉，K={k_val:.1f} D={d_val:.1f}，超卖严重")
+        elif k_val > 90 and d_val > 80:
+            add("KDJ超买超卖", "sell", f"超买区死叉，K={k_val:.1f} D={d_val:.1f}，超买严重")
         elif k_val > 80:
-            add("KDJ超买", "sell", f"K={k_val:.1f}，超买区")
+            add("KDJ超买超卖", "sell", f"K={k_val:.1f}，超买区")
+        elif k_val < 20:
+            add("KDJ超买超卖", "hold", f"K={k_val:.1f} 超卖区，等待金叉确认")
+        else:
+            add("KDJ超买超卖", "hold", f"K={k_val:.1f}，中位运行，观望")
     except Exception:
-        pass
+        add("KDJ超买超卖", "hold", "数据不足")
+
+    # 3. 5日均线止损
     try:
         ma5 = df["ma5"].iloc[i]
         if pd.notna(ma5):
@@ -224,8 +227,12 @@ def analyze_stock(code):
                 add("5日均线止损", "buy", f"价格({price:.2f})站上MA5({ma5:.2f})")
             else:
                 add("5日均线止损", "sell", f"价格({price:.2f})跌破MA5({ma5:.2f})")
+        else:
+            add("5日均线止损", "hold", "MA5数据不足")
     except Exception:
-        pass
+        add("5日均线止损", "hold", "数据不足")
+
+    # 4. BOLL布林线
     try:
         bu = boll_u.iloc[i]
         bm = boll_m.iloc[i]
@@ -235,20 +242,32 @@ def analyze_stock(code):
         elif pd.notna(bu) and price >= bu:
             add("BOLL布林线", "sell", f"价格({price:.2f})触及上轨({bu:.2f})")
         elif pd.notna(bm) and price > bm:
-            add("BOLL中轨", "buy", f"价格({price:.2f})在中轨({bm:.2f})上方，可操作趋势")
+            add("BOLL布林线", "buy", f"价格({price:.2f})在中轨({bm:.2f})上方，可操作趋势")
         elif pd.notna(bm):
-            add("BOLL中轨", "sell", f"价格({price:.2f})在中轨({bm:.2f})下方，不建议操作")
+            add("BOLL布林线", "sell", f"价格({price:.2f})在中轨({bm:.2f})下方，不建议操作")
+        else:
+            add("BOLL布林线", "hold", "BOLL数据不足")
     except Exception:
-        pass
+        add("BOLL布林线", "hold", "数据不足")
+
+    # 5. DMI趋势（含四线低于50的盘整判断）
     try:
         pdi_v = pdi.iloc[i]
         mdi_v = mdi.iloc[i]
-        if pd.notna(pdi_v) and pd.notna(mdi_v) and pdi_v > mdi_v:
-            add("DMI趋势", "buy", f"PDI({pdi_v:.1f})>MDI({mdi_v:.1f})，多方主导")
-        elif pd.notna(pdi_v) and pd.notna(mdi_v):
-            add("DMI趋势", "sell", f"MDI({mdi_v:.1f})>PDI({pdi_v:.1f})，空方主导")
+        adx_v = adx.iloc[i]
+        if pd.notna(pdi_v) and pd.notna(mdi_v) and pd.notna(adx_v):
+            if pdi_v < 50 and mdi_v < 50 and adx_v < 50:
+                add("DMI趋势", "hold", f"四线均低于50({pdi_v:.0f}/{mdi_v:.0f}/{adx_v:.0f})，盘整观望")
+            elif pdi_v > mdi_v:
+                add("DMI趋势", "buy", f"PDI({pdi_v:.1f})>MDI({mdi_v:.1f})，多方主导")
+            else:
+                add("DMI趋势", "sell", f"MDI({mdi_v:.1f})>PDI({pdi_v:.1f})，空方主导")
+        else:
+            add("DMI趋势", "hold", "DMI数据不足")
     except Exception:
-        pass
+        add("DMI趋势", "hold", "数据不足")
+
+    # 6. PSY心理线
     try:
         psy_v = psy.iloc[i]
         if pd.notna(psy_v):
@@ -256,8 +275,14 @@ def analyze_stock(code):
                 add("PSY心理线", "buy", f"PSY={psy_v:.0f}，超卖区，市场悲观，有望反弹")
             elif psy_v >= 75:
                 add("PSY心理线", "sell", f"PSY={psy_v:.0f}，超买区，短期获利盘较多")
+            else:
+                add("PSY心理线", "hold", f"PSY={psy_v:.0f}，25-75正常区间")
+        else:
+            add("PSY心理线", "hold", "PSY数据不足")
     except Exception:
-        pass
+        add("PSY心理线", "hold", "数据不足")
+
+    # 7. BIAS乖离率
     try:
         bias_v = bias.iloc[i]
         if pd.notna(bias_v):
@@ -265,8 +290,14 @@ def analyze_stock(code):
                 add("BIAS乖离率", "buy", f"BIAS={bias_v:.1f}%，超跌")
             elif bias_v >= 3:
                 add("BIAS乖离率", "sell", f"BIAS={bias_v:.1f}%，超涨，注意回调")
+            else:
+                add("BIAS乖离率", "hold", f"BIAS={bias_v:.1f}%，±3%内正常")
+        else:
+            add("BIAS乖离率", "hold", "BIAS数据不足")
     except Exception:
-        pass
+        add("BIAS乖离率", "hold", "数据不足")
+
+    # 8. SAR止损
     try:
         sar_v = sar[i]
         if sar_v > 0:
@@ -274,66 +305,12 @@ def analyze_stock(code):
                 add("SAR止损", "buy", f"价格({price:.2f})>SAR({sar_v:.2f})，翻红")
             else:
                 add("SAR止损", "sell", f"价格({price:.2f})<SAR({sar_v:.2f})，翻绿")
+        else:
+            add("SAR止损", "hold", "SAR数据不足")
     except Exception:
-        pass
-    try:
-        bu = bbiboll_u.iloc[i]
-        bm = bbiboll_m.iloc[i]
-        bl = bbiboll_l.iloc[i]
-        if pd.notna(bm):
-            if price >= bu:
-                add("BBIBOLL", "sell", f"价格({price:.2f})突破上轨({bu:.2f})，大概率回调")
-            elif price <= bl:
-                add("BBIBOLL", "buy", f"价格({price:.2f})跌破下轨({bl:.2f})，大概率反弹")
-            elif price > bm:
-                add("BBIBOLL", "buy", f"价格({price:.2f})在BBI中轨({bm:.2f})上方，多方强势")
-            else:
-                add("BBIBOLL", "sell", f"价格({price:.2f})在BBI中轨({bm:.2f})下方，空方强势")
-    except Exception:
-        pass
-    try:
-        tw = tower.iloc[i]
-        pre = tower.iloc[i - 1] if i > 0 else 0
-        if tw == 1 and pre == -1:
-            add("宝塔线", "buy", f"翻红，价格站上前收盘，买入")
-        elif tw == -1 and pre == 1:
-            add("宝塔线", "sell", f"翻绿，价格跌破前收盘，卖出")
-        elif tw == 1:
-            add("宝塔线", "buy", f"连续红柱，持仓")
-        elif tw == -1:
-            add("宝塔线", "sell", f"连续绿柱，持续下跌")
-    except Exception:
-        pass
-    try:
-        ma5_v = df["ma5"].iloc[i]
-        ma10_v = df["ma10"].iloc[i]
-        ma60_v = df["ma60"].iloc[i]
-        if pd.notna(ma5_v) and pd.notna(ma10_v) and pd.notna(ma60_v):
-            if price > ma5_v > ma10_v > ma60_v:
-                add("均线组合", "buy", f"多头排列，{ma5_v:.2f}>{ma10_v:.2f}>{ma60_v:.2f}")
-            elif price < ma5_v or price < ma10_v:
-                add("均线组合", "sell", f"均线走坏，价格({price:.2f})跌破MA5({ma5_v:.2f})或MA10({ma10_v:.2f})")
-    except Exception:
-        pass
-    try:
-        ma5_v = df["ma5"].iloc[i]
-        ma10_v = df["ma10"].iloc[i]
-        if pd.notna(ma5_v) and pd.notna(ma10_v):
-            if ma5_v > ma10_v:
-                add("二线法", "buy", f"MA5({ma5_v:.2f})>MA10({ma10_v:.2f})，短线可操作")
-            else:
-                add("二线法", "sell", f"MA5({ma5_v:.2f})<MA10({ma10_v:.2f})，清仓观望")
-    except Exception:
-        pass
-    try:
-        ma60_v = df["ma60"].iloc[i]
-        if pd.notna(ma60_v):
-            if price > ma60_v:
-                add("60日生命线", "buy", f"价格({price:.2f})在MA60({ma60_v:.2f})上方，积极做多")
-            else:
-                add("60日生命线", "sell", f"价格({price:.2f})在MA60({ma60_v:.2f})下方，空头市场")
-    except Exception:
-        pass
+        add("SAR止损", "hold", "数据不足")
+
+    # 9. 三指标共振
     try:
         diff = macd_diff.iloc[i]
         dea = macd_dea.iloc[i]
@@ -347,11 +324,31 @@ def analyze_stock(code):
         bm = boll_m.iloc[i]
         macd_golden = prev_diff <= prev_dea and diff > dea
         kdj_golden = k_prev <= d_prev and k_val > d_val
-        if pd.notna(ma5_v) and pd.notna(bm):
-            if macd_golden and kdj_golden and price > bm and price > ma5_v:
-                add("三指标共振", "buy", f"MACD金叉+KDJ金叉+BOLL中轨+站上MA5({ma5_v:.2f})")
+        if pd.notna(ma5_v) and pd.notna(bm) and macd_golden and kdj_golden and price > bm and price > ma5_v:
+            add("三指标共振", "buy", f"MACD金叉+KDJ金叉+BOLL中轨+站上MA5({ma5_v:.2f})")
+        else:
+            add("三指标共振", "hold", "MACD+KDJ+BOLL+MA5未同向共振")
     except Exception:
-        pass
+        add("三指标共振", "hold", "数据不足")
+
+    # 10. 均线组合(5/10/60)
+    try:
+        ma5_v = df["ma5"].iloc[i]
+        ma10_v = df["ma10"].iloc[i]
+        ma60_v = df["ma60"].iloc[i]
+        if pd.notna(ma5_v) and pd.notna(ma10_v) and pd.notna(ma60_v):
+            if price > ma5_v > ma10_v > ma60_v:
+                add("均线组合", "buy", f"多头排列，{ma5_v:.2f}>{ma10_v:.2f}>{ma60_v:.2f}")
+            elif price < ma5_v or price < ma10_v:
+                add("均线组合", "sell", f"均线走坏，价格({price:.2f})跌破MA5({ma5_v:.2f})或MA10({ma10_v:.2f})")
+            else:
+                add("均线组合", "hold", "均线未成多头排列也未见走坏")
+        else:
+            add("均线组合", "hold", "均线数据不足")
+    except Exception:
+        add("均线组合", "hold", "数据不足")
+
+    # 11. 量价背离
     try:
         lookback = 10
         if i >= lookback:
@@ -361,16 +358,30 @@ def analyze_stock(code):
             vol_now = df["volume"].iloc[i]
             if price >= recent_high and vol_now < avg_vol * 0.7:
                 add("量价背离", "sell", f"价格创新高但量萎缩{vol_now:.0f}<均量{avg_vol:.0f}，无量上涨需警惕")
+            elif price >= recent_high and vol_now > avg_vol * 1.3:
+                add("量价背离", "buy", f"价格创新高且放量{vol_now:.0f}>均量{avg_vol:.0f}，量价配合")
+            else:
+                add("量价背离", "hold", "价格未创新高，无量价背离")
+        else:
+            add("量价背离", "hold", "数据不足")
     except Exception:
-        pass
+        add("量价背离", "hold", "数据不足")
+
+    # 12. DMI+PSY超跌反弹
     try:
         pdi_v = pdi.iloc[i]
         psy_v = psy.iloc[i]
         if pd.notna(pdi_v) and pd.notna(psy_v):
             if pdi_v < 5 and psy_v <= 25:
                 add("DMI+PSY超跌", "buy", f"PDI({pdi_v:.1f})<5且PSY({psy_v:.0f})≤25，超跌反弹")
+            else:
+                add("DMI+PSY超跌", "hold", f"PDI({pdi_v:.1f})/PSY({psy_v:.0f})未达超跌极值")
+        else:
+            add("DMI+PSY超跌", "hold", "数据不足")
     except Exception:
-        pass
+        add("DMI+PSY超跌", "hold", "数据不足")
+
+    # 13. 三分法(7/13/20)
     try:
         ma7_v = df["ma7"].iloc[i]
         ma13_v = df["ma13"].iloc[i]
@@ -380,8 +391,28 @@ def analyze_stock(code):
                 add("三分法", "buy", f"站上7日({ma7_v:.2f})/13日({ma13_v:.2f})/20日({ma20_v:.2f})线")
             elif price < ma7_v:
                 add("三分法", "sell", f"跌破7日线({ma7_v:.2f})，注意分批减仓")
+            else:
+                add("三分法", "hold", f"价格({price:.2f})在7/13/20日线之间")
+        else:
+            add("三分法", "hold", "均线数据不足")
     except Exception:
-        pass
+        add("三分法", "hold", "数据不足")
+
+    # 14. 麻雀战术（2.5%止盈纪律）
+    try:
+        if i >= 5:
+            low5 = close.iloc[i - 5:i].min()
+            pnl_from_low = (price - low5) / low5 * 100 if low5 > 0 else 0
+            if pnl_from_low >= 2.5:
+                add("麻雀战术", "sell", f"自5日低点({low5:.2f})已涨{pnl_from_low:.1f}%≥2.5%，见好就收")
+            else:
+                add("麻雀战术", "hold", f"自5日低点仅涨{pnl_from_low:.1f}%，未达2.5%止盈线")
+        else:
+            add("麻雀战术", "hold", "数据不足")
+    except Exception:
+        add("麻雀战术", "hold", "数据不足")
+
+    # 15. 反弹量化
     try:
         if i >= 3:
             prev_close = close.iloc[i - 1]
@@ -394,17 +425,77 @@ def analyze_stock(code):
                 vol_change = (vol_now - prev_volume) / prev_volume * 100 if prev_volume > 0 else 0
                 if today_change > abs(yesterday_change) * 0.5 and vol_change > 20:
                     add("反弹量化", "buy", f"涨幅{today_change:.1f}%>昨日跌幅{abs(yesterday_change):.1f}%×50%，放量{vol_change:.0f}%")
+                else:
+                    add("反弹量化", "hold", f"今日反弹{today_change:.1f}%未达昨日跌幅{abs(yesterday_change):.1f}%的50%或未放量")
+            else:
+                add("反弹量化", "hold", "昨日非下跌，无反弹条件")
+        else:
+            add("反弹量化", "hold", "数据不足")
     except Exception:
-        pass
+        add("反弹量化", "hold", "数据不足")
+
+    # 16. 二线法(5/10)
     try:
-        pdi_v = pdi.iloc[i]
-        mdi_v = mdi.iloc[i]
-        adx_v = adx.iloc[i]
-        if pd.notna(pdi_v) and pd.notna(mdi_v) and pd.notna(adx_v):
-            if pdi_v < 50 and mdi_v < 50 and adx_v < 50:
-                add("DMI盘整", "hold", f"四条线均在50以下，趋势不明朗，观望")
+        ma5_v = df["ma5"].iloc[i]
+        ma10_v = df["ma10"].iloc[i]
+        if pd.notna(ma5_v) and pd.notna(ma10_v):
+            if ma5_v > ma10_v:
+                add("二线法", "buy", f"MA5({ma5_v:.2f})>MA10({ma10_v:.2f})，短线可操作")
+            else:
+                add("二线法", "sell", f"MA5({ma5_v:.2f})<MA10({ma10_v:.2f})，清仓观望")
+        else:
+            add("二线法", "hold", "均线数据不足")
     except Exception:
-        pass
+        add("二线法", "hold", "数据不足")
+
+    # 17. 60日生命线
+    try:
+        ma60_v = df["ma60"].iloc[i]
+        if pd.notna(ma60_v):
+            if price > ma60_v:
+                add("60日生命线", "buy", f"价格({price:.2f})在MA60({ma60_v:.2f})上方，积极做多")
+            else:
+                add("60日生命线", "sell", f"价格({price:.2f})在MA60({ma60_v:.2f})下方，空头市场")
+        else:
+            add("60日生命线", "hold", "MA60数据不足")
+    except Exception:
+        add("60日生命线", "hold", "数据不足")
+
+    # 18. BBIBOLL多空布林
+    try:
+        bu = bbiboll_u.iloc[i]
+        bm = bbiboll_m.iloc[i]
+        bl = bbiboll_l.iloc[i]
+        if pd.notna(bm):
+            if price >= bu:
+                add("BBIBOLL", "sell", f"价格({price:.2f})突破上轨({bu:.2f})，大概率回调")
+            elif price <= bl:
+                add("BBIBOLL", "buy", f"价格({price:.2f})跌破下轨({bl:.2f})，大概率反弹")
+            elif price > bm:
+                add("BBIBOLL", "buy", f"价格({price:.2f})在BBI中轨({bm:.2f})上方，多方强势")
+            else:
+                add("BBIBOLL", "sell", f"价格({price:.2f})在BBI中轨({bm:.2f})下方，空方强势")
+        else:
+            add("BBIBOLL", "hold", "BBIBOLL数据不足")
+    except Exception:
+        add("BBIBOLL", "hold", "数据不足")
+
+    # 19. 宝塔线TOWER
+    try:
+        tw = tower.iloc[i]
+        pre = tower.iloc[i - 1] if i > 0 else 0
+        if tw == 1 and pre == -1:
+            add("宝塔线", "buy", f"翻红，价格站上前收盘，买入")
+        elif tw == -1 and pre == 1:
+            add("宝塔线", "sell", f"翻绿，价格跌破前收盘，卖出")
+        elif tw == 1:
+            add("宝塔线", "buy", f"连续红柱，持仓")
+        elif tw == -1:
+            add("宝塔线", "sell", f"连续绿柱，持续下跌")
+        else:
+            add("宝塔线", "hold", "宝塔线走平")
+    except Exception:
+        add("宝塔线", "hold", "数据不足")
     buy_count = sum(1 for s in signals if s["signal"] == "buy")
     sell_count = sum(1 for s in signals if s["signal"] == "sell")
     hold_count = sum(1 for s in signals if s["signal"] == "hold")
