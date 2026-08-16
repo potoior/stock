@@ -89,8 +89,10 @@
         }
         .switch input:checked + .slider { background: #2e7d32; }
         .switch input:checked + .slider:before { transform: translateX(18px); }
-        .strategy-row { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid #f0f0f0; flex-wrap: wrap; }
+        .strategy-row { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid #f0f0f0; flex-wrap: wrap; justify-content: space-between; }
         .strategy-row:last-child { border-bottom: none; }
+        .strategy-row .left { display: flex; align-items: center; gap: 12px; }
+        .strategy-row .right { display: flex; align-items: center; gap: 8px; margin-left: auto; flex-wrap: wrap; }
         .strategy-name { font-weight: 600; font-size: 13px; min-width: 140px; }
         .strategy-detail { padding: 10px 14px; margin: 0 0 12px 52px; background: #fafafa; border: 1px solid #eee; border-radius: 8px; }
         .strategy-desc { font-size: 12px; color: #888; flex: 1; min-width: 180px; }
@@ -320,30 +322,34 @@
             <div v-if="!builtinStrategies.length" class="empty">暂无策略</div>
             <div v-for="s in builtinStrategies" :key="s.id" style="border-bottom:1px solid #f0f0f0;">
                 <div class="strategy-row">
-                    <label class="switch" :title="s.enabled ? '点击关闭' : '点击开启'">
-                        <input type="checkbox" :checked="s.enabled" @change="toggleStrategy(s)">
-                        <span class="slider"></span>
-                    </label>
-                    <span class="strategy-name">{{ s.name }}</span>
-                    <div class="param-group">
-                        <template v-if="s.param_defs">
-                            <template v-for="(spec, k) in s.param_defs" :key="k">
-                                <span :title="spec.hint">{{ spec.label }}:</span>
-                                <input class="input sm" :value="spec.value"
-                                       @change="updateParam(s, k, $event.target.value)"
-                                       :title="spec.hint">
-                            </template>
-                        </template>
-                        <template v-else>
-                            <template v-for="(v, k) in s.params" :key="k">
-                                <span>{{ paramName(k) }}:</span>
-                                <input class="input sm" :value="v" @change="updateParam(s, k, $event.target.value)">
-                            </template>
-                        </template>
+                    <div class="left">
+                        <label class="switch" :title="s.enabled ? '点击关闭' : '点击开启'">
+                            <input type="checkbox" :checked="s.enabled" @change="toggleStrategy(s)">
+                            <span class="slider"></span>
+                        </label>
+                        <span class="strategy-name">{{ s.name }}</span>
                     </div>
-                    <button class="button sm ghost" @click="s.showDetail = !s.showDetail">
-                        {{ s.showDetail ? '▲ 收起' : '▼ 详情' }}
-                    </button>
+                    <div class="right">
+                        <div class="param-group">
+                            <template v-if="s.param_defs">
+                                <template v-for="(spec, k) in s.param_defs" :key="k">
+                                    <span :title="spec.hint">{{ spec.label }}:</span>
+                                    <input class="input sm" :value="spec.value"
+                                           @change="updateParam(s, k, $event.target.value)"
+                                           :title="spec.hint">
+                                </template>
+                            </template>
+                            <template v-else>
+                                <template v-for="(v, k) in s.params" :key="k">
+                                    <span>{{ paramName(k) }}:</span>
+                                    <input class="input sm" :value="v" @change="updateParam(s, k, $event.target.value)">
+                                </template>
+                            </template>
+                        </div>
+                        <button class="button sm ghost" @click="s.showDetail = !s.showDetail">
+                            {{ s.showDetail ? '▲ 收起' : '▼ 详情' }}
+                        </button>
+                    </div>
                 </div>
                 <div v-if="s.showDetail" class="strategy-detail">
                     <pre style="white-space:pre-wrap;font-family:inherit;font-size:12px;color:#555;line-height:1.7;">{{ s.detail }}</pre>
@@ -355,18 +361,22 @@
             <div class="card-title">✨ 自定义策略（{{ customStrategies.length }}）</div>
             <div v-if="!customStrategies.length" class="empty">还没有自定义策略，点击上方"添加策略"创建</div>
             <div class="strategy-row" v-for="s in customStrategies" :key="s.id">
-                <label class="switch">
-                    <input type="checkbox" :checked="s.enabled" @change="toggleStrategy(s)">
-                    <span class="slider"></span>
-                </label>
-                <span class="strategy-name">{{ s.name }}</span>
-                <span class="strategy-desc" style="color:#555;">
-                    <div style="font-size:12px;"><span style="color:#2e7d32;">买:</span> {{ s.buy_rule || (s.buy && s.buy.length ? s.buy.map(c => metricName(c.metric) + ' ' + opText(c.op) + ' ' + c.threshold).join(' 且 ') : '-') }}</div>
-                    <div style="font-size:12px;"><span style="color:#d32f2f;">卖:</span> {{ s.sell_rule || (s.sell && s.sell.length ? s.sell.map(c => metricName(c.metric) + ' ' + opText(c.op) + ' ' + c.threshold).join(' 且 ') : '-') }}</div>
-                </span>
-                <span class="badge badge-neutral">🤖 AI判定</span>
-                <button class="button sm ghost" @click="openRuleEditor(s)">编辑</button>
-                <button class="button sm danger" @click="deleteStrategy(s)">删除</button>
+                <div class="left">
+                    <label class="switch">
+                        <input type="checkbox" :checked="s.enabled" @change="toggleStrategy(s)">
+                        <span class="slider"></span>
+                    </label>
+                    <span class="strategy-name">{{ s.name }}</span>
+                </div>
+                <div class="right">
+                    <span class="strategy-desc" style="color:#555;">
+                        <div style="font-size:12px;"><span style="color:#2e7d32;">买:</span> {{ s.buy_rule || (s.buy && s.buy.length ? s.buy.map(c => metricName(c.metric) + ' ' + opText(c.op) + ' ' + c.threshold).join(' 且 ') : '-') }}</div>
+                        <div style="font-size:12px;"><span style="color:#d32f2f;">卖:</span> {{ s.sell_rule || (s.sell && s.sell.length ? s.sell.map(c => metricName(c.metric) + ' ' + opText(c.op) + ' ' + c.threshold).join(' 且 ') : '-') }}</div>
+                    </span>
+                    <span class="badge badge-neutral">🤖 AI判定</span>
+                    <button class="button sm ghost" @click="openRuleEditor(s)">编辑</button>
+                    <button class="button sm danger" @click="deleteStrategy(s)">删除</button>
+                </div>
             </div>
         </div>
     </div>
