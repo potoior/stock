@@ -177,7 +177,18 @@
     <!-- ============ 自选股 ============ -->
     <div v-show="tab === 'watchlist'" class="container">
         <div class="toolbar">
-            <input class="input" v-model="newCode" placeholder="输入股票代码，如 600789" @keyup.enter="addWatch">
+            <div style="position:relative;">
+                <input class="input" v-model="newCode" placeholder="输入代码或名称，如 600789 或 鲁抗"
+                       @keyup="searchStock(newCode)" @keyup.enter="addWatch" @focus="showSearch = searchResults.length > 0"
+                       @blur="setTimeout(() => showSearch = false, 200)">
+                <div v-if="showSearch" style="position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid #d0d0d0;border-radius:6px;z-index:50;max-height:200px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,0.1);">
+                    <div v-for="item in searchResults" :key="item.code" @mousedown="pickSearchResult(item)"
+                         style="padding:8px 12px;cursor:pointer;border-bottom:1px solid #f0f0f0;font-size:13px;"
+                         onmouseover="this.style.background='#f5f5f5'" onmouseout="this.style.background='#fff'">
+                        <b>{{ item.code }}</b> {{ item.name }}
+                    </div>
+                </div>
+            </div>
             <button class="button" @click="addWatch">➕ 添加自选</button>
             <button class="button ghost" @click="loadWatchlist">🔄 刷新</button>
             <span class="hint">沪市6开头 / 深市0、3开头 / ETF 5开头</span>
@@ -436,9 +447,29 @@
             <div id="agentChart" class="chart"></div>
         </div>
 
+        <!-- 本轮决策摘要 -->
+        <div class="card" v-if="agent.last_cycle_summary">
+            <div class="card-title">🔔 最新一轮决策</div>
+            <div style="font-size:13px;color:#333;padding:8px 0;">{{ agent.last_cycle_summary }}</div>
+        </div>
+
+        <!-- 决策日志 -->
+        <div class="card">
+            <div class="card-title">📝 决策日志</div>
+            <div v-if="!agentLogs.length" class="empty">暂无日志</div>
+            <div v-for="(log, idx) in agentLogs" :key="idx" class="signal-card" style="font-size:12px;">
+                <span style="color:#888;">{{ log.ts }}</span>
+                <span class="badge" :class="log.agent_type === 'ai' ? 'badge-neutral' : 'badge-neutral'">{{ log.agent_type === 'ai' ? '🤖' : '📐' }}</span>
+                <b>{{ log.name }}</b>({{ log.code }})
+                <span :class="log.action === 'buy' ? 'up' : (log.action === 'sell' ? 'down' : '')">{{ log.action }}</span>
+                <span v-if="log.qty">×{{ log.qty }}股 @{{ log.price?.toFixed(2) }}</span>
+                <span style="color:#555;">{{ log.reason }}</span>
+            </div>
+        </div>
+
         <!-- 交易记录 -->
         <div class="card">
-            <div class="card-title">📋 交易记录</div>
+            <div class="card-title">📋 交易记录 <button class="button sm ghost" style="margin-left:auto;" @click="exportTrades" v-if="agentTrades.length">📥 导出CSV</button></div>
             <table>
                 <thead>
                     <tr><th>时间</th><th>类型</th><th>代码</th><th>操作</th><th>价格</th><th>数量</th><th>金额</th><th>盈亏</th></tr>
@@ -503,7 +534,7 @@ createApp({
         return {
             tab: 'watchlist',
             // watchlist
-            watchlist: [], newCode: '',
+            watchlist: [], newCode: '', searchResults: [], showSearch: false,
             // market
             quotes: [], codesInput: '',
             time: '', timer: null,
@@ -521,7 +552,7 @@ createApp({
                 rule: { cash: 10000, market_value: 0, total_value: 10000, total_return: 0, return_pct: 0, positions: [], trade_count: 0 },
                 ai_history: [], rule_history: [],
             },
-            agentTrades: [], agentChart: null, agentTimer: null,
+            agentTrades: [], agentLogs: [], agentChart: null, agentTimer: null,
         };
     },
     computed: {
@@ -530,6 +561,20 @@ createApp({
     },
     methods: {
         toastMsg(msg) { this.toast = msg; setTimeout(() => this.toast = '', 2500); },
+        async searchStock(q) {
+            if (!q || q.length < 2) { this.searchResults = []; this.showSearch = false; return; }
+            try {
+                const res = await fetch('/api/search?q=' + encodeURIComponent(q));
+                const data = await res.json();
+                this.searchResults = data.results || [];
+                this.showSearch = this.searchResults.length > 0;
+            } catch (e) { this.searchResults = []; }
+        },
+        pickSearchResult(item) {
+            this.newCode = item.code;
+            this.showSearch = false;
+            this.searchResults = [];
+        },
         pctClass(p) { return p == null ? 'flat' : (p > 0 ? 'up' : (p < 0 ? 'down' : 'flat')); },
         badgeFor(q) {
             let s = 0;
@@ -844,6 +889,16 @@ createApp({
                 this.agentTrades = data.trades || [];
             } catch (e) {}
         },
+        async loadAgentLogs() {
+            try {
+                const res = await fetch('/api/agent/logs?limit=50');
+                const data = await res.json();
+                this.agentLogs = data.logs || [];
+            } catch (e) {}
+        },
+        exportTrades() {
+            window.open('/api/agent/trades-csv', '_blank');
+        },
         async startAgent() {
             const res = await (await fetch('/api/agent/start', { method: 'POST' })).json();
             this.toastMsg(res.msg);
@@ -889,13 +944,21 @@ createApp({
         this.loadStrategies();
         this.loadAgentStatus();
         this.loadAgentTrades();
+        this.loadAgentLogs();
         this.timer = setInterval(() => {
             if (this.tab === 'watchlist') this.loadWatchlist();
             if (this.tab === 'market') this.loadQuotes();
-            if (this.tab === 'agent') { this.loadAgentStatus(); this.loadAgentTrades(); }
         }, 60000);
+        // Agent tab 5秒轮询
+        this.agentTimer = setInterval(() => {
+            if (this.tab === 'agent') {
+                this.loadAgentStatus();
+                this.loadAgentTrades();
+                this.loadAgentLogs();
+            }
+        }, 5000);
     },
-    beforeUnmount() { if (this.timer) clearInterval(this.timer); }
+    beforeUnmount() { if (this.timer) clearInterval(this.timer); if (this.agentTimer) clearInterval(this.agentTimer); }
 }).mount('#app');
 </script>
 </body>

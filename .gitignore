@@ -9,3 +9,5 @@ __pycache__/
 
 agent_data_ai.db
 agent_data_rule.db
+
+agent_data.db

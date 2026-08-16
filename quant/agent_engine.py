@@ -1,4 +1,5 @@
 import json
+import sqlite3
 import threading
 import time
 from datetime import datetime
@@ -7,9 +8,81 @@ from pathlib import Path
 ENGINE_HOME = Path(__file__).parent
 AI_DB = ENGINE_HOME / "agent_data_ai.db"
 RULE_DB = ENGINE_HOME / "agent_data_rule.db"
+LOG_DB = ENGINE_HOME / "agent_data.db"
 
 import strategy_engine as se
 from executor import SimExecutor
+
+
+def _init_log_db():
+    conn = sqlite3.connect(str(LOG_DB))
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS equity_curve (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            agent_type TEXT, ts TEXT, value REAL
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS agent_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts TEXT, agent_type TEXT, code TEXT, name TEXT,
+            action TEXT, price REAL, qty INTEGER, reason TEXT
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+
+_init_log_db()
+
+
+def _save_equity_point(agent_type, ts, value):
+    conn = sqlite3.connect(str(LOG_DB))
+    conn.execute("INSERT INTO equity_curve (agent_type, ts, value) VALUES (?,?,?)",
+                 (agent_type, ts, value))
+    conn.commit()
+    conn.close()
+
+
+def _save_log(agent_type, ts, code, name, action, price, qty, reason):
+    conn = sqlite3.connect(str(LOG_DB))
+    conn.execute(
+        "INSERT INTO agent_logs (ts, agent_type, code, name, action, price, qty, reason) "
+        "VALUES (?,?,?,?,?,?,?,?)",
+        (ts, agent_type, code, name, action, price, qty, reason)
+    )
+    conn.commit()
+    conn.close()
+
+
+def _load_equity_curve(agent_type, limit=500):
+    conn = sqlite3.connect(str(LOG_DB))
+    rows = conn.execute(
+        "SELECT ts, value FROM equity_curve WHERE agent_type=? ORDER BY id DESC LIMIT ?",
+        (agent_type, limit)
+    ).fetchall()
+    conn.close()
+    rows = list(reversed(rows))
+    return [{"t": r[0], "v": r[1]} for r in rows]
+
+
+def _load_logs(limit=100):
+    conn = sqlite3.connect(str(LOG_DB))
+    rows = conn.execute(
+        "SELECT ts, agent_type, code, name, action, price, qty, reason "
+        "FROM agent_logs ORDER BY id DESC LIMIT ?", (limit,)
+    ).fetchall()
+    conn.close()
+    return [{"ts": r[0], "agent_type": r[1], "code": r[2], "name": r[3],
+             "action": r[4], "price": r[5], "qty": r[6], "reason": r[7]} for r in rows]
+
+
+def _clear_logs():
+    conn = sqlite3.connect(str(LOG_DB))
+    conn.execute("DELETE FROM equity_curve")
+    conn.execute("DELETE FROM agent_logs")
+    conn.commit()
+    conn.close()
 
 
 class AgentEngine:
@@ -20,14 +93,13 @@ class AgentEngine:
         self.last_run = None
         self.cycle_count = 0
         self.ai_decider = None
+        self.last_cycle_summary = ""
 
-        # 两个 Agent 各自的执行器，各 1 万元初始资金，独立 DB
         self.ai_executor = SimExecutor(initial_cash=10000.0, db_path=AI_DB)
         self.rule_executor = SimExecutor(initial_cash=10000.0, db_path=RULE_DB)
 
-        # 收益曲线数据（前端图表用）
-        self.ai_history = []
-        self.rule_history = []
+        self.ai_history = _load_equity_curve("ai")
+        self.rule_history = _load_equity_curve("rule")
         self._init_ai_decider()
 
     def _init_ai_decider(self):
@@ -36,8 +108,6 @@ class AgentEngine:
             self.ai_decider = AIDecider()
         except Exception:
             self.ai_decider = None
-
-    # ---------- 控制 ----------
 
     def start(self):
         if self.running:
@@ -62,9 +132,9 @@ class AgentEngine:
         self.rule_history = []
         self.cycle_count = 0
         self.last_run = None
+        self.last_cycle_summary = ""
+        _clear_logs()
         return {"ok": True, "msg": "已重置"}
-
-    # ---------- 状态 ----------
 
     def status(self):
         ai_prices = self._get_current_prices(self.ai_executor.portfolio.positions)
@@ -90,6 +160,7 @@ class AgentEngine:
             "running": self.running,
             "last_run": self.last_run.isoformat() if self.last_run else None,
             "cycle_count": self.cycle_count,
+            "last_cycle_summary": self.last_cycle_summary,
             "ai": {
                 "cash": ai_sum["cash"],
                 "market_value": ai_sum["market_value"],
@@ -113,7 +184,6 @@ class AgentEngine:
         }
 
     def trades(self, type_filter=None, limit=50):
-        """获取交易记录"""
         executors = []
         if type_filter in (None, "ai"):
             executors.append(("ai", self.ai_executor))
@@ -131,7 +201,8 @@ class AgentEngine:
         all_trades.sort(key=lambda x: x["date"], reverse=True)
         return all_trades[:limit]
 
-    # ---------- 主循环 ----------
+    def logs(self, limit=100):
+        return _load_logs(limit)
 
     def _loop(self):
         while self.running:
@@ -143,9 +214,6 @@ class AgentEngine:
                     traceback.print_exc()
                 self.last_run = datetime.now()
                 self.cycle_count += 1
-            else:
-                # 非交易时段，休眠 60 秒后继续检查
-                pass
             time.sleep(self.interval)
 
     def _is_market_hours(self):
@@ -168,7 +236,6 @@ class AgentEngine:
         if not self._is_market_hours():
             return
 
-        # 1. 取自选股实时行情
         watchlist = se.get_watchlist()
         if not watchlist:
             return
@@ -176,20 +243,15 @@ class AgentEngine:
         quotes = se.fetch_realtime(codes)
         prices = {q["code"]: q["price"] for q in quotes}
 
-        # 2. 对每只股票跑分析
         analysis_results = {}
         for q in quotes:
             result = se.analyze(q["code"], use_ai=False)
             if "error" not in result:
                 analysis_results[q["code"]] = result
 
-        # 3. 规则 Agent 决策
-        self._rule_cycle(quotes, prices, analysis_results)
+        rule_actions = self._rule_cycle(quotes, prices, analysis_results)
+        ai_actions = self._ai_cycle(quotes, prices, analysis_results)
 
-        # 4. AI Agent 决策
-        self._ai_cycle(quotes, prices, analysis_results)
-
-        # 5. 记录收益曲线
         ai_prices = self._get_current_prices(self.ai_executor.portfolio.positions)
         rule_prices = self._get_current_prices(self.rule_executor.portfolio.positions)
         ai_tv = self.ai_executor.get_summary(ai_prices)["total_value"]
@@ -197,13 +259,22 @@ class AgentEngine:
         ts = datetime.now().strftime("%H:%M")
         self.ai_history.append({"t": ts, "v": round(ai_tv, 2)})
         self.rule_history.append({"t": ts, "v": round(rule_tv, 2)})
+        _save_equity_point("ai", ts, round(ai_tv, 2))
+        _save_equity_point("rule", ts, round(rule_tv, 2))
 
-    # ---------- 规则 Agent ----------
+        summary_parts = []
+        if rule_actions:
+            summary_parts.append("规则: " + "; ".join(rule_actions))
+        if ai_actions:
+            summary_parts.append("AI: " + "; ".join(ai_actions))
+        self.last_cycle_summary = " | ".join(summary_parts) if summary_parts else "本轮无交易"
 
     def _rule_cycle(self, quotes, prices, analysis_results):
         ex = self.rule_executor
         today = datetime.now().date().isoformat()
+        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         daily_trades = 0
+        actions = []
         for q in quotes:
             code = q["code"]
             if daily_trades >= 5:
@@ -214,17 +285,17 @@ class AgentEngine:
             pos = ex.portfolio.positions.get(code)
             price = q["price"]
 
-            # 止损检查（硬性）
             if pos:
                 pnl_pct = (price - pos["cost"]) / pos["cost"]
                 if pnl_pct <= -0.05:
                     ex.execute(code, q["name"], price, "sell")
                     daily_trades += 1
+                    reason = f"止损卖出({pnl_pct*100:.1f}%)"
+                    _save_log("rule", ts, code, q["name"], "sell", price, pos["qty"], reason)
+                    actions.append(f"卖出{code}止损({pnl_pct*100:.1f}%)")
                     continue
 
-            # T+1 检查：今日买入的今日不能卖
             can_sell = not (pos and pos.get("buy_date") == today)
-
             verdict = result["verdict"]
             if verdict == "买入" and not pos:
                 total_value = ex.portfolio.total_value({code: price})
@@ -233,19 +304,25 @@ class AgentEngine:
                 if qty >= 100:
                     ex.execute(code, q["name"], price, "buy")
                     daily_trades += 1
+                    reason = f"策略投票买入(买入{result['summary']['buy']}票)"
+                    _save_log("rule", ts, code, q["name"], "buy", price, qty, reason)
+                    actions.append(f"买入{code} {qty}股")
             elif verdict == "卖出" and pos and can_sell:
                 ex.execute(code, q["name"], price, "sell")
                 daily_trades += 1
-
-    # ---------- AI Agent ----------
+                reason = f"策略投票卖出(卖出{result['summary']['sell']}票)"
+                _save_log("rule", ts, code, q["name"], "sell", price, pos["qty"], reason)
+                actions.append(f"卖出{code} {pos['qty']}股")
+        return actions
 
     def _ai_cycle(self, quotes, prices, analysis_results):
         if not self.ai_decider:
-            return
+            return []
         ex = self.ai_executor
         today = datetime.now().date().isoformat()
+        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        actions = []
 
-        # 止损检查（硬性，AI 不参与）
         for q in quotes:
             code = q["code"]
             pos = ex.portfolio.positions.get(code)
@@ -253,8 +330,10 @@ class AgentEngine:
                 pnl_pct = (q["price"] - pos["cost"]) / pos["cost"]
                 if pnl_pct <= -0.05:
                     ex.execute(code, q["name"], q["price"], "sell")
+                    reason = f"硬性止损({pnl_pct*100:.1f}%)"
+                    _save_log("ai", ts, code, q["name"], "sell", q["price"], pos["qty"], reason)
+                    actions.append(f"卖出{code}止损({pnl_pct*100:.1f}%)")
 
-        # 打包数据给 AI
         market_data = []
         for q in quotes:
             code = q["code"]
@@ -263,9 +342,9 @@ class AgentEngine:
                 continue
             ind = result.get("indicators", {})
             sigs = result.get("signals", [])
-            buy_sigs = [s for s in sigs if s["signal"] == "buy"]
-            sell_sigs = [s for s in sigs if s["signal"] == "sell"]
-            hold_sigs = [s for s in sigs if s["signal"] == "hold"]
+            buy_n = sum(1 for s in sigs if s["signal"] == "buy")
+            sell_n = sum(1 for s in sigs if s["signal"] == "sell")
+            hold_n = sum(1 for s in sigs if s["signal"] == "hold")
             info = {
                 "code": code, "name": q["name"],
                 "price": q["price"], "pct": q.get("pct", 0),
@@ -281,20 +360,18 @@ class AgentEngine:
                     "tower": ind.get('tower', 0),
                 },
                 "verdict": result.get("verdict", "观望"),
-                "votes": f"买入{buy_sigs.__len__()}票/卖出{len(sell_sigs)}票/观望{len(hold_sigs)}票",
+                "votes": f"买入{buy_n}票/卖出{sell_n}票/观望{hold_n}票",
                 "total": len(sigs),
             }
             market_data.append(info)
 
         if not market_data:
-            return
+            return []
 
-        # 生成 AI prompt
         prompt = self._build_agent_prompt(market_data, ex, prices)
         raw = self.ai_decider._call_api(prompt, timeout=45)
         decisions = self._parse_agent_response(raw, market_data)
 
-        # 执行决策
         daily_trades = 0
         for dec in decisions:
             if daily_trades >= 5:
@@ -316,11 +393,17 @@ class AgentEngine:
                 if qty >= 100:
                     ex.execute(code, q["name"], price, "buy")
                     daily_trades += 1
+                    _save_log("ai", ts, code, q["name"], "buy", price, qty, reason)
+                    actions.append(f"买入{code} {qty}股({reason})")
             elif action == "sell" and pos:
                 if pos.get("buy_date") == today:
-                    continue  # T+1
+                    _save_log("ai", ts, code, q["name"], "hold", price, 0, f"T+1限制: {reason}")
+                    continue
                 ex.execute(code, q["name"], price, "sell")
                 daily_trades += 1
+                _save_log("ai", ts, code, q["name"], "sell", price, pos["qty"], reason)
+                actions.append(f"卖出{code} {pos['qty']}股({reason})")
+        return actions
 
     def _build_agent_prompt(self, market_data, executor, prices):
         total_value = executor.portfolio.total_value(prices)
@@ -396,7 +479,6 @@ class AgentEngine:
             return [{"code": c, "action": "hold", "qty": 0, "reason": "AI解析失败"} for c in expected]
 
 
-# 全局单例
 _engine = None
 
 

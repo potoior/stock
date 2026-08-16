@@ -4,8 +4,9 @@ import pandas as pd
 from datetime import datetime
 from pathlib import Path
 from fastapi import FastAPI
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
+import urllib.parse
 
 import strategy_engine as se
 from data_fetcher import fetch_realtime
@@ -426,6 +427,71 @@ def agent_reset():
 def agent_trades(type_: str = None, limit: int = 50):
     from agent_engine import get_engine
     return {"trades": get_engine().trades(type_filter=type_, limit=limit)}
+
+
+@app.get("/api/agent/logs")
+def agent_logs(limit: int = 100):
+    from agent_engine import get_engine
+    return {"logs": get_engine().logs(limit=limit)}
+
+
+@app.get("/api/agent/trades-csv")
+def agent_trades_csv():
+    from agent_engine import get_engine
+    import io
+    trades = get_engine().trades(limit=1000)
+    output = io.StringIO()
+    output.write("时间,类型,代码,名称,操作,价格,数量,金额,盈亏\n")
+    for t in trades:
+        output.write(f"{t['date']},{t['agent_type']},{t['code']},{t['name']},"
+                     f"{t['action']},{t['price']},{t['qty']},{t['amount']},{t['pnl']}\n")
+    return PlainTextResponse(output.getvalue(), media_type="text/csv",
+                             headers={"Content-Disposition": "attachment; filename=trades.csv"})
+
+
+@app.get("/api/search")
+def search_stock(q: str = ""):
+    """按代码或名称搜索股票（新浪实时行情接口模糊匹配）"""
+    if not q or len(q) < 2:
+        return {"results": []}
+    q = q.strip()
+    # 如果是纯数字，直接查
+    if q.isdigit():
+        rt = se.fetch_realtime([q])
+        if rt:
+            return {"results": [{"code": rt[0]["code"], "name": rt[0]["name"]}]}
+        return {"results": []}
+    # 否则用新浪搜索接口
+    import urllib.request, json as _json
+    try:
+        url = f"http://suggest3.sinajs.cn/suggest/type=&key={urllib.parse.quote(q)}&name=suggestdata"
+        req = urllib.request.Request(url, headers={
+            "Referer": "https://finance.sina.com.cn/",
+            "User-Agent": "Mozilla/5.0"
+        })
+        resp = urllib.request.urlopen(req, timeout=10)
+        raw = resp.read().decode("gbk")
+        # 解析 var suggestdata="...";
+        if '"' in raw:
+            data_str = raw.split('"')[1]
+            if data_str:
+                items = data_str.split(";")
+                results = []
+                for item in items:
+                    if not item:
+                        continue
+                    parts = item.split(",")
+                    # 格式: 名称,类型,代码,完整代码,名称,...
+                    if len(parts) >= 4:
+                        name = parts[0]
+                        code = parts[2]
+                        full_code = parts[3]
+                        if code.startswith(("0", "3", "6")):
+                            results.append({"code": code, "name": name})
+                return {"results": results[:10]}
+    except Exception:
+        pass
+    return {"results": []}
 
 
 @app.get("/")
