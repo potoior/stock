@@ -224,10 +224,20 @@ def compute_sar(df, af_init=0.02, af_max=0.2):
 DEFAULT_STRATEGY_PARAMS = {
     "macd": {"fast": 12, "slow": 26, "signal": 9},
     "kdj": {"n": 9, "k1": 3, "d1": 3},
+    "ma_stop": {"period": 5},
     "boll": {"period": 20, "std": 2},
-    "bias": {"short": 3, "long": 5},
     "dmi": {"n": 14, "m": 6},
     "psy": {"period": 12},
+    "bias": {"short": 3, "long": 5},
+    "sar": {"af_init": 0.02, "af_max": 0.2},
+    "ma_combo": {"short": 5, "mid": 10, "long": 60},
+    "two_line": {"short": 5, "long": 10},
+    "life_line": {"period": 60},
+    "three_third": {"p1": 7, "p2": 13, "p3": 20},
+    "sparrow": {"lookback": 5, "target": 2.5},
+    "bounce": {"rebound_pct": 0.5, "vol_increase": 20},
+    "volume_div": {"lookback": 10, "shrink": 0.7, "expand": 1.3},
+    "dmi_psy": {"pdi_threshold": 5, "psy_threshold": 25},
 }
 
 
@@ -385,12 +395,21 @@ def _cross_series(series):
     return golden, death
 
 
+def _ma_series(df, period):
+    return df["close"].rolling(period).mean()
+
+
 def strategy_macd(ctx, params):
-    diff = ctx["macd_diff"]
-    dea = ctx["macd_dea"]
+    fast = int(params.get("fast", 12))
+    slow = int(params.get("slow", 26))
+    signal = int(params.get("signal", 9))
+    diff, dea, bar = compute_macd(ctx["df"], fast=fast, slow=slow, signal=signal)
+    return _strategy_macd_impl(ctx, diff, dea)
+
+
+def _strategy_macd_impl(ctx, diff, dea):
     i = ctx["i"]
     d, e = diff.iloc[i], dea.iloc[i]
-    pd_, pe = diff.iloc[i - 1], dea.iloc[i - 1]
     g, dth = _cross_series(diff - dea)
     below_zero = d < 0 and e < 0
     above_zero = d > 0 and e > 0
@@ -423,7 +442,14 @@ def strategy_macd(ctx, params):
 
 
 def strategy_kdj(ctx, params):
-    k, d = ctx["k"], ctx["d"]
+    n = int(params.get("n", 9))
+    k1 = int(params.get("k1", 3))
+    d1 = int(params.get("d1", 3))
+    k, d, j, _ = compute_kdj(ctx["df"], n=n, k1=k1, d1=d1)
+    return _strategy_kdj_impl(ctx, k, d)
+
+
+def _strategy_kdj_impl(ctx, k, d):
     i = ctx["i"]
     k_v, d_v = k.iloc[i], d.iloc[i]
     if k_v < 20 and d_v < 30:
@@ -442,17 +468,22 @@ def strategy_kdj(ctx, params):
 
 
 def strategy_ma_stop(ctx, params):
+    period = int(params.get("period", 5))
     price = ctx["price"]
-    ma5 = ctx["ma5"].iloc[ctx["i"]]
-    if pd.isna(ma5):
-        return "hold", "MA5数据不足"
-    if price > ma5:
-        return "buy", f"价格({price:.2f})站上MA5({ma5:.2f})"
-    return "sell", f"价格({price:.2f})跌破MA5({ma5:.2f})"
+    ma = _ma_series(ctx["df"], period).iloc[ctx["i"]]
+    if pd.isna(ma):
+        return "hold", f"MA{period}数据不足"
+    if price > ma:
+        return "buy", f"价格({price:.2f})站上MA{period}({ma:.2f})"
+    return "sell", f"价格({price:.2f})跌破MA{period}({ma:.2f})"
 
 
 def strategy_boll(ctx, params):
-    u, m, l = ctx["boll_u"].iloc[ctx["i"]], ctx["boll_m"].iloc[ctx["i"]], ctx["boll_l"].iloc[ctx["i"]]
+    period = int(params.get("period", 20))
+    std = float(params.get("std", 2))
+    u, m, l = compute_boll(ctx["df"], period=period, std=std)
+    i = ctx["i"]
+    u, m, l = u.iloc[i], m.iloc[i], l.iloc[i]
     price = ctx["price"]
     if pd.isna(l):
         return "hold", "BOLL数据不足"
@@ -466,7 +497,11 @@ def strategy_boll(ctx, params):
 
 
 def strategy_dmi(ctx, params):
-    pdi, mdi, adx = ctx["pdi"].iloc[ctx["i"]], ctx["mdi"].iloc[ctx["i"]], ctx["adx"].iloc[ctx["i"]]
+    n = int(params.get("n", 14))
+    m = int(params.get("m", 6))
+    pdi, mdi, adx = compute_dmi(ctx["df"], n=n, m=m)
+    i = ctx["i"]
+    pdi, mdi, adx = pdi.iloc[i], mdi.iloc[i], adx.iloc[i]
     if pd.isna(pdi):
         return "hold", "DMI数据不足"
     if adx < 20:
@@ -481,7 +516,9 @@ def strategy_dmi(ctx, params):
 
 
 def strategy_psy(ctx, params):
-    v = ctx["psy"].iloc[ctx["i"]]
+    period = int(params.get("period", 12))
+    psy = compute_psy(ctx["df"], period=period)
+    v = psy.iloc[ctx["i"]]
     if pd.isna(v):
         return "hold", "PSY数据不足"
     if v <= 25:
@@ -492,9 +529,11 @@ def strategy_psy(ctx, params):
 
 
 def strategy_bias(ctx, params):
-    b1, b2, b3 = ctx["bias1"].iloc[ctx["i"]], ctx["bias2"].iloc[ctx["i"]], ctx["bias3"].iloc[ctx["i"]]
-    short = params.get("short", 3)
-    long = params.get("long", 5)
+    short = float(params.get("short", 3))
+    long = float(params.get("long", 5))
+    b1, b2, b3 = compute_bias(ctx["df"])
+    i = ctx["i"]
+    b1, b2, b3 = b1.iloc[i], b2.iloc[i], b3.iloc[i]
     if pd.isna(b1):
         return "hold", "BIAS数据不足"
     if b1 <= -short or b2 <= -long:
@@ -505,7 +544,10 @@ def strategy_bias(ctx, params):
 
 
 def strategy_sar(ctx, params):
-    sar_v = ctx["sar"][ctx["i"]]
+    af_init = float(params.get("af_init", 0.02))
+    af_max = float(params.get("af_max", 0.2))
+    sar, _trend = compute_sar(ctx["df"], af_init=af_init, af_max=af_max)
+    sar_v = sar[ctx["i"]]
     if sar_v <= 0:
         return "hold", "SAR数据不足"
     if ctx["price"] > sar_v:
@@ -514,7 +556,9 @@ def strategy_sar(ctx, params):
 
 
 def strategy_burnal(ctx, params):
-    bu, bm, bl = ctx["bbiboll_u"].iloc[ctx["i"]], ctx["bbiboll_m"].iloc[ctx["i"]], ctx["bbiboll_l"].iloc[ctx["i"]]
+    u, m, l = compute_bbiboll(ctx["df"])
+    i = ctx["i"]
+    bu, bm, bl = u.iloc[i], m.iloc[i], l.iloc[i]
     price = ctx["price"]
     if pd.isna(bm):
         return "hold", "BBIBOLL数据不足"
@@ -544,57 +588,73 @@ def strategy_tower(ctx, params):
 def strategy_ma_combo(ctx, params):
     i = ctx["i"]
     price = ctx["price"]
-    ma5, ma10, ma60 = ctx["ma5"].iloc[i], ctx["ma10"].iloc[i], ctx["ma60"].iloc[i]
-    if pd.isna(ma5) or pd.isna(ma60):
+    short = int(params.get("short", 5))
+    mid = int(params.get("mid", 10))
+    long = int(params.get("long", 60))
+    ma_s = _ma_series(ctx["df"], short).iloc[i]
+    ma_m = _ma_series(ctx["df"], mid).iloc[i]
+    ma_l = _ma_series(ctx["df"], long).iloc[i]
+    if pd.isna(ma_s) or pd.isna(ma_l):
         return "hold", "均线数据不足"
-    if price > ma5 > ma10 > ma60:
-        return "buy", f"多头排列，{ma5:.2f}>{ma10:.2f}>{ma60:.2f}"
-    if price < ma5 or price < ma10:
-        return "sell", f"价格({price:.2f})跌破MA5({ma5:.2f})或MA10({ma10:.2f})"
+    if price > ma_s > ma_m > ma_l:
+        return "buy", f"{short}日({ma_s:.2f})>{mid}日({ma_m:.2f})>{long}日({ma_l:.2f})，多头排列"
+    if price < ma_s or price < ma_m:
+        return "sell", f"价格({price:.2f})跌破MA{short}({ma_s:.2f})或MA{mid}({ma_m:.2f})"
     return "hold", "均线方向不明"
 
 
 def strategy_two_line(ctx, params):
-    ma5, ma10 = ctx["ma5"].iloc[ctx["i"]], ctx["ma10"].iloc[ctx["i"]]
-    if pd.isna(ma5):
+    short = int(params.get("short", 5))
+    long = int(params.get("long", 10))
+    ma_s = _ma_series(ctx["df"], short).iloc[ctx["i"]]
+    ma_l = _ma_series(ctx["df"], long).iloc[ctx["i"]]
+    if pd.isna(ma_s):
         return "hold", "数据不足"
-    if ma5 > ma10:
-        return "buy", f"MA5({ma5:.2f})>MA10({ma10:.2f})，短线可操作"
-    return "sell", f"MA5({ma5:.2f})<MA10({ma10:.2f})，清仓观望"
+    if ma_s > ma_l:
+        return "buy", f"MA{short}({ma_s:.2f})>MA{long}({ma_l:.2f})，短线可操作"
+    return "sell", f"MA{short}({ma_s:.2f})<MA{long}({ma_l:.2f})，清仓观望"
 
 
 def strategy_life_line(ctx, params):
-    v = ctx["ma60"].iloc[ctx["i"]]
+    period = int(params.get("period", 60))
+    v = _ma_series(ctx["df"], period).iloc[ctx["i"]]
     if pd.isna(v):
-        return "hold", "MA60数据不足"
+        return "hold", f"MA{period}数据不足"
     if ctx["price"] > v:
-        return "buy", f"价格({ctx['price']:.2f})在MA60({v:.2f})上方，积极做多"
-    return "sell", f"价格({ctx['price']:.2f})在MA60({v:.2f})下方，空头市场"
+        return "buy", f"价格({ctx['price']:.2f})在MA{period}({v:.2f})上方，积极做多"
+    return "sell", f"价格({ctx['price']:.2f})在MA{period}({v:.2f})下方，空头市场"
 
 
 def strategy_three_third(ctx, params):
     i = ctx["i"]
     price = ctx["price"]
-    ma7, ma13, ma20 = ctx["ma7"].iloc[i], ctx["ma13"].iloc[i], ctx["ma20"].iloc[i]
-    if pd.isna(ma7) or pd.isna(ma20):
+    p1 = int(params.get("p1", 7))
+    p2 = int(params.get("p2", 13))
+    p3 = int(params.get("p3", 20))
+    ma1 = _ma_series(ctx["df"], p1).iloc[i]
+    ma2 = _ma_series(ctx["df"], p2).iloc[i]
+    ma3 = _ma_series(ctx["df"], p3).iloc[i]
+    if pd.isna(ma1) or pd.isna(ma3):
         return "hold", "数据不足"
-    if price > ma7 and price > ma13 and price > ma20:
-        return "buy", f"站上7日({ma7:.2f})/13日({ma13:.2f})/20日({ma20:.2f})线"
-    if price < ma7:
-        return "sell", f"跌破7日线({ma7:.2f})，分批减仓"
+    if price > ma1 and price > ma2 and price > ma3:
+        return "buy", f"站上{p1}日({ma1:.2f})/{p2}日({ma2:.2f})/{p3}日({ma3:.2f})线"
+    if price < ma1:
+        return "sell", f"跌破{p1}日线({ma1:.2f})，分批减仓"
     return "hold", f"价格({price:.2f})在均线之间"
 
 
 def strategy_sparrow(ctx, params):
     i = ctx["i"]
     close = ctx["close"]
-    if i < 5:
+    lookback = int(params.get("lookback", 5))
+    target = float(params.get("target", 2.5))
+    if i < lookback:
         return "hold", "数据不足"
-    low5 = close.iloc[i - 5:i].min()
-    pnl = (ctx["price"] - low5) / low5 * 100 if low5 > 0 else 0
-    if pnl >= 2.5:
-        return "sell", f"自5日低点({low5:.2f})已涨{pnl:.1f}%≥2.5%，见好就收"
-    return "hold", f"自5日低点仅涨{pnl:.1f}%，未达2.5%止盈线"
+    low = close.iloc[i - lookback:i].min()
+    pnl = (ctx["price"] - low) / low * 100 if low > 0 else 0
+    if pnl >= target:
+        return "sell", f"自{lookback}日低点({low:.2f})已涨{pnl:.1f}%≥{target}%，见好就收"
+    return "hold", f"自{lookback}日低点仅涨{pnl:.1f}%，未达{target}%止盈线"
 
 
 def strategy_bounce(ctx, params):
@@ -602,6 +662,8 @@ def strategy_bounce(ctx, params):
     close = ctx["close"]
     if i < 3:
         return "hold", "数据不足"
+    rebound_pct = float(params.get("rebound_pct", 0.5))
+    vol_increase = float(params.get("vol_increase", 20))
     pc = close.iloc[i - 1]
     pp = close.iloc[i - 2]
     dc = (pc - pp) / pp * 100
@@ -611,30 +673,33 @@ def strategy_bounce(ctx, params):
     vol_i = ctx["df"]["volume"].iloc[i]
     vol_p = ctx["df"]["volume"].iloc[i - 1]
     vr = (vol_i - vol_p) / vol_p * 100 if vol_p > 0 else 0
-    if tc > abs(dc) * 0.5 and vr > 20:
-        return "buy", f"涨幅{tc:.1f}%>昨日跌幅{abs(dc):.1f}%×50%，放量{vr:.0f}%"
+    if tc > abs(dc) * rebound_pct and vr > vol_increase:
+        return "buy", f"涨幅{tc:.1f}%>昨日跌幅{abs(dc):.1f}%×{rebound_pct:.0%}，放量{vr:.0f}%"
     return "hold", f"反弹{tc:.1f}%未达条件或未放量"
 
 
 def strategy_volume_divergence(ctx, params):
     close = ctx["close"]
     i = ctx["i"]
-    if i < 10:
+    lookback = int(params.get("lookback", 10))
+    shrink = float(params.get("shrink", 0.7))
+    expand = float(params.get("expand", 1.3))
+    if i < lookback:
         return "hold", "数据不足"
-    rh = close.iloc[i - 10:i].max()
-    vols = ctx["df"]["volume"].iloc[i - 10:i]
+    rh = close.iloc[i - lookback:i].max()
+    vols = ctx["df"]["volume"].iloc[i - lookback:i]
     avg = vols.mean()
     vn = ctx["df"]["volume"].iloc[i]
-    if ctx["price"] >= rh and vn < avg * 0.7:
-        return "sell", f"创10日新高但量萎缩{vn:.0f}<均量{avg:.0f}，无量上涨警惕"
-    if ctx["price"] >= rh and vn > avg * 1.3:
+    if ctx["price"] >= rh and vn < avg * shrink:
+        return "sell", f"创{lookback}日新高但量萎缩，无量上涨警惕"
+    if ctx["price"] >= rh and vn > avg * expand:
         return "buy", f"放量突破，量价配合"
     return "hold", "无量价背离"
 
 
 def strategy_resonance(ctx, params):
-    diff, dea = ctx["macd_diff"], ctx["macd_dea"]
-    k, d = ctx["k"], ctx["d"]
+    diff, dea, _ = compute_macd(ctx["df"])
+    k, d, _, _ = compute_kdj(ctx["df"])
     i = ctx["i"]
     if diff.iloc[i] > dea.iloc[i] and diff.iloc[i - 1] <= dea.iloc[i - 1] and \
        k.iloc[i] > d.iloc[i] and k.iloc[i - 1] <= d.iloc[i - 1] and \
@@ -644,13 +709,17 @@ def strategy_resonance(ctx, params):
 
 
 def strategy_dmi_psy(ctx, params):
-    pdi = ctx["pdi"].iloc[ctx["i"]]
-    psy = ctx["psy"].iloc[ctx["i"]]
-    if pd.isna(pdi) or pd.isna(psy):
+    pdi_threshold = float(params.get("pdi_threshold", 5))
+    psy_threshold = float(params.get("psy_threshold", 25))
+    pdi, mdi, adx = compute_dmi(ctx["df"])
+    psy = compute_psy(ctx["df"])
+    pdi_v = pdi.iloc[ctx["i"]]
+    psy_v = psy.iloc[ctx["i"]]
+    if pd.isna(pdi_v) or pd.isna(psy_v):
         return "hold", "数据不足"
-    if pdi < 5 and psy <= 25:
-        return "buy", f"PDI({pdi:.1f})<5且PSY({psy:.0f})≤25，超跌反弹"
-    return "hold", f"PDI({pdi:.1f})/PSY({psy:.0f})未达超跌极值"
+    if pdi_v < pdi_threshold and psy_v <= psy_threshold:
+        return "buy", f"PDI({pdi_v:.1f})<{pdi_threshold}且PSY({psy_v:.0f})≤{psy_threshold}，超跌反弹"
+    return "hold", f"PDI({pdi_v:.1f})/PSY({psy_v:.0f})未达超跌极值"
 
 
 # ---------------- 自定义可视化规则策略 ----------------

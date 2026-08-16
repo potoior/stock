@@ -92,6 +92,7 @@
         .strategy-row { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid #f0f0f0; flex-wrap: wrap; }
         .strategy-row:last-child { border-bottom: none; }
         .strategy-name { font-weight: 600; font-size: 13px; min-width: 140px; }
+        .strategy-detail { padding: 10px 14px; margin: 0 0 12px 52px; background: #fafafa; border: 1px solid #eee; border-radius: 8px; }
         .strategy-desc { font-size: 12px; color: #888; flex: 1; min-width: 180px; }
         .param-group { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #555; flex-wrap: wrap; }
         .verdict-box { display: flex; align-items: center; gap: 24px; padding: 16px; border-radius: 8px; margin-bottom: 16px; flex-wrap: wrap; }
@@ -313,18 +314,36 @@
 
         <div class="card">
             <div class="card-title">🧩 内置策略（{{ builtinStrategies.length }}）</div>
-            <div class="strategy-row" v-for="s in builtinStrategies" :key="s.id">
-                <label class="switch" :title="s.enabled ? '点击关闭' : '点击开启'">
-                    <input type="checkbox" :checked="s.enabled" @change="toggleStrategy(s)">
-                    <span class="slider"></span>
-                </label>
-                <span class="strategy-name">{{ s.name }}</span>
-                <span class="strategy-desc">{{ s.desc }}</span>
-                <div class="param-group">
-                    <template v-for="(v, k) in s.params" :key="k">
-                        <span>{{ paramName(k) }}={{ v }}</span>
-                        <input class="input sm" :value="v" @change="updateParam(s, k, $event.target.value)">
-                    </template>
+            <div v-if="!builtinStrategies.length" class="empty">暂无策略</div>
+            <div v-for="s in builtinStrategies" :key="s.id" style="border-bottom:1px solid #f0f0f0;">
+                <div class="strategy-row">
+                    <label class="switch" :title="s.enabled ? '点击关闭' : '点击开启'">
+                        <input type="checkbox" :checked="s.enabled" @change="toggleStrategy(s)">
+                        <span class="slider"></span>
+                    </label>
+                    <span class="strategy-name">{{ s.name }}</span>
+                    <div class="param-group">
+                        <template v-if="s.param_defs">
+                            <template v-for="(spec, k) in s.param_defs" :key="k">
+                                <span :title="spec.hint">{{ spec.label }}:</span>
+                                <input class="input sm" :value="spec.value"
+                                       @change="updateParam(s, k, $event.target.value)"
+                                       :title="spec.hint">
+                            </template>
+                        </template>
+                        <template v-else>
+                            <template v-for="(v, k) in s.params" :key="k">
+                                <span>{{ paramName(k) }}:</span>
+                                <input class="input sm" :value="v" @change="updateParam(s, k, $event.target.value)">
+                            </template>
+                        </template>
+                    </div>
+                    <button class="button sm ghost" @click="s.showDetail = !s.showDetail">
+                        {{ s.showDetail ? '▲ 收起' : '▼ 详情' }}
+                    </button>
+                </div>
+                <div v-if="s.showDetail" class="strategy-detail">
+                    <pre style="white-space:pre-wrap;font-family:inherit;font-size:12px;color:#555;line-height:1.7;">{{ s.detail }}</pre>
                 </div>
             </div>
         </div>
@@ -648,13 +667,19 @@ createApp({
         async updateParam(s, key, val) {
             const num = parseFloat(val);
             if (isNaN(num)) return;
+            if (!s.params) s.params = {};
             s.params[key] = num;
+            if (s.param_defs && s.param_defs[key]) s.param_defs[key].value = num;
             await this.saveStrategyRow(s);
             this.toastMsg('已更新 ' + s.name + ' 参数 ' + key + '=' + num);
         },
         async saveStrategyRow(s) {
+            // 内置策略只提交 id/enabled/params（param_defs/detail 是展示用，不提交）
+            const body = s.builtin
+                ? { id: s.id, enabled: s.enabled, params: s.params || {} }
+                : s;
             await fetch('/api/strategies/' + s.id, {
-                method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(s)
+                method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
             });
         },
         async deleteStrategy(s) {
