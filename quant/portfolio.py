@@ -3,10 +3,11 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 
-DB_PATH = Path(__file__).parent / "agent_data.db"
+DEFAULT_DB = Path(__file__).parent / "agent_data.db"
 
-def init_db():
-    conn = sqlite3.connect(str(DB_PATH))
+def init_db(db_path=None):
+    path = Path(db_path) if db_path else DEFAULT_DB
+    conn = sqlite3.connect(str(path))
     conn.execute("""
         CREATE TABLE IF NOT EXISTS positions (
             code TEXT PRIMARY KEY,
@@ -32,14 +33,15 @@ def init_db():
     return conn
 
 class Portfolio:
-    def __init__(self, initial_cash=100000.0):
+    def __init__(self, initial_cash=100000.0, db_path=None):
         self.initial_cash = initial_cash
         self.cash = initial_cash
         self.positions = {}
+        self.db_path = Path(db_path) if db_path else DEFAULT_DB
         self._load()
 
     def _load(self):
-        conn = init_db()
+        conn = init_db(self.db_path)
         rows = conn.execute("SELECT code, qty, cost, buy_date FROM positions").fetchall()
         for code, qty, cost, buy_date in rows:
             self.positions[code] = {"qty": qty, "cost": cost, "buy_date": buy_date}
@@ -85,7 +87,7 @@ class Portfolio:
                 self.sell(code, code, prices[code], self.positions[code]["qty"])
 
     def _record_trade(self, code, name, action, price, qty, amount, pnl):
-        conn = init_db()
+        conn = init_db(self.db_path)
         conn.execute(
             "INSERT INTO trades (code, name, action, price, qty, amount, pnl, date) VALUES (?,?,?,?,?,?,?,?)",
             (code, name, action, price, qty, amount, pnl, datetime.now().isoformat())
@@ -94,7 +96,7 @@ class Portfolio:
         conn.close()
 
     def _save_positions(self):
-        conn = init_db()
+        conn = init_db(self.db_path)
         conn.execute("DELETE FROM positions")
         for code, p in self.positions.items():
             conn.execute(
@@ -117,7 +119,7 @@ class Portfolio:
         return self.cash + self.market_value(prices)
 
     def reset(self):
-        conn = init_db()
+        conn = init_db(self.db_path)
         conn.execute("DELETE FROM positions")
         conn.execute("DELETE FROM trades")
         conn.commit()
@@ -129,7 +131,7 @@ class Portfolio:
         return self.positions
 
     def get_trades(self, limit=100):
-        conn = init_db()
+        conn = init_db(self.db_path)
         rows = conn.execute("SELECT * FROM trades ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
         conn.close()
         return rows

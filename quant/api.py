@@ -396,6 +396,38 @@ def analyze(code: str, ai: int = 1):
     return se.analyze(code, use_ai=bool(ai))
 
 
+# ---------------- 实盘模拟 Agent ----------------
+
+@app.get("/api/agent/status")
+def agent_status():
+    from agent_engine import get_engine
+    return get_engine().status()
+
+
+@app.post("/api/agent/start")
+def agent_start():
+    from agent_engine import get_engine
+    return get_engine().start()
+
+
+@app.post("/api/agent/stop")
+def agent_stop():
+    from agent_engine import get_engine
+    return get_engine().stop()
+
+
+@app.post("/api/agent/reset")
+def agent_reset():
+    from agent_engine import get_engine
+    return get_engine().reset()
+
+
+@app.get("/api/agent/trades")
+def agent_trades(type_: str = None, limit: int = 50):
+    from agent_engine import get_engine
+    return {"trades": get_engine().trades(type_filter=type_, limit=limit)}
+
+
 @app.get("/")
 def index():
     return FileResponse(str(WEB_DIR / "index.html"))

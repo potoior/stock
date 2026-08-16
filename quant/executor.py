@@ -4,8 +4,8 @@ from portfolio import Portfolio
 from risk_manager import RiskManager
 
 class SimExecutor:
-    def __init__(self, initial_cash=100000.0):
-        self.portfolio = Portfolio(initial_cash)
+    def __init__(self, initial_cash=100000.0, db_path=None):
+        self.portfolio = Portfolio(initial_cash, db_path=db_path)
         self.risk = RiskManager()
         self.trades = []
 
@@ -60,6 +60,6 @@ class SimExecutor:
             return False, "周末休市"
         hour = now.hour
         minute = now.minute
-        if (hour == 9 and minute >= 30) or (10 <= hour <= 11) or (hour == 13 and minute < 0) or (13 <= hour <= 14):
+        if (hour == 9 and minute >= 30) or (10 <= hour <= 11) or (13 <= hour <= 14):
             return True, "交易中"
         return False, "非交易时间"
