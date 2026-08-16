@@ -132,9 +132,19 @@ def compute_bbiboll(df, m1=3, m2=6, m3=12, m4=24, n=11, m=6):
 
 
 def compute_tower(df):
-    up = (df["close"] > df["close"].shift(1)).astype(int)
-    down = (df["close"] < df["close"].shift(1)).astype(int)
-    return up - down
+    close = df["close"].values
+    high = df["high"].values
+    low = df["low"].values
+    n = len(close)
+    tower = np.zeros(n)
+    for i in range(1, n):
+        if close[i] > high[i - 1]:
+            tower[i] = 1          # 突破前一根最高价 → 翻红
+        elif close[i] < low[i - 1]:
+            tower[i] = -1         # 跌破前一根最低价 → 翻绿
+        else:
+            tower[i] = tower[i - 1]  # 未突破/未跌破 → 延续前态
+    return pd.Series(tower, index=df.index)
 
 
 def compute_dmi(df, n=14, m=6):
@@ -269,6 +279,20 @@ def _ai_cache_set(code, date, content):
         conn = _ai_cache_db()
         conn.execute("INSERT OR REPLACE INTO ai_cache(code, date, content) VALUES(?,?,?)",
                      (code, date, content))
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+
+def clear_ai_cache(code=None):
+    """清除AI判定缓存（策略变更后调用）。code=None清全部"""
+    try:
+        conn = _ai_cache_db()
+        if code:
+            conn.execute("DELETE FROM ai_cache WHERE code=?", (code,))
+        else:
+            conn.execute("DELETE FROM ai_cache")
         conn.commit()
         conn.close()
     except Exception:
@@ -976,8 +1000,17 @@ def analyze(code, use_ai=True):
     sell_sigs = [s for s in signals if s["signal"] == "sell"]
     hold_sigs = [s for s in signals if s["signal"] == "hold"]
     buy_n, sell_n, hold_n = len(buy_sigs), len(sell_sigs), len(hold_sigs)
+    total_n = len(signals)
 
-    if buy_n > sell_n and buy_n >= 3:
+    # 动态阈值：方向票需达到启用策略的40%，且持有≥3票偏向（避免1票定方向）
+    buy_ratio = buy_n / total_n if total_n else 0
+    sell_ratio = sell_n / total_n if total_n else 0
+    min_votes = max(3, int(total_n * 0.4))
+    if buy_n >= min_votes and buy_n > sell_n:
+        verdict, icon = "买入", "⬆"
+    elif sell_n >= min_votes and sell_n > buy_n:
+        verdict, icon = "卖出", "⬇"
+    elif buy_n > sell_n and buy_n >= 3:
         verdict, icon = "买入", "⬆"
     elif sell_n > buy_n and sell_n >= 3:
         verdict, icon = "卖出", "⬇"

@@ -570,16 +570,42 @@ createApp({
             if (!this.analyzeChart) this.analyzeChart = echarts.init(el);
             const kl = this.analysis.kline;
             const dates = kl.map(d => d.date);
+            const ohlc = kl.map(d => [d.open, d.close, d.low, d.high]);
+            const volumes = kl.map((d, idx) => ({
+                value: d.volume,
+                itemStyle: { color: d.close >= d.open ? '#d32f2f' : '#2e7d32' }
+            }));
             const closes = kl.map(d => d.close);
-            const volumes = kl.map(d => d.volume);
+            const vol = kl.map(d => d.volume);
+            const ma5 = closes.map((_, i) => {
+                if (i < 4) return '-';
+                const s = closes.slice(i - 4, i + 1);
+                return +(s.reduce((a, b) => a + b, 0) / 5).toFixed(2);
+            });
+            const ma10 = closes.map((_, i) => {
+                if (i < 9) return '-';
+                const s = closes.slice(i - 9, i + 1);
+                return +(s.reduce((a, b) => a + b, 0) / 10).toFixed(2);
+            });
             this.analyzeChart.setOption({
-                tooltip: { trigger: 'axis' },
+                tooltip: {
+                    trigger: 'axis', axisPointer: { type: 'cross' },
+                    formatter: function (params) {
+                        const p = params.find(x => x.seriesType === 'candlestick');
+                        if (!p) return '';
+                        const d = kl[p.dataIndex];
+                        return `${d.date}<br>
+                            开: ${d.open.toFixed(2)}  收: ${d.close.toFixed(2)}<br>
+                            高: ${d.high.toFixed(2)}  低: ${d.low.toFixed(2)}<br>
+                            量: ${d.volume.toLocaleString()}`;
+                    }
+                },
                 grid: [
                     { left: 60, right: 20, top: 20, height: '55%' },
                     { left: 60, right: 20, top: '72%', height: '18%' }
                 ],
                 xAxis: [
-                    { type: 'category', data: dates, boundaryGap: false, axisLine: { lineStyle: { color: '#ccc' } } },
+                    { type: 'category', data: dates, boundaryGap: true, axisLine: { lineStyle: { color: '#ccc' } } },
                     { type: 'category', data: dates, axisLabel: { show: false }, axisLine: { lineStyle: { color: '#ccc' } } }
                 ],
                 yAxis: [
@@ -588,9 +614,16 @@ createApp({
                 ],
                 dataZoom: [{ type: 'inside', xAxisIndex: [0, 1], start: 50, end: 100 }],
                 series: [
-                    { name: '收盘价', type: 'line', data: closes, smooth: true,
-                      lineStyle: { color: '#333', width: 2 }, areaStyle: { color: 'rgba(51,51,51,0.08)' } },
-                    { name: '成交量', type: 'bar', xAxisIndex: 1, yAxisIndex: 1, data: volumes, itemStyle: { color: '#999' } }
+                    {
+                        name: 'K线', type: 'candlestick', data: ohlc,
+                        itemStyle: {
+                            color: '#d32f2f', color0: '#2e7d32',
+                            borderColor: '#d32f2f', borderColor0: '#2e7d32'
+                        }
+                    },
+                    { name: 'MA5', type: 'line', data: ma5, smooth: true, symbol: 'none', lineStyle: { width: 1, color: '#f9a825' } },
+                    { name: 'MA10', type: 'line', data: ma10, smooth: true, symbol: 'none', lineStyle: { width: 1, color: '#283593' } },
+                    { name: '成交量', type: 'bar', xAxisIndex: 1, yAxisIndex: 1, data: volumes }
                 ]
             }, true);
         },

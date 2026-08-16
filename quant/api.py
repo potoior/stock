@@ -8,7 +8,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 import strategy_engine as se
-from data_fetcher import get_daily_data, fetch_realtime
+from data_fetcher import fetch_realtime
 
 app = FastAPI(title="A股量化监控系统")
 WEB_DIR = Path(__file__).parent / "web"
@@ -21,9 +21,10 @@ DEFAULT_CODES = ["600789", "000001", "600519", "601318", "000333", "002415"]
 
 def compute_signals(code, current_price=None):
     try:
-        df = get_daily_data(code, "20240101")
+        df = se.get_daily_data(code)
         if len(df) < 60:
             return {}
+        df = df.sort_values("date").reset_index(drop=True)
         close = df["close"].astype(float)
         high = df["high"].astype(float)
         low = df["low"].astype(float)
@@ -198,6 +199,7 @@ async def create_strategy(body: dict):
     }
     strategies.append(strategy)
     se.save_strategies(strategies)
+    se.clear_ai_cache()
     return {"ok": True, "strategy": strategy}
 
 
@@ -214,6 +216,8 @@ async def update_strategy(sid: str, req: dict):
         strategies.append({"id": sid, **req})
         found = True
     se.save_strategies(strategies)
+    if found:
+        se.clear_ai_cache()
     return {"ok": found}
 
 
@@ -223,6 +227,8 @@ def delete_strategy(sid: str):
     new = [s for s in strategies if s["id"] != sid]
     changed = len(new) != len(strategies)
     se.save_strategies(new)
+    if changed:
+        se.clear_ai_cache()
     return {"ok": changed, "msg": "已删除" if changed else "未找到"}
 
 
