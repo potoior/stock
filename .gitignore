@@ -1,13 +1,10 @@
 .venv/
 stock_cache.db
 agent_data.db
+agent_data_ai.db
+agent_data_rule.db
 __pycache__/
 *.pyc
 .DS_Store
 *.pdf
-*.dbconfig.json
-
-agent_data_ai.db
-agent_data_rule.db
-
-agent_data.db
+config.json
