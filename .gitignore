@@ -6,6 +6,7 @@ __pycache__/
 .DS_Store
 *.pdf
 *.dbconfig.json
+quant/config.json
 
 agent_data_ai.db
 agent_data_rule.db
