@@ -1,0 +1,767 @@
+
+const { createApp } = Vue;
+createApp({
+    data() {
+        return {
+            tab: 'watchlist',
+            // watchlist
+            watchlist: [], newCode: '', searchResults: [], showSearch: false,
+            // market
+            quotes: [], codesInput: '',
+            time: '', timer: null,
+            // analyze
+            analyzeCode: '', analysis: null, analysisList: [], analyzing: false,
+            analyzeChart: null,
+            // strategies
+            strategies: [], metrics: {},
+            showEditor: false, editor: { name: '', buy_rule: '', sell_rule: '' }, editorId: '',
+            toast: '',
+            // agent
+            agent: {
+                running: false, lastRun: null,
+                ai: { cash: 10000, market_value: 0, total_value: 10000, total_return: 0, return_pct: 0, positions: [], trade_count: 0 },
+                rule: { cash: 10000, market_value: 0, total_value: 10000, total_return: 0, return_pct: 0, positions: [], trade_count: 0 },
+                ai_history: [], rule_history: [],
+            },
+            agentTrades: [], agentLogs: [], agentChart: null, agentTimer: null,
+            // daily scan
+            dsStatus: { next_run: null, last_run: null, last_status: 'idle' },
+            dsRunning: false, dsReport: { exists: false, markdown: '' },
+            dsReportDates: [], dsSelectedDate: '', dsPollTimer: null,
+            // yujie picks
+            yjStatus: { next_run: null, last_run: null, last_status: 'idle' },
+            yjPicks: [], yjRunning: false, yjPollTimer: null, yjTimer: null,
+            yjParams: null, yjDefaults: null, showYjParams: false, yjSaving: false,
+            yjSearchQ: '', yjSearchResults: [], showYjSearch: false,
+            yjScoreItem: null, yjScoreScoring: false,
+            yjSelected: null, yjKlineChart: null, yjKlineLoading: false,
+            yjView: 'list', yjPage: 1,
+        };
+    },
+    computed: {
+        builtinStrategies() { return this.strategies.filter(s => s.builtin); },
+        customStrategies() { return this.strategies.filter(s => !s.builtin); },
+        dsReportHtml() { return this.mdToHtml(this.dsReport.markdown || ''); },
+        yjDetailRows() {
+            const d = (this.yjSelected && this.yjSelected.detail) || {};
+            const r = [];
+            const add = (label, k, hit, fmt) => {
+                let v = d[k];
+                if (fmt && typeof v === 'number') v = fmt(v);
+                if (v == null) v = '-';
+                r.push({ k, label, value: v, hit: !!hit });
+            };
+            add('现价', 'price', d.price > 0, v => v.toFixed(2));
+            add('MA5', 'ma5', d.ma5 > 0 && d.price > d.ma5, v => v.toFixed(2));
+            add('MA10', 'ma10', d.ma10 > 0 && d.price > d.ma10, v => v.toFixed(2));
+            add('MA20', 'ma20', d.ma20 > 0 && d.price > d.ma20, v => v.toFixed(2));
+            add('MA60', 'ma60', d.ma60 > 0 && d.price > d.ma60, v => v.toFixed(2));
+            const bull = d.price > d.ma5 && d.ma5 > d.ma10 && d.ma10 > d.ma20 && d.ma20 > d.ma60;
+            add('多线多头', 'bull_ma', !!d.bull_ma, v => v.toFixed(1));
+            add('MACD DIFF(12-26)', 'macd_dif', !!d.macd_golden || !!d.macd_near, v => v.toFixed(3));
+            add('MACD DEA(9)', 'macd_dea', !!d.macd_golden || !!d.macd_near, v => v.toFixed(3));
+            add('MACD 柱', 'macd_bar', !!d.macd_green, v => v.toFixed(3));
+            add('MACD 金叉', 'macd_golden', !!d.macd_golden, v => v.toFixed(1));
+            add('MACD 即将金叉', 'macd_near', !!d.macd_near, v => v.toFixed(1));
+            add('RSI6', 'rsi6', !!d.rsi_golden, v => v.toFixed(1));
+            add('RSI12', 'rsi12', !!d.rsi_golden, v => v.toFixed(1));
+            add('RSI 金叉', 'rsi_golden', !!d.rsi_golden, v => v.toFixed(1));
+            add('MOS 低点(底背离)', 'mos_bottom', !!d.mos_bottom, v => v.toFixed(1));
+            add('MOS CL1', 'cl1', !!d.mos_bottom, v => v.toFixed(2));
+            add('MOS CL2', 'cl2', !!d.mos_bottom, v => v.toFixed(2));
+            add('MOS 低位区', 'low_pos', !!d.low_pos, v => v.toFixed(1));
+            add('深回撤(距120日高)', 'drawdown', !!d.drawdown, v => v.toFixed(1));
+            return r;
+        },
+        yjPagedPicks() {
+            const start = (this.yjPage - 1) * 10;
+            return this.yjPicks.slice(start, start + 10);
+        },
+        yjTotalPages() {
+            return Math.ceil(this.yjPicks.length / 10) || 1;
+        }
+    },
+    methods: {
+        toastMsg(msg) { this.toast = msg; setTimeout(() => this.toast = '', 2500); },
+        async searchStock(q) {
+            if (!q || q.length < 2) { this.searchResults = []; this.showSearch = false; return; }
+            try {
+                const res = await fetch('/api/search?q=' + encodeURIComponent(q));
+                const data = await res.json();
+                this.searchResults = data.results || [];
+                this.showSearch = this.searchResults.length > 0;
+            } catch (e) { this.searchResults = []; }
+        },
+        pickSearchResult(item) {
+            this.newCode = item.code;
+            this.showSearch = false;
+            this.searchResults = [];
+        },
+        pctClass(p) { return p == null ? 'flat' : (p > 0 ? 'up' : (p < 0 ? 'down' : 'flat')); },
+        badgeFor(q) {
+            let s = 0;
+            if (q.ma5 != null && q.price > q.ma5) s++;
+            if (q.macd_bull) s++;
+            if (q.kdj_signal === '超卖') s++;
+            if (q.kdj_signal === '超买') s--;
+            if (s >= 2) return 'badge-buy';
+            if (s <= -1) return 'badge-sell';
+            return 'badge-neutral';
+        },
+        badgeText(q) {
+            let s = 0;
+            if (q.ma5 != null && q.price > q.ma5) s++;
+            if (q.macd_bull) s++;
+            if (q.kdj_signal === '超卖') s++;
+            if (q.kdj_signal === '超买') s--;
+            if (s >= 2) return '📈 关注';
+            if (s <= -1) return '📉 观望';
+            return '➡️ 中性';
+        },
+        indicatorName(k) {
+            const map = {
+                macd_diff: 'MACD DIFF', macd_dea: 'MACD DEA', macd_bar: 'MACD柱',
+                k: 'KDJ K', d: 'KDJ D', j: 'KDJ J',
+                boll_u: 'BOLL上轨', boll_m: 'BOLL中轨', boll_l: 'BOLL下轨',
+                bbiboll_u: 'BBIBOLL上轨', bbiboll_m: 'BBIBOLL中轨', bbiboll_l: 'BBIBOLL下轨',
+                ma5: 'MA5', ma10: 'MA10', ma20: 'MA20', ma60: 'MA60',
+                psy: 'PSY', bias1: 'BIAS6', bias2: 'BIAS12', bias3: 'BIAS24',
+                pdi: 'PDI', mdi: 'MDI', adx: 'ADX', sar: 'SAR', tower: '宝塔线'
+            };
+            return map[k] || k;
+        },
+        formatIndicator(key, v) {
+            if (v == null) return '-';
+            if (key === 'tower') return v > 0 ? '红' : (v < 0 ? '绿' : '平');
+            if (typeof v === 'number') {
+                if (key.startsWith('bias') || key === 'psy' || ['k','d','j','pdi','mdi','adx'].includes(key)) return v.toFixed(1);
+                if (['macd_diff','macd_dea','macd_bar'].includes(key)) return v.toFixed(3);
+                return v.toFixed(2);
+            }
+            return v;
+        },
+        modeLabel(m) { return { buy: '🟢 买入', sell: '🔴 卖出', hold: '⚪ 观望' }[m]; },
+        paramName(k) {
+            return { fast:'快线', slow:'慢线', signal:'信号', n:'周期', k1:'K平滑', d1:'D平滑', period:'周期', std:'倍数', short:'短阈值', long:'长阈值', m:'M' }[k] || k;
+        },
+        metricName(k) { return this.metrics[k] || k; },
+        opText(op) {
+            return { '>':'大于', '>=':'大于等于', '<':'小于', '<=':'小于等于', '==':'等于', 'is_true':'为真' }[op] || op;
+        },
+
+        // ---------- watchlist ----------
+        async loadWatchlist() {
+            try {
+                const res = await fetch('/api/watchlist');
+                const data = await res.json();
+                this.watchlist = data.data || [];
+            } catch (e) { console.error('加载自选股失败', e); }
+        },
+        async addWatch() {
+            const code = this.newCode.trim().replace(/^[szsh]/i, '');
+            if (!code) return;
+            try {
+                const res = await fetch('/api/watchlist?code=' + encodeURIComponent(code), { method: 'POST' });
+                const data = await res.json();
+                this.toastMsg(data.msg);
+                this.newCode = '';
+                this.loadWatchlist();
+            } catch (e) { this.toastMsg('添加失败'); }
+        },
+        async removeWatch(code) {
+            await fetch('/api/watchlist/' + code, { method: 'DELETE' });
+            this.loadWatchlist();
+        },
+
+        // ---------- market ----------
+        async loadQuotes() {
+            let codes = this.codesInput.replace(/\s+/g, '').replace(/，/g, ',');
+            if (!codes && this.watchlist.length) {
+                codes = this.watchlist.map(w => w.code).join(',');
+                this.codesInput = codes;
+            }
+            if (!codes) { this.toastMsg('自选股为空，请先添加自选股'); return; }
+            try {
+                const res = await fetch('/api/quotes?codes=' + encodeURIComponent(codes));
+                const data = await res.json();
+                this.quotes = data.data;
+                this.time = data.time;
+            } catch (e) { console.error('加载行情失败', e); }
+        },
+        loadQuotesWithWatchlist() {
+            const codes = this.watchlist.map(w => w.code).join(',');
+            if (codes) { this.codesInput = codes; this.loadQuotes(); }
+            else this.toastMsg('自选股为空');
+        },
+
+        // ---------- analyze ----------
+        async doAnalyze() {
+            const code = this.analyzeCode.trim().replace(/^[szsh]/i, '');
+            if (!code) return;
+            this.analyzing = true;
+            this.tab = 'analyze';
+            try {
+                await this.loadAnalysis(code);
+            } catch (e) { console.error('分析失败', e); }
+            this.analyzing = false;
+        },
+        async analyzeAll() {
+            if (!this.watchlist.length) { this.toastMsg('自选股为空'); return; }
+            this.analyzing = true; this.tab = 'analyze'; this.analysisList = [];
+            for (const w of this.watchlist) {
+                try {
+                    const res = await fetch('/api/analyze/' + w.code);
+                    const data = await res.json();
+                    if (!data.error) {
+                        this.analysisList.push({ code: w.code, name: data.realtime && data.realtime.name || w.name });
+                        if (!this.analysis) this.analysis = this.normalizeAnalysis(data);
+                    }
+                } catch (e) {}
+            }
+            this.analyzing = false;
+            if (!this.analysis) this.toastMsg('所有自选分析失败');
+        },
+        async loadAnalysis(code) {
+            const res = await fetch('/api/analyze/' + code);
+            const data = await res.json();
+            if (data.error) { this.toastMsg(data.error); return; }
+            this.analysis = this.normalizeAnalysis(data);
+            if (!this.analysisList.find(a => a.code === code)) {
+                this.analysisList.push({ code: code, name: data.realtime && data.realtime.name || code });
+            }
+            this.$nextTick(() => this.renderAnalyzeChart());
+        },
+        async viewAnalysis(code) {
+            this.analyzing = true;
+            await this.loadAnalysis(code);
+            this.analyzing = false;
+        },
+        normalizeAnalysis(data) {
+            const r = data.realtime || {};
+            return {
+                verdict: data.verdict, verdictIcon: data.verdict_icon,
+                verdictClass: data.verdict === '买入' ? 'buy' : (data.verdict === '卖出' ? 'sell' : 'hold'),
+                realtime: r, summary: data.summary,
+                currentPrice: r.price != null ? r.price.toFixed(2) : '-',
+                indicators: data.indicators,
+                buyReasons: data.buy_reasons || [],
+                sellReasons: data.sell_reasons || [],
+                holdReasons: data.hold_reasons || [],
+                kline: data.kline || [],
+            };
+        },
+        renderAnalyzeChart() {
+            const el = document.getElementById('analyzeChart');
+            if (!el || !this.analysis) return;
+            if (!this.analyzeChart) this.analyzeChart = echarts.init(el);
+            const kl = this.analysis.kline;
+            const dates = kl.map(d => d.date);
+            const ohlc = kl.map(d => [d.open, d.close, d.low, d.high]);
+            const volumes = kl.map((d, idx) => ({
+                value: d.volume,
+                itemStyle: { color: d.close >= d.open ? '#d32f2f' : '#2e7d32' }
+            }));
+            const closes = kl.map(d => d.close);
+            const vol = kl.map(d => d.volume);
+            const ma5 = closes.map((_, i) => {
+                if (i < 4) return '-';
+                const s = closes.slice(i - 4, i + 1);
+                return +(s.reduce((a, b) => a + b, 0) / 5).toFixed(2);
+            });
+            const ma10 = closes.map((_, i) => {
+                if (i < 9) return '-';
+                const s = closes.slice(i - 9, i + 1);
+                return +(s.reduce((a, b) => a + b, 0) / 10).toFixed(2);
+            });
+            this.analyzeChart.setOption({
+                tooltip: {
+                    trigger: 'axis', axisPointer: { type: 'cross' },
+                    formatter: function (params) {
+                        const p = params.find(x => x.seriesType === 'candlestick');
+                        if (!p) return '';
+                        const d = kl[p.dataIndex];
+                        return `${d.date}<br>
+                            开: ${d.open.toFixed(2)}  收: ${d.close.toFixed(2)}<br>
+                            高: ${d.high.toFixed(2)}  低: ${d.low.toFixed(2)}<br>
+                            量: ${d.volume.toLocaleString()}`;
+                    }
+                },
+                grid: [
+                    { left: 60, right: 20, top: 20, height: '55%' },
+                    { left: 60, right: 20, top: '72%', height: '18%' }
+                ],
+                xAxis: [
+                    { type: 'category', data: dates, boundaryGap: true, axisLine: { lineStyle: { color: '#ccc' } } },
+                    { type: 'category', data: dates, axisLabel: { show: false }, axisLine: { lineStyle: { color: '#ccc' } } }
+                ],
+                yAxis: [
+                    { type: 'value', scale: true, splitLine: { lineStyle: { color: '#f0f0f0' } } },
+                    { type: 'value', axisLabel: { show: false }, splitLine: { show: false } }
+                ],
+                dataZoom: [{ type: 'inside', xAxisIndex: [0, 1], start: 50, end: 100 }],
+                series: [
+                    {
+                        name: 'K线', type: 'candlestick', data: ohlc,
+                        itemStyle: {
+                            color: '#d32f2f', color0: '#2e7d32',
+                            borderColor: '#d32f2f', borderColor0: '#2e7d32'
+                        }
+                    },
+                    { name: 'MA5', type: 'line', data: ma5, smooth: true, symbol: 'none', lineStyle: { width: 1, color: '#f9a825' } },
+                    { name: 'MA10', type: 'line', data: ma10, smooth: true, symbol: 'none', lineStyle: { width: 1, color: '#283593' } },
+                    { name: '成交量', type: 'bar', xAxisIndex: 1, yAxisIndex: 1, data: volumes }
+                ]
+            }, true);
+        },
+
+        // ---------- strategies ----------
+        async loadStrategies() {
+            try {
+                const res = await fetch('/api/strategies');
+                const data = await res.json();
+                this.strategies = data.strategies || [];
+            } catch (e) { console.error('加载策略失败', e); }
+            try {
+                const m = await (await fetch('/api/strategy-metrics')).json();
+                this.metrics = m.metrics || {};
+            } catch (e) {}
+        },
+        async toggleStrategy(s) {
+            s.enabled = !s.enabled;
+            await this.saveStrategyRow(s);
+            this.toastMsg((s.enabled ? '已开启 ' : '已关闭 ') + s.name);
+        },
+        async updateParam(s, key, val) {
+            const num = parseFloat(val);
+            if (isNaN(num)) return;
+            if (!s.params) s.params = {};
+            s.params[key] = num;
+            if (s.param_defs && s.param_defs[key]) s.param_defs[key].value = num;
+            await this.saveStrategyRow(s);
+            this.toastMsg('已更新 ' + s.name + ' 参数 ' + key + '=' + num);
+        },
+        async saveStrategyRow(s) {
+            // 内置策略只提交 id/enabled/params（param_defs/detail 是展示用，不提交）
+            const body = s.builtin
+                ? { id: s.id, enabled: s.enabled, params: s.params || {} }
+                : s;
+            await fetch('/api/strategies/' + s.id, {
+                method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+            });
+        },
+        async deleteStrategy(s) {
+            if (!confirm('确认删除策略「' + s.name + '」？')) return;
+            const res = await fetch('/api/strategies/' + s.id, { method: 'DELETE' });
+            const data = await res.json();
+            this.toastMsg(data.msg);
+            this.loadStrategies();
+        },
+        openRuleEditor(s) {
+            this.editorId = s ? s.id : '';
+            this.editor = s ? {
+                name: s.name,
+                buy_rule: s.buy_rule || (s.buy && s.buy.length ? s.buy.map(c => metricName(c.metric) + ' ' + opText(c.op) + ' ' + c.threshold).join(' 且 ') : ''),
+                sell_rule: s.sell_rule || (s.sell && s.sell.length ? s.sell.map(c => metricName(c.metric) + ' ' + opText(c.op) + ' ' + c.threshold).join(' 且 ') : ''),
+            } : { name: '', buy_rule: '', sell_rule: '' };
+            this.showEditor = true;
+        },
+        async saveStrategy() {
+            const payload = {
+                id: this.editorId || undefined,
+                name: this.editor.name.trim() || '未命名策略',
+                type: 'custom', enabled: true,
+                buy_rule: (this.editor.buy_rule || '').trim(),
+                sell_rule: (this.editor.sell_rule || '').trim(),
+            };
+            if (this.editorId) {
+                await fetch('/api/strategies/' + this.editorId, {
+                    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+                });
+            } else {
+                await fetch('/api/strategies', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+                });
+            }
+            this.showEditor = false;
+            this.toastMsg('策略已保存');
+            await this.loadStrategies();
+        },
+
+        openAnalyze(code) {
+            this.analyzeCode = code;
+            this.tab = 'analyze';
+            this.doAnalyze();
+        },
+
+        // ---------- agent ----------
+        async loadAgentStatus() {
+            try {
+                const res = await fetch('/api/agent/status');
+                const data = await res.json();
+                if (data.running !== undefined) {
+                    this.agent = data;
+                    this.$nextTick(() => this.renderAgentChart());
+                }
+            } catch (e) { /* console.error('agent status fail', e); */ }
+        },
+        async loadAgentTrades() {
+            try {
+                const res = await fetch('/api/agent/trades?limit=20');
+                const data = await res.json();
+                this.agentTrades = data.trades || [];
+            } catch (e) {}
+        },
+        async loadAgentLogs() {
+            try {
+                const res = await fetch('/api/agent/logs?limit=50');
+                const data = await res.json();
+                this.agentLogs = data.logs || [];
+            } catch (e) {}
+        },
+        exportTrades() {
+            window.open('/api/agent/trades-csv', '_blank');
+        },
+        async startAgent() {
+            const res = await (await fetch('/api/agent/start', { method: 'POST' })).json();
+            this.toastMsg(res.msg);
+            this.loadAgentStatus();
+        },
+        async stopAgent() {
+            const res = await (await fetch('/api/agent/stop', { method: 'POST' })).json();
+            this.toastMsg(res.msg);
+            this.loadAgentStatus();
+        },
+        async resetAgent() {
+            if (!confirm('确认重置？所有持仓和交易记录将被清空，资金恢复为初始值。')) return;
+            const res = await (await fetch('/api/agent/reset', { method: 'POST' })).json();
+            this.toastMsg(res.msg);
+            this.loadAgentStatus();
+            this.loadAgentTrades();
+        },
+        renderAgentChart() {
+            const el = document.getElementById('agentChart');
+            if (!el) return;
+            const aiData = this.agent.ai_history || [];
+            const ruleData = this.agent.rule_history || [];
+            if (!aiData.length && !ruleData.length) return;
+            if (!this.agentChart) this.agentChart = echarts.init(el);
+            const times = aiData.map(d => d.t);
+            this.agentChart.setOption({
+                tooltip: { trigger: 'axis' },
+                grid: { left: 60, right: 20, top: 20, bottom: 30 },
+                xAxis: { type: 'category', data: times, axisLine: { lineStyle: { color: '#ccc' } } },
+                yAxis: { type: 'value', scale: true, splitLine: { lineStyle: { color: '#f0f0f0' } } },
+                series: [
+                    { name: 'AI Agent', type: 'line', data: aiData.map(d => d.v), smooth: true,
+                      lineStyle: { color: '#d32f2f', width: 2 }, itemStyle: { color: '#d32f2f' } },
+                    { name: '规则 Agent', type: 'line', data: ruleData.map(d => d.v), smooth: true,
+                      lineStyle: { color: '#1565c0', width: 2 }, itemStyle: { color: '#1565c0' } },
+                ],
+                legend: { data: ['AI Agent', '规则 Agent'], bottom: 0 },
+            }, true);
+        },
+        // ===== 每日扫描 =====
+        async loadDailyScan() {
+            await Promise.all([this.loadDailyScanStatus(), this.loadDailyScanReports(), this.loadDailyScanReport()]);
+        },
+        async loadDailyScanStatus() {
+            try {
+                const r = await (await fetch('/api/daily-scan/status')).json();
+                this.dsStatus = r;
+                this.dsRunning = r.last_status === 'running';
+            } catch (e) {}
+        },
+        async loadDailyScanReports() {
+            try {
+                const r = await (await fetch('/api/daily-scan/reports')).json();
+                this.dsReportDates = r.dates || [];
+            } catch (e) {}
+        },
+        async loadDailyScanReport() {
+            try {
+                const url = '/api/daily-scan/report' + (this.dsSelectedDate ? '?date=' + this.dsSelectedDate : '');
+                const r = await (await fetch(url)).json();
+                this.dsReport = r;
+            } catch (e) {}
+        },
+        async runDailyScan() {
+            try {
+                await fetch('/api/daily-scan/run', { method: 'POST' });
+                this.toastMsg('已触发扫描，后台执行中…');
+                this.dsRunning = true;
+                // 轮询状态直到完成
+                if (this.dsPollTimer) clearInterval(this.dsPollTimer);
+                this.dsPollTimer = setInterval(async () => {
+                    await this.loadDailyScanStatus();
+                    if (this.dsStatus.last_status !== 'running') {
+                        clearInterval(this.dsPollTimer);
+                        this.dsPollTimer = null;
+                        this.dsRunning = false;
+                        await this.loadDailyScanReport();
+                        await this.loadDailyScanReports();
+                        this.toastMsg('扫描完成，日报已更新');
+                    }
+                }, 5000);
+            } catch (e) { this.toastMsg('触发失败'); }
+        },
+        // ===== 玉姐精选 =====
+        yjParamLabel(gkey, key) {
+            const map = {
+                scope: { min_history_days: '最少历史天数', min_amount_yi: '最低成交额(亿)', exclude_sz_code: '剔除板块代码' },
+                macd: { golden_score: '金叉分数', near_size: '即将金叉差值阈值', near_score: '即将金叉分数', green_shrink_score: '绿柱缩短分数' },
+                mos: { bottom_score: '低点分数', green_shrink_score: '绿柱缩短分数' },
+                breakout: { score: '突破分数', period: '突破回看周期(日)' },
+                rsi: { score: '金叉分数', p1: '短线周期', p2: '长线周期' },
+                bull_ma: { score: '多头分数', m1: '短期均线1', m2: '短期均线2', m3: '中期均线', m4: '长期均线' },
+                low_pos: { score: '低位分数', period: '回看周期(日)', ratio: '低位比例' },
+                drawdown: { score: '回撤分数', period: '回看周期(日)', threshold: '回撤阈值' },
+            };
+            return (map[gkey] || {})[key] || key;
+        },
+        async loadYujie() {
+            await Promise.all([this.loadYujieStatus(), this.loadYujiePicks()]);
+        },
+        async loadYujieStatus() {
+            try {
+                const r = await (await fetch('/api/yujie/status')).json();
+                this.yjStatus = r;
+                this.yjRunning = r.last_status === 'running';
+            } catch (e) {}
+        },
+        async loadYujiePicks() {
+            try {
+                const r = await (await fetch('/api/yujie/picks')).json();
+                this.yjPicks = r.picks || [];
+            } catch (e) {}
+        },
+        yjSelectStock(p) {
+            this.yjSelected = p;
+            this.loadYjKline(p.code);
+        },
+        yjViewDetail(p) {
+            this.yjSelected = p;
+            this.yjView = 'detail';
+            this.$nextTick(() => this.loadYjKline(p.code));
+        },
+        yjBackToList() {
+            this.yjView = 'list';
+            this.yjSelected = null;
+            if (this.yjKlineChart) { this.yjKlineChart.dispose(); this.yjKlineChart = null; }
+        },
+        yjGoPage(n) {
+            if (n >= 1 && n <= this.yjTotalPages) this.yjPage = n;
+        },
+        async loadYjKline(code) {
+            this.yjKlineLoading = false;
+            try {
+                const r = await (await fetch('/api/kline/' + code + '?days=120')).json();
+                const kl = r.data || [];
+                this.$nextTick(() => this.renderYjKline(kl));
+            } catch (e) {}
+        },
+        renderYjKline(kl) {
+            const el = document.getElementById('yjKlineChart');
+            if (!el || !kl.length) return;
+            if (!this.yjKlineChart) this.yjKlineChart = echarts.init(el);
+            const dates = kl.map(d => d.date);
+            const ohlc = kl.map(d => [d.open, d.close, d.low, d.high]);
+            const volumes = kl.map(d => ({
+                value: d.volume,
+                itemStyle: { color: d.close >= d.open ? '#d32f2f' : '#2e7d32' }
+            }));
+            const closes = kl.map(d => d.close);
+            const ma5 = closes.map((_, i) => {
+                if (i < 4) return '-';
+                const s = closes.slice(i - 4, i + 1);
+                return +(s.reduce((a, b) => a + b, 0) / 5).toFixed(2);
+            });
+            const ma10 = closes.map((_, i) => {
+                if (i < 9) return '-';
+                const s = closes.slice(i - 9, i + 1);
+                return +(s.reduce((a, b) => a + b, 0) / 10).toFixed(2);
+            });
+            this.yjKlineChart.setOption({
+                tooltip: {
+                    trigger: 'axis', axisPointer: { type: 'cross' },
+                    formatter: function (params) {
+                        const p = params.find(x => x.seriesType === 'candlestick');
+                        if (!p) return '';
+                        const d = kl[p.dataIndex];
+                        return `${d.date}<br>开: ${d.open.toFixed(2)}  收: ${d.close.toFixed(2)}<br>高: ${d.high.toFixed(2)}  低: ${d.low.toFixed(2)}<br>量: ${d.volume.toLocaleString()}`;
+                    }
+                },
+                grid: [
+                    { left: 50, right: 16, top: 20, height: '58%' },
+                    { left: 50, right: 16, top: '76%', height: '14%' }
+                ],
+                xAxis: [
+                    { type: 'category', data: dates, boundaryGap: true, axisLabel: { show: false }, axisLine: { lineStyle: { color: '#ccc' } } },
+                    { type: 'category', data: dates, axisLabel: { show: false }, axisLine: { lineStyle: { color: '#ccc' } } }
+                ],
+                yAxis: [
+                    { type: 'value', scale: true, splitLine: { lineStyle: { color: '#f0f0f0' } } },
+                    { type: 'value', axisLabel: { show: false }, splitLine: { show: false } }
+                ],
+                dataZoom: [{ type: 'inside', xAxisIndex: [0, 1], start: 60, end: 100 }],
+                series: [
+                    {
+                        name: 'K线', type: 'candlestick', data: ohlc,
+                        itemStyle: {
+                            color: '#d32f2f', color0: '#2e7d32',
+                            borderColor: '#d32f2f', borderColor0: '#2e7d32'
+                        }
+                    },
+                    { name: 'MA5', type: 'line', data: ma5, smooth: true, symbol: 'none', lineStyle: { width: 1, color: '#f9a825' } },
+                    { name: 'MA10', type: 'line', data: ma10, smooth: true, symbol: 'none', lineStyle: { width: 1, color: '#283593' } },
+                    { name: '成交量', type: 'bar', xAxisIndex: 1, yAxisIndex: 1, data: volumes }
+                ]
+            }, true);
+        },
+        yjSearchKeyup() {
+            const q = this.yjSearchQ.trim();
+            if (!q || q.length < 2) { this.yjSearchResults = []; this.showYjSearch = false; return; }
+            fetch('/api/search?q=' + encodeURIComponent(q))
+                .then(r => r.json())
+                .then(d => {
+                    this.yjSearchResults = (d.results || []).slice(0, 8);
+                    this.showYjSearch = true;
+                }).catch(() => { this.yjSearchResults = []; });
+        },
+        queryYjScoreByCode(item) {
+            this.yjSearchQ = item.name + ' ' + item.code;
+            this.showYjSearch = false;
+            this.yjSearchResults = [];
+            this.queryYjScore(1);
+        },
+        async queryYjScore(force) {
+            const q = this.yjSearchQ.trim();
+            if (!q || q.length < 2) return;
+            this.yjScoreScoring = true;
+            this.yjScoreItem = { ok: true, code: '', name: '', score: null };
+            try {
+                const r = await (await fetch('/api/yujie/score?q=' + encodeURIComponent(q))).json();
+                this.yjScoreItem = r;
+            } catch (e) {
+                this.yjScoreItem = { ok: false, msg: '查询失败' };
+            }
+            this.yjScoreScoring = false;
+        },
+        async runYujieScan() {
+            try {
+                const r = await (await fetch('/api/yujie/run', { method: 'POST' })).json();
+                this.toastMsg(r.message || '已触发扫描');
+                if (r.started) {
+                    this.yjRunning = true;
+                    if (this.yjPollTimer) clearInterval(this.yjPollTimer);
+                    this.yjPollTimer = setInterval(async () => {
+                        await this.loadYujieStatus();
+                        if (this.yjStatus.last_status !== 'running') {
+                            clearInterval(this.yjPollTimer);
+                            this.yjPollTimer = null;
+                            this.yjRunning = false;
+                            await this.loadYujiePicks();
+                            this.toastMsg('玉姐精选扫描完成');
+                        }
+                    }, 5000);
+                }
+            } catch (e) { this.toastMsg('触发失败'); }
+        },
+        async openYjParams() {
+            try {
+                const r = await (await fetch('/api/yujie/params')).json();
+                this.yjParams = r.params || {};
+                this.yjDefaults = r.defaults || {};
+                this.showYjParams = true;
+            } catch (e) { this.toastMsg('参数加载失败'); }
+        },
+        async saveYjParams() {
+            try {
+                this.yjSaving = true;
+                const r = await (await fetch('/api/yujie/params', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ params: this.yjParams }),
+                })).json();
+                this.yjSaving = false;
+                if (r.ok) {
+                    this.toastMsg('参数已保存，下次扫描生效');
+                    this.showYjParams = false;
+                } else {
+                    this.toastMsg('保存失败');
+                }
+            } catch (e) { this.yjSaving = false; this.toastMsg('保存失败'); }
+        },
+        openAnalysis(code) {
+            this.analyzeCode = code;
+            this.tab = 'analyze';
+            this.doAnalyze();
+        },
+        mdToHtml(md) {
+            if (!md) return '';
+            const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+            const lines = md.split('\n');
+            let html = '', inList = false, inTable = false, tableRows = [];
+            const flushTable = () => {
+                if (!tableRows.length) return;
+                const rows = tableRows.map(r => r.split('|').map(c => c.trim()).filter(Boolean));
+                if (rows.length >= 2) {
+                    html += '<table style="width:100%;border-collapse:collapse;font-size:13px;margin:8px 0;">';
+                    html += '<thead><tr>' + rows[0].map(c => `<th style="border:1px solid #444;padding:4px 8px;background:#2a2a2e;">${esc(c)}</th>`).join('') + '</tr></thead>';
+                    // rows[1] 是分隔行 |---|---|
+                    for (let i = 2; i < rows.length; i++) {
+                        html += '<tr>' + rows[i].map(c => `<td style="border:1px solid #444;padding:4px 8px;">${esc(c)}</td>`).join('') + '</tr>';
+                    }
+                    html += '</table>';
+                }
+                tableRows = [];
+            };
+            for (let line of lines) {
+                if (line.trim().startsWith('|')) { if (inList) { html += '</ul>'; inList = false; } inTable = true; tableRows.push(line.trim()); continue; }
+                else { if (inTable) { flushTable(); inTable = false; } }
+                if (/^###\s/.test(line)) { if (inList) { html += '</ul>'; inList = false; } html += `<h3 style="margin:14px 0 6px;color:#7ec;">${esc(line.replace(/^###\s/,''))}</h3>`; }
+                else if (/^##\s/.test(line)) { if (inList) { html += '</ul>'; inList = false; } html += `<h2 style="margin:16px 0 8px;color:#9e7ec;border-bottom:1px solid #444;padding-bottom:4px;">${esc(line.replace(/^##\s/,''))}</h2>`; }
+                else if (/^#\s/.test(line)) { if (inList) { html += '</ul>'; inList = false; } html += `<h1 style="margin:18px 0 10px;color:#fff;">${esc(line.replace(/^#\s/,''))}</h1>`; }
+                else if (/^\s*[-*]\s/.test(line)) { if (!inList) { html += '<ul style="margin:6px 0 6px 20px;">'; inList = true; } html += `<li>${esc(line.replace(/^\s*[-*]\s/,'')).replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>')}</li>`; }
+                else if (line.trim() === '---') { if (inList) { html += '</ul>'; inList = false; } html += '<hr style="border:none;border-top:1px solid #444;margin:12px 0;">'; }
+                else if (line.trim() === '') { if (inList) { html += '</ul>'; inList = false; } }
+                else { if (inList) { html += '</ul>'; inList = false; } html += `<p style="margin:6px 0;line-height:1.7;">${esc(line).replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>')}</p>`; }
+            }
+            if (inList) html += '</ul>';
+            if (inTable) flushTable();
+            return html;
+        },
+    },
+    mounted() {
+        this.loadWatchlist().then(() => this.loadQuotes());
+        this.loadStrategies();
+        this.loadAgentStatus();
+        this.loadAgentTrades();
+        this.loadAgentLogs();
+        this.timer = setInterval(() => {
+            if (this.tab === 'watchlist') this.loadWatchlist();
+            if (this.tab === 'market') this.loadQuotes();
+        }, 60000);
+        // Agent tab 5秒轮询
+        this.agentTimer = setInterval(() => {
+            if (this.tab === 'agent') {
+                this.loadAgentStatus();
+                this.loadAgentTrades();
+                this.loadAgentLogs();
+            }
+        }, 5000);
+        // 玉姐精选 tab 30秒轮询状态
+        this.yjTimer = setInterval(() => {
+            if (this.tab === 'yujie') {
+                this.loadYujieStatus();
+                if (this.yjStatus.last_status !== 'running') this.loadYujiePicks();
+            }
+        }, 30000);
+    },
+    beforeUnmount() {
+        if (this.timer) clearInterval(this.timer);
+        if (this.agentTimer) clearInterval(this.agentTimer);
+        if (this.yjTimer) clearInterval(this.yjTimer);
+        if (this.dsPollTimer) clearInterval(this.dsPollTimer);
+        if (this.yjPollTimer) clearInterval(this.yjPollTimer);
+    }
+}).mount('#app');

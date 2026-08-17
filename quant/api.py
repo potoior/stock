@@ -15,6 +15,7 @@ WEB_DIR = Path(__file__).parent / "web"
 DB_PATH = Path(__file__).parent / "stock_cache.db"
 
 app.mount("/lib", StaticFiles(directory=str(WEB_DIR / "lib")), name="lib")
+app.mount("/js", StaticFiles(directory=str(WEB_DIR / "js")), name="js")
 
 DEFAULT_CODES = ["600789", "000001", "600519", "601318", "000333", "002415"]
 

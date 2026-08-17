@@ -289,7 +289,7 @@ def compute_mos_lows(df, diff=None, dea=None):
     }
 
 
-def compute_tower(df):
+def compute_dmi(df, n=14, m=6):
     high, low, close = df["high"], df["low"], df["close"]
     ph, pl, pc = high.shift(1), low.shift(1), close.shift(1)
     tr = pd.concat([high - low, (high - pc).abs(), (low - pc).abs()], axis=1).max(axis=1)
