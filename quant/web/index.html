@@ -176,7 +176,7 @@
                 <button :class="{active: tab === 'dailyscan'}" @click="tab='dailyscan'; loadDailyScan()">
                     <span class="icon">📰</span> 每日扫描
                 </button>
-                <button :class="{active: tab === 'yujie'}" @click="tab='yujie'; loadYujie()">
+                <button :class="{active: tab === 'yujie'}" @click="tab='yujie'; yjView='list'; yjPage=1; loadYujie()">
                     <span class="icon">💠</span> 玉姐精选
                 </button>
             </nav>
@@ -536,107 +536,118 @@
 
     <!-- ============ 玉姐精选 ============ -->
     <div v-show="tab === 'yujie'" class="container">
-        <div class="toolbar">
-            <button class="button" @click="runYujieScan" :disabled="yjRunning">▶ 立即扫描</button>
-            <button class="button ghost" @click="openYjParams">⚙️ 参数设置</button>
-            <div style="position:relative;flex:1;min-width:200px;">
-                <input class="input" v-model="yjSearchQ" placeholder="🔍 输入股票名称或代码查评分，如 鲁抗 / 600789"
+
+        <!-- ===== 列表视图 ===== -->
+        <template v-if="yjView === 'list'">
+        <div class="toolbar" style="margin-bottom:10px;">
+            <button class="button" @click="runYujieScan" :disabled="yjRunning" style="white-space:nowrap;">▶ 立即扫描</button>
+            <button class="button ghost" @click="openYjParams" style="white-space:nowrap;">⚙️ 参数</button>
+            <span :class="'badge ' + (yjRunning ? 'badge-neutral' : (yjStatus.last_status === 'ok' ? 'badge-buy' : 'badge-neutral'))" style="font-size:12px;padding:3px 10px;white-space:nowrap;">
+                {{ yjRunning ? '🟢 扫描中…' : (yjStatus.last_status === 'ok' ? '✅ 已完成' : '⚪ 待运行') }}
+            </span>
+            <span class="hint" v-if="yjStatus.next_run" style="white-space:nowrap;">下次: {{ yjStatus.next_run }}</span>
+            <span class="hint" v-if="yjStatus.last_run" style="white-space:nowrap;">上次: {{ yjStatus.last_run }}</span>
+            <div style="flex:1;min-width:160px;position:relative;">
+                <input class="input" v-model="yjSearchQ" placeholder="🔍 搜代码或名称查评分"
                        @keyup.enter="queryYjScore(1)" @keyup="yjSearchKeyup" @focus="showYjSearch = true"
-                       @blur="setTimeout(() => showYjSearch = false, 200)">
+                       @blur="setTimeout(() => showYjSearch = false, 200)" style="padding:6px 10px;font-size:12px;">
                 <div v-if="showYjSearch && yjSearchResults.length"
-                     style="position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid #d0d0d0;border-radius:6px;z-index:50;max-height:220px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,0.1);">
+                     style="position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid #d0d0d0;border-radius:6px;z-index:50;max-height:200px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,0.1);">
                     <div v-for="item in yjSearchResults" :key="item.code" @mousedown="queryYjScoreByCode(item)"
-                         style="padding:8px 12px;cursor:pointer;border-bottom:1px solid #f0f0f0;font-size:13px;"
+                         style="padding:6px 10px;cursor:pointer;border-bottom:1px solid #f0f0f0;font-size:12px;"
                          onmouseover="this.style.background='#f5f5f5'" onmouseout="this.style.background='#fff'">
                         <b>{{ item.code }}</b> {{ item.name }}
                     </div>
                 </div>
             </div>
-            <span :class="'badge ' + (yjRunning ? 'badge-neutral' : (yjStatus.last_status === 'ok' ? 'badge-buy' : 'badge-neutral'))" style="font-size:13px;padding:4px 12px;">
-                {{ yjRunning ? '🟢 扫描中…' : (yjStatus.last_status === 'ok' ? '✅ 已完成' : '⚪ 待运行') }}
-            </span>
-            <span class="hint" v-if="yjStatus.next_run">下次自动: {{ yjStatus.next_run }}</span>
-            <span class="hint" v-if="yjStatus.last_run">上次: {{ yjStatus.last_run }}</span>
         </div>
-        <div class="hint" style="margin:8px 0 12px;" v-if="yjRunning">全市场扫描约需 30-60 分钟，请稍候，页面会自动刷新…</div>
+        <div class="hint" style="margin:-4px 0 10px;font-size:12px;" v-if="yjRunning">全市场扫描进行中，请稍候…</div>
 
         <!-- 搜索评分结果 -->
-        <div class="card" v-if="yjScoreItem" style="margin-bottom:16px;">
-            <div class="card-title">🔎 查询结果</div>
-            <div v-if="yjScoreScoring" style="color:#999;font-size:13px;">正在计算 {{ yjScoreItem.code }} 的评分…</div>
-            <div v-else-if="!yjScoreItem.ok">
-                <div class="empty" style="padding:16px;">{{ yjScoreItem.msg || '未找到该股票' }}</div>
-            </div>
-            <div v-else style="display:flex;flex-wrap:wrap;gap:20px;align-items:center;">
-                <div style="font-size:18px;font-weight:600;">{{ yjScoreItem.name }}
-                    <span style="font-size:13px;color:#888;font-weight:400;">{{ yjScoreItem.code }}</span>
-                </div>
-                <div style="text-align:center;">
-                    <div style="font-size:11px;color:#888;">评分</div>
-                    <div style="font-size:32px;font-weight:700;color:#c62828;">{{ yjScoreItem.score }}</div>
-                </div>
-                <div style="text-align:center;" v-if="yjScoreItem.rank">
-                    <div style="font-size:11px;color:#888;">今日榜单排名</div>
-                    <div style="font-size:24px;font-weight:600;color:#1565c0;">{{ yjScoreItem.rank }}</div>
-                </div>
-                <div>
-                    <div style="font-size:11px;color:#888;margin-bottom:4px;">命中信号</div>
-                    <span v-for="h in yjScoreItem.hits" :key="h" class="rule-chip" style="display:inline-block;margin:2px 4px 2px 0;">{{ h }}</span>
-                    <span v-if="!yjScoreItem.hits.length" style="color:#999;font-size:12px;">无命中（评分 0）</span>
-                </div>
-                <button class="button sm ghost" @click="openAnalysis(yjScoreItem.code)">查看个股分析</button>
+        <div class="card" v-if="yjScoreItem" style="margin-bottom:10px;padding:10px 14px;">
+            <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;font-size:13px;">
+                <template v-if="yjScoreScoring">
+                    <span style="color:#999;">正在计算 {{ yjScoreItem.code }} 的评分…</span>
+                </template>
+                <template v-else-if="!yjScoreItem.ok">
+                    <span style="color:#999;">{{ yjScoreItem.msg || '未找到该股票' }}</span>
+                </template>
+                <template v-else>
+                    <b>{{ yjScoreItem.name }}</b>
+                    <span style="color:#888;">{{ yjScoreItem.code }}</span>
+                    <span style="font-size:22px;font-weight:700;color:#c62828;">{{ yjScoreItem.score }}</span>
+                    <span style="color:#888;font-size:12px;">分</span>
+                    <span v-if="yjScoreItem.rank" style="background:#e3f2fd;color:#1565c0;padding:2px 8px;border-radius:10px;font-size:11px;">榜第{{ yjScoreItem.rank }}</span>
+                    <span v-for="h in yjScoreItem.hits" :key="h" class="rule-chip" style="display:inline-block;margin:1px 3px;">{{ h }}</span>
+                    <span v-if="!yjScoreItem.hits.length" style="color:#999;font-size:12px;">未命中</span>
+                    <button class="button sm ghost" style="font-size:12px;" @click="openAnalysis(yjScoreItem.code)">详情 →</button>
+                </template>
             </div>
         </div>
 
-        <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap;">
-            <div class="card" style="margin:0;flex:1 1 480px;min-width:420px;">
-                <div class="card-title">🏆 玉姐精选 Top 榜单 <span class="hint">点击行查看明细</span></div>
-                <table>
-                    <thead>
-                        <tr><th>排名</th><th>代码</th><th>名称</th><th>现价</th><th>涨跌%</th><th>分数</th><th>命中信号</th></tr>
-                    </thead>
-                    <tbody>
-                        <tr v-for="p in yjPicks" :key="p.code" style="cursor:pointer;"
-                            :class="yjSelected && yjSelected.code === p.code ? 'row-selected' : ''"
-                            @click="yjSelectStock(p)">
-                            <td><span :class="'badge ' + (p.rank <= 3 ? 'badge-buy' : 'badge-neutral')">{{ p.rank }}</span></td>
-                            <td>{{ p.code }}</td>
-                            <td><b>{{ p.name }}</b></td>
-                            <td>{{ Number(p.price ?? 0).toFixed(2) }}</td>
-                            <td :class="(p.pct ?? 0) >= 0 ? 'up' : 'down'">{{ (p.pct ?? 0) >= 0 ? '+' : '' }}{{ Number(p.pct ?? 0).toFixed(2) }}</td>
-                            <td><b style="color:#c62828;font-size:15px;">{{ p.score }}</b></td>
-                            <td><span v-for="h in p.hits" :key="h" class="rule-chip" style="display:inline-block;margin:2px 4px 2px 0;">{{ h }}</span></td>
-                        </tr>
-                        <tr v-if="!yjPicks.length"><td colspan="7" class="empty">{{ yjRunning ? '扫描进行中，暂无结果' : '暂无数据。点击「立即扫描」或等待每天 09:00 自动扫描。' }}</td></tr>
-                    </tbody>
-                </table>
+        <!-- 榜单 + 分页 -->
+        <div class="card" style="margin:0;">
+            <div class="card-title" style="font-size:14px;">🏆 Top 50 榜单 <span class="hint" style="font-size:11px;">共 {{ yjPicks.length }} 只，点击名称进详情</span></div>
+            <table style="font-size:12px;">
+                <thead><tr><th>#</th><th>代码</th><th>名称</th><th>现价</th><th>涨跌%</th><th>分</th><th>命中信号</th></tr></thead>
+                <tbody>
+                    <tr v-for="p in yjPagedPicks" :key="p.code" style="cursor:pointer;"
+                        @click="yjViewDetail(p)">
+                        <td><span :class="'badge ' + (p.rank <= 3 ? 'badge-buy' : 'badge-neutral')" style="font-size:11px;padding:1px 6px;">{{ p.rank }}</span></td>
+                        <td style="font-size:11px;">{{ p.code }}</td>
+                        <td><b>{{ p.name }}</b></td>
+                        <td>{{ Number(p.price ?? 0).toFixed(2) }}</td>
+                        <td :class="(p.pct ?? 0) >= 0 ? 'up' : 'down'">{{ (p.pct ?? 0) >= 0 ? '+' : '' }}{{ Number(p.pct ?? 0).toFixed(2) }}</td>
+                        <td><b style="color:#c62828;">{{ p.score }}</b></td>
+                        <td><span v-for="h in p.hits" :key="h" class="rule-chip" style="font-size:10px;padding:1px 6px;margin:1px 2px;">{{ h }}</span></td>
+                    </tr>
+                    <tr v-if="!yjPicks.length"><td colspan="7" class="empty" style="padding:20px;">{{ yjRunning ? '扫描中' : '暂无数据，点击立即扫描' }}</td></tr>
+                </tbody>
+            </table>
+            <!-- 分页器 -->
+            <div v-if="yjTotalPages > 1" style="display:flex;justify-content:center;gap:4px;padding:10px 0 4px;">
+                <button class="button sm ghost" :disabled="yjPage <= 1" @click="yjGoPage(yjPage - 1)" style="font-size:12px;">‹</button>
+                <button v-for="n in yjTotalPages" :key="n" class="button sm"
+                        :class="n === yjPage ? '' : 'ghost'"
+                        @click="yjGoPage(n)" style="font-size:12px;min-width:30px;">{{ n }}</button>
+                <button class="button sm ghost" :disabled="yjPage >= yjTotalPages" @click="yjGoPage(yjPage + 1)" style="font-size:12px;">›</button>
             </div>
+        </div>
+        </template>
 
-            <!-- 右侧：强势明细表 -->
-            <div class="card" style="margin:0;flex:1 1 340px;min-width:300px;">
-                <div class="card-title">
-                    💪 强势明细
-                    <span v-if="yjSelected" style="font-size:13px;color:#888;">{{ yjSelected.name }} ({{ yjSelected.code }})</span>
+        <!-- ===== 详情视图 ===== -->
+        <template v-if="yjView === 'detail' && yjSelected">
+        <div style="margin-bottom:12px;">
+            <button class="button ghost" @click="yjBackToList" style="font-size:12px;">← 返回榜单</button>
+        </div>
+        <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap;">
+            <!-- 左侧：明细表 -->
+            <div class="card" style="margin:0;flex:1 1 340px;min-width:300px;padding:14px;">
+                <div class="card-title" style="font-size:15px;margin-bottom:8px;">
+                    {{ yjSelected.name }} <span style="font-size:13px;color:#888;font-weight:400;">{{ yjSelected.code }}</span>
+                    <span style="float:right;font-size:24px;font-weight:700;color:#c62828;">{{ yjSelected.score }}<span style="font-size:13px;color:#888;font-weight:400;">分</span></span>
                 </div>
-                <div v-if="!yjSelected" class="empty" style="padding:30px;">点击左侧榜单中的股票，查看它的强势指标明细</div>
-                <table v-else>
-                    <thead><tr><th>指标</th><th>当前值</th><th>状态</th></tr></thead>
+                <table style="font-size:12px;">
+                    <thead><tr><th style="padding:3px 8px;">指标</th><th style="padding:3px 8px;">值</th><th style="padding:3px 8px;">强势</th></tr></thead>
                     <tbody>
                         <tr v-for="row in yjDetailRows" :key="row.k">
-                            <td>{{ row.label }}</td>
-                            <td>{{ row.value }}</td>
-                            <td><span :class="row.hit ? 'rule-chip' : 'badge-neutral'" :style="row.hit ? '' : 'color:#bbb;font-size:11px;padding:2px 8px;'">{{ row.hit ? '✓ 强势' : '—' }}</span></td>
+                            <td style="padding:3px 8px;">{{ row.label }}</td>
+                            <td style="padding:3px 8px;font-weight:500;">{{ row.value }}</td>
+                            <td style="padding:3px 8px;"><span :class="row.hit ? 'rule-chip' : 'badge-neutral'" :style="'font-size:11px;padding:1px 8px;' + (row.hit ? '' : 'color:#ccc;')">{{ row.hit ? '✓' : '—' }}</span></td>
                         </tr>
                     </tbody>
                 </table>
+                <div style="margin-top:10px;text-align:right;">
+                    <button class="button sm" @click="openAnalysis(yjSelected.code)">📊 详细分析 →</button>
+                </div>
             </div>
-
-            <!-- 右侧：K线走势图 -->
-            <div class="card" style="margin:0;flex:1 1 340px;min-width:300px;" v-if="yjSelected">
-                <div class="card-title">📈 {{ yjSelected.name }} 走势图 <span class="hint">日K前复权</span></div>
-                <div id="yjKlineChart" class="chart" style="height:280px;"></div>
+            <!-- 右侧：K线图 -->
+            <div class="card" style="margin:0;flex:2 1 500px;min-width:360px;padding:14px;">
+                <div class="card-title" style="font-size:14px;margin-bottom:6px;">📈 {{ yjSelected.name }} 走势图 <span class="hint" style="font-size:11px;">日K前复权 120日</span></div>
+                <div id="yjKlineChart" class="chart" style="height:360px;"></div>
             </div>
         </div>
+        </template>
     </div>
 
     </main>
@@ -742,6 +753,7 @@ createApp({
             yjSearchQ: '', yjSearchResults: [], showYjSearch: false,
             yjScoreItem: null, yjScoreScoring: false,
             yjSelected: null, yjKlineChart: null, yjKlineLoading: false,
+            yjView: 'list', yjPage: 1,
         };
     },
     computed: {
@@ -778,6 +790,13 @@ createApp({
             add('MOS 低位区', 'low_pos', !!d.low_pos, v => v.toFixed(1));
             add('深回撤(距120日高)', 'drawdown', !!d.drawdown, v => v.toFixed(1));
             return r;
+        },
+        yjPagedPicks() {
+            const start = (this.yjPage - 1) * 10;
+            return this.yjPicks.slice(start, start + 10);
+        },
+        yjTotalPages() {
+            return Math.ceil(this.yjPicks.length / 10) || 1;
         }
     },
     methods: {
@@ -1236,6 +1255,19 @@ createApp({
         yjSelectStock(p) {
             this.yjSelected = p;
             this.loadYjKline(p.code);
+        },
+        yjViewDetail(p) {
+            this.yjSelected = p;
+            this.yjView = 'detail';
+            this.$nextTick(() => this.loadYjKline(p.code));
+        },
+        yjBackToList() {
+            this.yjView = 'list';
+            this.yjSelected = null;
+            if (this.yjKlineChart) { this.yjKlineChart.dispose(); this.yjKlineChart = null; }
+        },
+        yjGoPage(n) {
+            if (n >= 1 && n <= this.yjTotalPages) this.yjPage = n;
         },
         async loadYjKline(code) {
             this.yjKlineLoading = false;
