@@ -785,6 +785,40 @@ def yujie_run():
     return {"started": True, "message": "已在后台启动，全市场扫描约需30-60分钟"}
 
 
+@app.get("/api/yujie/score")
+def yujie_score(q: str = ""):
+    """按股票代码或名称查询其玉姐评分（即时计算）。"""
+    if not q or len(q) < 2:
+        return {"ok": False, "msg": "请输入股票代码或名称"}
+
+    # 解析为代码：纯数字直接当代码；否则走新浪搜索接口取第一个A股
+    q = q.strip()
+    code = q if q.isdigit() else None
+    name = ""
+    if code is None:
+        results = search_stock(q).get("results", [])
+        if not results:
+            return {"ok": False, "msg": f"未找到股票「{q}」"}
+        code, name = results[0]["code"], results[0]["name"]
+
+    import yujie_scan
+
+    params = yujie_scan.get_params()
+    rt = se.fetch_realtime([code])
+    name2 = rt[0]["name"] if rt else name or code
+    rank = None
+    try:
+        sc, hits, detail = yujie_scan.score_stock(code, params)
+        for p in yujie_scan.load_picks():
+            if p["code"] == code:
+                rank = p["rank"]
+                break
+        return {"ok": True, "code": code, "name": name2, "score": sc,
+                "hits": hits, "detail": detail, "rank": rank}
+    except Exception as e:
+        return {"ok": False, "msg": f"计算失败: {e}"}
+
+
 def _start_yujie_scheduler():
     """每个交易日 09:00 自动跑玉姐精选扫描。"""
     import os

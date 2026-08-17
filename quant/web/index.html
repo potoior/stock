@@ -538,6 +538,19 @@
         <div class="toolbar">
             <button class="button" @click="runYujieScan" :disabled="yjRunning">▶ 立即扫描</button>
             <button class="button ghost" @click="openYjParams">⚙️ 参数设置</button>
+            <div style="position:relative;flex:1;min-width:200px;">
+                <input class="input" v-model="yjSearchQ" placeholder="🔍 输入股票名称或代码查评分，如 鲁抗 / 600789"
+                       @keyup.enter="queryYjScore(1)" @keyup="yjSearchKeyup" @focus="showYjSearch = true"
+                       @blur="setTimeout(() => showYjSearch = false, 200)">
+                <div v-if="showYjSearch && yjSearchResults.length"
+                     style="position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid #d0d0d0;border-radius:6px;z-index:50;max-height:220px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,0.1);">
+                    <div v-for="item in yjSearchResults" :key="item.code" @mousedown="queryYjScoreByCode(item)"
+                         style="padding:8px 12px;cursor:pointer;border-bottom:1px solid #f0f0f0;font-size:13px;"
+                         onmouseover="this.style.background='#f5f5f5'" onmouseout="this.style.background='#fff'">
+                        <b>{{ item.code }}</b> {{ item.name }}
+                    </div>
+                </div>
+            </div>
             <span :class="'badge ' + (yjRunning ? 'badge-neutral' : (yjStatus.last_status === 'ok' ? 'badge-buy' : 'badge-neutral'))" style="font-size:13px;padding:4px 12px;">
                 {{ yjRunning ? '🟢 扫描中…' : (yjStatus.last_status === 'ok' ? '✅ 已完成' : '⚪ 待运行') }}
             </span>
@@ -545,6 +558,34 @@
             <span class="hint" v-if="yjStatus.last_run">上次: {{ yjStatus.last_run }}</span>
         </div>
         <div class="hint" style="margin:8px 0 12px;" v-if="yjRunning">全市场扫描约需 30-60 分钟，请稍候，页面会自动刷新…</div>
+
+        <!-- 搜索评分结果 -->
+        <div class="card" v-if="yjScoreItem" style="margin-bottom:16px;">
+            <div class="card-title">🔎 查询结果</div>
+            <div v-if="yjScoreScoring" style="color:#999;font-size:13px;">正在计算 {{ yjScoreItem.code }} 的评分…</div>
+            <div v-else-if="!yjScoreItem.ok">
+                <div class="empty" style="padding:16px;">{{ yjScoreItem.msg || '未找到该股票' }}</div>
+            </div>
+            <div v-else style="display:flex;flex-wrap:wrap;gap:20px;align-items:center;">
+                <div style="font-size:18px;font-weight:600;">{{ yjScoreItem.name }}
+                    <span style="font-size:13px;color:#888;font-weight:400;">{{ yjScoreItem.code }}</span>
+                </div>
+                <div style="text-align:center;">
+                    <div style="font-size:11px;color:#888;">评分</div>
+                    <div style="font-size:32px;font-weight:700;color:#c62828;">{{ yjScoreItem.score }}</div>
+                </div>
+                <div style="text-align:center;" v-if="yjScoreItem.rank">
+                    <div style="font-size:11px;color:#888;">今日榜单排名</div>
+                    <div style="font-size:24px;font-weight:600;color:#1565c0;">{{ yjScoreItem.rank }}</div>
+                </div>
+                <div>
+                    <div style="font-size:11px;color:#888;margin-bottom:4px;">命中信号</div>
+                    <span v-for="h in yjScoreItem.hits" :key="h" class="rule-chip" style="display:inline-block;margin:2px 4px 2px 0;">{{ h }}</span>
+                    <span v-if="!yjScoreItem.hits.length" style="color:#999;font-size:12px;">无命中（评分 0）</span>
+                </div>
+                <button class="button sm ghost" @click="openAnalysis(yjScoreItem.code)">查看个股分析</button>
+            </div>
+        </div>
 
         <div class="card" style="margin:0;">
             <div class="card-title">🏆 玉姐精选 Top 榜单</div>
@@ -668,6 +709,8 @@ createApp({
             yjStatus: { next_run: null, last_run: null, last_status: 'idle' },
             yjPicks: [], yjRunning: false, yjPollTimer: null, yjTimer: null,
             yjParams: null, yjDefaults: null, showYjParams: false, yjSaving: false,
+            yjSearchQ: '', yjSearchResults: [], showYjSearch: false,
+            yjScoreItem: null, yjScoreScoring: false,
         };
     },
     computed: {
@@ -1127,6 +1170,35 @@ createApp({
                 const r = await (await fetch('/api/yujie/picks')).json();
                 this.yjPicks = r.picks || [];
             } catch (e) {}
+        },
+        yjSearchKeyup() {
+            const q = this.yjSearchQ.trim();
+            if (!q || q.length < 2) { this.yjSearchResults = []; this.showYjSearch = false; return; }
+            fetch('/api/search?q=' + encodeURIComponent(q))
+                .then(r => r.json())
+                .then(d => {
+                    this.yjSearchResults = (d.results || []).slice(0, 8);
+                    this.showYjSearch = true;
+                }).catch(() => { this.yjSearchResults = []; });
+        },
+        queryYjScoreByCode(item) {
+            this.yjSearchQ = item.name + ' ' + item.code;
+            this.showYjSearch = false;
+            this.yjSearchResults = [];
+            this.queryYjScore(1);
+        },
+        async queryYjScore(force) {
+            const q = this.yjSearchQ.trim();
+            if (!q || q.length < 2) return;
+            this.yjScoreScoring = true;
+            this.yjScoreItem = { ok: true, code: '', name: '', score: null };
+            try {
+                const r = await (await fetch('/api/yujie/score?q=' + encodeURIComponent(q))).json();
+                this.yjScoreItem = r;
+            } catch (e) {
+                this.yjScoreItem = { ok: false, msg: '查询失败' };
+            }
+            this.yjScoreScoring = false;
         },
         async runYujieScan() {
             try {
