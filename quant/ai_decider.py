@@ -4,7 +4,8 @@ import re
 import time
 from pathlib import Path
 
-CONFIG_PATH = Path.home() / ".config" / "opencode" / "opencode.jsonc"
+CONFIG_DIR = Path.home() / ".config" / "opencode"
+CONFIG_PATHS = [CONFIG_DIR / "opencode.json", CONFIG_DIR / "opencode.jsonc"]
 
 _last_call_ts = 0.0
 _MIN_INTERVAL = 0.8  # 两次AI调用最小间隔，降频避免触发限流
@@ -15,7 +16,12 @@ def load_api_key():
     env_key = os.environ.get("SENSENOVA_API_KEY") or os.environ.get("AI_API_KEY")
     if env_key:
         return env_key
-    text = CONFIG_PATH.read_text(encoding="utf-8")
+    for path in CONFIG_PATHS:
+        if path.exists():
+            text = path.read_text(encoding="utf-8")
+            break
+    else:
+        raise FileNotFoundError("未找到 opencode 配置文件，请设置 SENSENOVA_API_KEY 环境变量")
     lines = [line for line in text.split("\n") if not line.lstrip().startswith("//")]
     text = re.sub(r",\s*}", "}", re.sub(r",\s*]", "]", "\n".join(lines)))
     config = json.loads(text)
@@ -26,6 +32,10 @@ class AIDecider:
     def __init__(self, model="sensenova-6.7-flash-lite"):
         self.api_key = load_api_key()
         self.model = model
+
+    def generate(self, prompt, timeout=90):
+        """通用文本生成（新闻分析等非交易场景），返回模型原始文本。"""
+        return self._call_api(prompt, timeout=timeout)
 
     def decide(self, market_data, portfolio):
         """AI 综合决策：分析市场并给出交易建议"""
@@ -84,7 +94,7 @@ class AIDecider:
             "max_tokens": 4096,
         }
         try:
-            with httpx.Client(timeout=timeout) as client:
+            with httpx.Client(timeout=timeout, trust_env=False) as client:
                 resp = client.post(
                     "https://token.sensenova.cn/v1/chat/completions", json=payload, headers=headers
                 )
