@@ -39,14 +39,13 @@ class Portfolio:
         self.cash = initial_cash
         self.positions = {}
         self.db_path = Path(db_path) if db_path else DEFAULT_DB
+        self._conn = init_db(self.db_path)
         self._load()
 
     def _load(self):
-        conn = init_db(self.db_path)
-        rows = conn.execute("SELECT code, qty, cost, buy_date FROM positions").fetchall()
+        rows = self._conn.execute("SELECT code, qty, cost, buy_date FROM positions").fetchall()
         for code, qty, cost, buy_date in rows:
             self.positions[code] = {"qty": qty, "cost": cost, "buy_date": buy_date}
-        conn.close()
 
     def buy(self, code, name, price, qty):
         amount = price * qty
@@ -88,43 +87,41 @@ class Portfolio:
                 self.sell(code, code, prices[code], self.positions[code]["qty"])
 
     def _record_trade(self, code, name, action, price, qty, amount, pnl):
-        conn = init_db(self.db_path)
-        conn.execute(
+        self._conn.execute(
             "INSERT INTO trades (code, name, action, price, qty, amount, pnl, date) VALUES (?,?,?,?,?,?,?,?)",
             (code, name, action, price, qty, amount, pnl, datetime.now().isoformat()),
         )
-        conn.commit()
-        conn.close()
+        self._conn.commit()
 
     def _save_positions(self):
-        conn = init_db(self.db_path)
-        conn.execute("DELETE FROM positions")
+        # 使用 UPSERT 避免崩溃丢数据；先按当前持仓 upsert，再删除已不在的 code
+        existing = {r[0] for r in self._conn.execute("SELECT code FROM positions").fetchall()}
         for code, p in self.positions.items():
-            conn.execute(
-                "INSERT INTO positions (code, qty, cost, buy_date) VALUES (?,?,?,?)",
+            self._conn.execute(
+                "INSERT INTO positions (code, qty, cost, buy_date) VALUES (?,?,?,?) "
+                "ON CONFLICT(code) DO UPDATE SET qty=excluded.qty, cost=excluded.cost, buy_date=excluded.buy_date",
                 (code, p["qty"], p["cost"], p["buy_date"]),
             )
-        conn.commit()
-        conn.close()
+        stale = existing - set(self.positions.keys())
+        for code in stale:
+            self._conn.execute("DELETE FROM positions WHERE code=?", (code,))
+        self._conn.commit()
 
     def market_value(self, prices):
+        """纯查询：不改持仓对象状态。prices 中缺失的 code 不计入。"""
         total = 0
         for code, p in self.positions.items():
             if code in prices:
                 total += prices[code] * p["qty"]
-                p["market_value"] = prices[code] * p["qty"]
-                p["pnl"] = (prices[code] - p["cost"]) * p["qty"]
         return total
 
     def total_value(self, prices):
         return self.cash + self.market_value(prices)
 
     def reset(self):
-        conn = init_db(self.db_path)
-        conn.execute("DELETE FROM positions")
-        conn.execute("DELETE FROM trades")
-        conn.commit()
-        conn.close()
+        self._conn.execute("DELETE FROM positions")
+        self._conn.execute("DELETE FROM trades")
+        self._conn.commit()
         self.positions = {}
         self.cash = self.initial_cash
 
@@ -132,7 +129,8 @@ class Portfolio:
         return self.positions
 
     def get_trades(self, limit=100):
-        conn = init_db(self.db_path)
-        rows = conn.execute("SELECT * FROM trades ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
-        conn.close()
+        rows = self._conn.execute("SELECT * FROM trades ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
         return rows
+
+    def close(self):
+        self._conn.close()

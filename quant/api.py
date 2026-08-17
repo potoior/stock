@@ -1,3 +1,5 @@
+import urllib.parse
+import urllib.request
 from datetime import datetime
 from pathlib import Path
 
@@ -573,8 +575,6 @@ def search_stock(q: str = ""):
             return {"results": [{"code": rt[0]["code"], "name": rt[0]["name"]}]}
         return {"results": []}
     # 否则用新浪搜索接口
-    import urllib.request
-
     try:
         url = f"http://suggest3.sinajs.cn/suggest/type=&key={urllib.parse.quote(q)}&name=suggestdata"
         req = urllib.request.Request(

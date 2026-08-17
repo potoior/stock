@@ -39,10 +39,18 @@ class RiskManager:
             return False, 0, "今日交易次数已达上限"
         if position_has and self.config["no_averaging_down"]:
             return False, 0, "已有持仓，禁止摊平"
-        total_value = portfolio.total_value({code: price})
+        # 用当前价估算总资产（仅本次 code 有最新价，其他持仓用 cost 估算）
+        est_mv = sum(p["cost"] * p["qty"] for p in portfolio.positions.values())
+        total_value = portfolio.cash + est_mv + (price * portfolio.positions.get(code, {"qty": 0})["qty"] if code in portfolio.positions else 0)
         per_position = total_value * self.config["max_single_position"]
         if portfolio.cash < per_position:
             return False, 0, "可用资金不足"
+        # 总仓位上限：当前持仓成本市值 + 本次买入金额 不得超过 total_value * max_total_position
+        if (est_mv + per_position) > total_value * self.config["max_total_position"]:
+            remaining = total_value * self.config["max_total_position"] - est_mv
+            if remaining <= 0:
+                return False, 0, f"总仓位已达上限 {self.config['max_total_position']:.0%}"
+            per_position = min(per_position, remaining)
         return True, per_position, "允许买入"
 
     def check_sell(self, code, price, portfolio):

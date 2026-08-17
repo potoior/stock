@@ -10,6 +10,8 @@ for r in results:
         continue
     strategies.setdefault(r["strategy"], []).append(r)
 
+strategy_avgs = []
+
 
 def avg(lst, key):
     vals = [x[key] for x in lst if x.get(key) is not None]
@@ -36,18 +38,30 @@ for strat_name, strat_results in strategies.items():
             f"{r['sharpe_ratio'] if r['sharpe_ratio'] is not None else '-'} | "
             f"{r['max_drawdown_pct']:.2f}% |"
         )
-    tr = avg(strat_results, "total_return_pct")
-    ar = avg(strat_results, "annual_return_pct")
-    sr = avg(strat_results, "sharpe_ratio")
-    dd = avg(strat_results, "max_drawdown_pct")
-    lines.append(
-        f"\n**平均：** 总收益 {tr:+.2f}% | 年化 {ar:+.2f}% | 夏普 {sr if sr is not None else '-'} | 最大回撤 {dd:.2f}%\n"
-    )
+    avg_total = avg(strat_results, "total_return_pct")
+    if avg_total is not None:
+        strategy_avgs.append(
+            (
+                strat_name,
+                avg_total,
+                avg(strat_results, "annual_return_pct"),
+                avg(strat_results, "sharpe_ratio"),
+                avg(strat_results, "max_drawdown_pct"),
+            )
+        )
 
 lines.append("## 结论\n")
-lines.append("- **5日均线止损法** 平均表现最好，趋势跟踪有效")
-lines.append("- **MACD金叉死叉** 在部分股票上有效，需结合个股筛选")
-lines.append("- **KDJ超买超卖** 单独使用效果一般，适合作为辅助指标")
+# 按平均总收益排序，动态挑出最优/最差
+strategy_avgs.sort(key=lambda x: x[1] or 0, reverse=True)
+if strategy_avgs:
+    best = strategy_avgs[0]
+    worst = strategy_avgs[-1]
+    lines.append(f"- **{best[0]}** 平均表现最好，总收益 {best[1]:+.2f}%")
+    if best[3] is not None:
+        lines.append(f"  - 年化 {best[2]:+.2f}% | 夏普 {best[3]} | 最大回撤 {best[4]:.2f}%")
+    if worst[0] != best[0]:
+        lines.append(f"- **{worst[0]}** 表现最弱，总收益 {worst[1]:+.2f}%，建议谨慎或作为反向信号")
+    lines.append("- 各策略在不同股票上分化明显，实盘需结合个股筛选与大盘环境")
 lines.append("\n> 注：简单单股回测，未考虑仓位管理、大盘过滤、多股对冲等，实盘需谨慎。")
 
 (OUTPUT / "回测报告.md").write_text("\n".join(lines), encoding="utf-8")

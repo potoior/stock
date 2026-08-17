@@ -11,7 +11,7 @@ RULE_DB = ENGINE_HOME / "agent_data_rule.db"
 LOG_DB = ENGINE_HOME / "agent_data.db"
 
 import strategy_engine as se
-from executor import SimExecutor
+from executor import SimExecutor, is_market_open
 
 
 def _init_log_db():
@@ -43,12 +43,22 @@ def _save_equity_point(agent_type, ts, value):
     conn.close()
 
 
-def _save_log(agent_type, ts, code, name, action, price, qty, reason):
+def _save_log(record):
+    """record: dict with keys agent_type, ts, code, name, action, price, qty, reason"""
     conn = sqlite3.connect(str(LOG_DB))
     conn.execute(
         "INSERT INTO agent_logs (ts, agent_type, code, name, action, price, qty, reason) "
         "VALUES (?,?,?,?,?,?,?,?)",
-        (ts, agent_type, code, name, action, price, qty, reason),
+        (
+            record["ts"],
+            record["agent_type"],
+            record["code"],
+            record["name"],
+            record["action"],
+            record["price"],
+            record["qty"],
+            record["reason"],
+        ),
     )
     conn.commit()
     conn.close()
@@ -242,13 +252,8 @@ class AgentEngine:
             time.sleep(self.interval)
 
     def _is_market_hours(self):
-        now = datetime.now()
-        if now.weekday() >= 5:
-            return False
-        hour, minute = now.hour, now.minute
-        if (hour == 9 and minute >= 30) or (10 <= hour <= 11) or (13 <= hour <= 14):
-            return True
-        return False
+        open_, _ = is_market_open()
+        return open_
 
     def _get_current_prices(self, positions):
         codes = list(positions.keys())
@@ -316,7 +321,18 @@ class AgentEngine:
                     ex.execute(code, q["name"], price, "sell")
                     daily_trades += 1
                     reason = f"止损卖出({pnl_pct * 100:.1f}%)"
-                    _save_log("rule", ts, code, q["name"], "sell", price, pos["qty"], reason)
+                    _save_log(
+                        {
+                            "agent_type": "rule",
+                            "ts": ts,
+                            "code": code,
+                            "name": q["name"],
+                            "action": "sell",
+                            "price": price,
+                            "qty": pos["qty"],
+                            "reason": reason,
+                        }
+                    )
                     actions.append(f"卖出{code}止损({pnl_pct * 100:.1f}%)")
                     continue
 
@@ -330,13 +346,35 @@ class AgentEngine:
                     ex.execute(code, q["name"], price, "buy")
                     daily_trades += 1
                     reason = f"策略投票买入(买入{result['summary']['buy']}票)"
-                    _save_log("rule", ts, code, q["name"], "buy", price, qty, reason)
+                    _save_log(
+                        {
+                            "agent_type": "rule",
+                            "ts": ts,
+                            "code": code,
+                            "name": q["name"],
+                            "action": "buy",
+                            "price": price,
+                            "qty": qty,
+                            "reason": reason,
+                        }
+                    )
                     actions.append(f"买入{code} {qty}股")
             elif verdict == "卖出" and pos and can_sell:
                 ex.execute(code, q["name"], price, "sell")
                 daily_trades += 1
                 reason = f"策略投票卖出(卖出{result['summary']['sell']}票)"
-                _save_log("rule", ts, code, q["name"], "sell", price, pos["qty"], reason)
+                _save_log(
+                    {
+                        "agent_type": "rule",
+                        "ts": ts,
+                        "code": code,
+                        "name": q["name"],
+                        "action": "sell",
+                        "price": price,
+                        "qty": pos["qty"],
+                        "reason": reason,
+                    }
+                )
                 actions.append(f"卖出{code} {pos['qty']}股")
         return actions
 
@@ -356,7 +394,18 @@ class AgentEngine:
                 if pnl_pct <= -0.05:
                     ex.execute(code, q["name"], q["price"], "sell")
                     reason = f"硬性止损({pnl_pct * 100:.1f}%)"
-                    _save_log("ai", ts, code, q["name"], "sell", q["price"], pos["qty"], reason)
+                    _save_log(
+                        {
+                            "agent_type": "ai",
+                            "ts": ts,
+                            "code": code,
+                            "name": q["name"],
+                            "action": "sell",
+                            "price": q["price"],
+                            "qty": pos["qty"],
+                            "reason": reason,
+                        }
+                    )
                     actions.append(f"卖出{code}止损({pnl_pct * 100:.1f}%)")
 
         market_data = []
@@ -420,15 +469,48 @@ class AgentEngine:
                 if qty >= 100:
                     ex.execute(code, q["name"], price, "buy")
                     daily_trades += 1
-                    _save_log("ai", ts, code, q["name"], "buy", price, qty, reason)
+                    _save_log(
+                        {
+                            "agent_type": "ai",
+                            "ts": ts,
+                            "code": code,
+                            "name": q["name"],
+                            "action": "buy",
+                            "price": price,
+                            "qty": qty,
+                            "reason": reason,
+                        }
+                    )
                     actions.append(f"买入{code} {qty}股({reason})")
             elif action == "sell" and pos:
                 if pos.get("buy_date") == today:
-                    _save_log("ai", ts, code, q["name"], "hold", price, 0, f"T+1限制: {reason}")
+                    _save_log(
+                        {
+                            "agent_type": "ai",
+                            "ts": ts,
+                            "code": code,
+                            "name": q["name"],
+                            "action": "hold",
+                            "price": price,
+                            "qty": 0,
+                            "reason": f"T+1限制: {reason}",
+                        }
+                    )
                     continue
                 ex.execute(code, q["name"], price, "sell")
                 daily_trades += 1
-                _save_log("ai", ts, code, q["name"], "sell", price, pos["qty"], reason)
+                _save_log(
+                    {
+                        "agent_type": "ai",
+                        "ts": ts,
+                        "code": code,
+                        "name": q["name"],
+                        "action": "sell",
+                        "price": price,
+                        "qty": pos["qty"],
+                        "reason": reason,
+                    }
+                )
                 actions.append(f"卖出{code} {pos['qty']}股({reason})")
         return actions
 

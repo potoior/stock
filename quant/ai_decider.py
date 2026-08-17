@@ -1,4 +1,5 @@
 import json
+import os
 import re
 import time
 from pathlib import Path
@@ -10,6 +11,10 @@ _MIN_INTERVAL = 0.8  # 两次AI调用最小间隔，降频避免触发限流
 
 
 def load_api_key():
+    # 优先环境变量，避免与 opencode 配置文件强耦合
+    env_key = os.environ.get("SENSENOVA_API_KEY") or os.environ.get("AI_API_KEY")
+    if env_key:
+        return env_key
     text = CONFIG_PATH.read_text(encoding="utf-8")
     lines = [line for line in text.split("\n") if not line.lstrip().startswith("//")]
     text = re.sub(r",\s*}", "}", re.sub(r",\s*]", "]", "\n".join(lines)))
@@ -79,7 +84,7 @@ class AIDecider:
             "max_tokens": 4096,
         }
         try:
-            with httpx.Client(timeout=timeout, verify=False) as client:
+            with httpx.Client(timeout=timeout) as client:
                 resp = client.post(
                     "https://token.sensenova.cn/v1/chat/completions", json=payload, headers=headers
                 )
