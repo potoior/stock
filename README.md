@@ -111,12 +111,19 @@ pip install -r requirements.txt   # pandas/numpy/backtrader/fastapi/uvicorn/grad
 # 首次运行前：复制配置文件（含自选股与策略开关/参数，不入库）
 cp config.example.json config.json
 
+# AI 服务配置：复制 .env.example 为 .env 并填 API 密钥（OpenAI 兼容接口，可切换）
+cp .env.example .env        # 编辑 AI_API_KEY / AI_BASE_URL / AI_MODEL
+
+# 每日财经新闻 AI 分析日报（新浪+东财双源）
+python news_digest.py                    # 抓当天新闻 + AI 生成日报
+python news_digest.py --schedule "08:30" # 纯 Python 定时，每天到点自动跑
+
 # 启动 Web 前端（port 可用环境变量覆盖，默认 8000）
 python api.py                        # http://127.0.0.1:8000
 PORT=18000 python api.py             # 自定义端口示例
 
 # 运行回测
-python backtest.py               # 17 个策略全量回测
+python backtest.py               # 19 个策略全量回测
 
 # 运行 AI Agent (CLI 单进程)
 python agent.py 600789 000001    # AI 决策模式（默认）

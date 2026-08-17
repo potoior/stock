@@ -10,9 +10,37 @@ CONFIG_PATHS = [CONFIG_DIR / "opencode.json", CONFIG_DIR / "opencode.jsonc"]
 _last_call_ts = 0.0
 _MIN_INTERVAL = 0.8  # 两次AI调用最小间隔，降频避免触发限流
 
+DEFAULT_BASE_URL = "https://token.sensenova.cn/v1/chat/completions"
+DEFAULT_MODEL = "sensenova-6.7-flash-lite"
+
+
+def _load_env_file(path):
+    """手动解析 .env（KEY=VALUE，# 为注释），不覆盖已存在的环境变量。"""
+    if not path.exists():
+        return
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        k, _, v = line.partition("=")
+        k = k.strip()
+        v = v.strip().strip('"').strip("'")
+        if k:
+            os.environ.setdefault(k, v)
+
+
+def load_env():
+    """加载 quant/.env 与项目根 .env，供本模块及其他模块使用。"""
+    here = Path(__file__).resolve().parent
+    for p in (here / ".env", here.parent / ".env"):
+        _load_env_file(p)
+
+
+load_env()
+
 
 def load_api_key():
-    # 优先环境变量，避免与 opencode 配置文件强耦合
+    # 优先级：环境变量(含 .env) > opencode 配置文件（向后兼容）
     env_key = os.environ.get("SENSENOVA_API_KEY") or os.environ.get("AI_API_KEY")
     if env_key:
         return env_key
@@ -21,7 +49,7 @@ def load_api_key():
             text = path.read_text(encoding="utf-8")
             break
     else:
-        raise FileNotFoundError("未找到 opencode 配置文件，请设置 SENSENOVA_API_KEY 环境变量")
+        raise FileNotFoundError("未配置 AI 密钥：请复制 quant/.env.example 为 quant/.env 并设置 AI_API_KEY")
     lines = [line for line in text.split("\n") if not line.lstrip().startswith("//")]
     text = re.sub(r",\s*}", "}", re.sub(r",\s*]", "]", "\n".join(lines)))
     config = json.loads(text)
@@ -29,9 +57,10 @@ def load_api_key():
 
 
 class AIDecider:
-    def __init__(self, model="sensenova-6.7-flash-lite"):
+    def __init__(self, model=None):
         self.api_key = load_api_key()
-        self.model = model
+        self.base_url = os.environ.get("AI_BASE_URL", DEFAULT_BASE_URL)
+        self.model = model or os.environ.get("AI_MODEL", DEFAULT_MODEL)
 
     def generate(self, prompt, timeout=90):
         """通用文本生成（新闻分析等非交易场景），返回模型原始文本。"""
@@ -95,9 +124,7 @@ class AIDecider:
         }
         try:
             with httpx.Client(timeout=timeout, trust_env=False) as client:
-                resp = client.post(
-                    "https://token.sensenova.cn/v1/chat/completions", json=payload, headers=headers
-                )
+                resp = client.post(self.base_url, json=payload, headers=headers)
                 if resp.status_code == 200:
                     msg = resp.json()["choices"][0]["message"]
                     content = msg.get("content") or ""
