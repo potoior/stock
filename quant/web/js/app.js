@@ -12,6 +12,8 @@ createApp({
             // analyze
             analyzeCode: '', analysis: null, analysisList: [], analyzing: false,
             analyzeChart: null,
+            macdChart: null, kdjChart: null, bollChart: null,
+            dmiChart: null, psyChart: null, biasChart: null,
             // strategies
             strategies: [], metrics: {},
             showEditor: false, editor: { name: '', buy_rule: '', sell_rule: '' }, editorId: '',
@@ -35,13 +37,27 @@ createApp({
             yjSearchQ: '', yjSearchResults: [], showYjSearch: false,
             yjScoreItem: null, yjScoreScoring: false,
             yjSelected: null, yjKlineChart: null, yjKlineLoading: false,
-            yjView: 'list', yjPage: 1,
+            yjView: 'list', yjPage: 1, yjPageSize: 50, yjJumpPage: '',
         };
     },
     computed: {
         builtinStrategies() { return this.strategies.filter(s => s.builtin); },
         customStrategies() { return this.strategies.filter(s => !s.builtin); },
         dsReportHtml() { return this.mdToHtml(this.dsReport.markdown || ''); },
+        dsParsedStats() {
+            const md = this.dsReport.markdown || '';
+            const stats = [];
+            const num = (re) => { const m = md.match(re); return m ? parseInt(m[1]) : null; };
+            const up = num(/上涨\s*(\d+)/), down = num(/下跌\s*(\d+)/);
+            const zt = num(/涨停\s*\*?\*?(\d+)/), dt = num(/跌停\s*\*?\*?(\d+)/);
+            const amt = num(/成交额[^\d]*\*?\*?(\d+)/);
+            if (up != null) stats.push({ label: '上涨', val: up, color: '#ef5350' });
+            if (down != null) stats.push({ label: '下跌', val: down, color: '#66bb6a' });
+            if (zt != null) stats.push({ label: '涨停', val: zt, color: '#ff1744' });
+            if (dt != null) stats.push({ label: '跌停', val: dt, color: '#00c853' });
+            if (amt != null) stats.push({ label: '成交额(亿)', val: amt, color: '#ffd54f' });
+            return stats;
+        },
         yjDetailRows() {
             const d = (this.yjSelected && this.yjSelected.detail) || {};
             const r = [];
@@ -74,11 +90,19 @@ createApp({
             return r;
         },
         yjPagedPicks() {
-            const start = (this.yjPage - 1) * 10;
-            return this.yjPicks.slice(start, start + 10);
+            const start = (this.yjPage - 1) * this.yjPageSize;
+            return this.yjPicks.slice(start, start + this.yjPageSize);
         },
         yjTotalPages() {
-            return Math.ceil(this.yjPicks.length / 10) || 1;
+            return Math.ceil(this.yjPicks.length / this.yjPageSize) || 1;
+        },
+        yjPageRange() {
+            const total = this.yjTotalPages, cur = this.yjPage;
+            const range = [];
+            let s = Math.max(1, cur - 4), e = Math.min(total, s + 9);
+            s = Math.max(1, e - 9);
+            for (let i = s; i <= e; i++) range.push(i);
+            return range;
         }
     },
     methods: {
@@ -229,7 +253,10 @@ createApp({
             if (!this.analysisList.find(a => a.code === code)) {
                 this.analysisList.push({ code: code, name: data.realtime && data.realtime.name || code });
             }
-            this.$nextTick(() => this.renderAnalyzeChart());
+            this.$nextTick(() => {
+                this.renderAnalyzeChart();
+                this.renderIndicatorCharts();
+            });
         },
         async viewAnalysis(code) {
             this.analyzing = true;
@@ -248,6 +275,7 @@ createApp({
                 sellReasons: data.sell_reasons || [],
                 holdReasons: data.hold_reasons || [],
                 kline: data.kline || [],
+                indicator_series: data.indicator_series || {},
             };
         },
         renderAnalyzeChart() {
@@ -312,6 +340,110 @@ createApp({
                     { name: '成交量', type: 'bar', xAxisIndex: 1, yAxisIndex: 1, data: volumes }
                 ]
             }, true);
+        },
+
+        renderIndicatorCharts() {
+            const s = this.analysis.indicator_series;
+            if (!s || !s.dates) return;
+            const dates = s.dates;
+
+            // MACD: DIFF, DEA lines + BAR histogram
+            this._renderChart('macdChart', 'macdChart', {
+                tooltip: { trigger: 'axis' },
+                legend: { data: ['DIFF', 'DEA', 'BAR'], top: 0, textStyle: { fontSize: 10 } },
+                grid: { left: 50, right: 15, top: 30, bottom: 25 },
+                xAxis: { type: 'category', data: dates, axisLabel: { fontSize: 9 } },
+                yAxis: { type: 'value', scale: true, splitLine: { lineStyle: { color: '#f0f0f0' } } },
+                dataZoom: [{ type: 'inside', start: 50 }],
+                series: [
+                    { name: 'DIFF', type: 'line', data: s.macd_diff, symbol: 'none', lineStyle: { width: 1.5, color: '#1565c0' } },
+                    { name: 'DEA', type: 'line', data: s.macd_dea, symbol: 'none', lineStyle: { width: 1.5, color: '#e65100' } },
+                    { name: 'BAR', type: 'bar', data: (s.macd_bar || []).map(v => v == null ? null : { value: v, itemStyle: { color: v >= 0 ? '#d32f2f' : '#2e7d32' } }) },
+                ]
+            });
+
+            // KDJ: K, D, J lines
+            this._renderChart('kdjChart', 'kdjChart', {
+                tooltip: { trigger: 'axis' },
+                legend: { data: ['K', 'D', 'J'], top: 0, textStyle: { fontSize: 10 } },
+                grid: { left: 50, right: 15, top: 30, bottom: 25 },
+                xAxis: { type: 'category', data: dates, axisLabel: { fontSize: 9 } },
+                yAxis: { type: 'value', scale: true, splitLine: { lineStyle: { color: '#f0f0f0' } } },
+                dataZoom: [{ type: 'inside', start: 50 }],
+                series: [
+                    { name: 'K', type: 'line', data: s.k, symbol: 'none', lineStyle: { width: 1.5, color: '#1565c0' } },
+                    { name: 'D', type: 'line', data: s.d, symbol: 'none', lineStyle: { width: 1.5, color: '#e65100' } },
+                    { name: 'J', type: 'line', data: s.j, symbol: 'none', lineStyle: { width: 1.5, color: '#6a1b9a' } },
+                ]
+            });
+
+            // BOLL: upper, mid, lower + close
+            const closes = (this.analysis.kline || []).map(d => d.close);
+            this._renderChart('bollChart', 'bollChart', {
+                tooltip: { trigger: 'axis' },
+                legend: { data: ['收盘', 'UP', 'MID', 'LOW'], top: 0, textStyle: { fontSize: 10 } },
+                grid: { left: 50, right: 15, top: 30, bottom: 25 },
+                xAxis: { type: 'category', data: dates, axisLabel: { fontSize: 9 } },
+                yAxis: { type: 'value', scale: true, splitLine: { lineStyle: { color: '#f0f0f0' } } },
+                dataZoom: [{ type: 'inside', start: 50 }],
+                series: [
+                    { name: '收盘', type: 'line', data: closes, symbol: 'none', lineStyle: { width: 1, color: '#333' } },
+                    { name: 'UP', type: 'line', data: s.boll_u, symbol: 'none', lineStyle: { width: 1, color: '#d32f2f', type: 'dashed' } },
+                    { name: 'MID', type: 'line', data: s.boll_m, symbol: 'none', lineStyle: { width: 1, color: '#888' } },
+                    { name: 'LOW', type: 'line', data: s.boll_l, symbol: 'none', lineStyle: { width: 1, color: '#2e7d32', type: 'dashed' } },
+                ]
+            });
+
+            // DMI: +DI, -DI, ADX
+            this._renderChart('dmiChart', 'dmiChart', {
+                tooltip: { trigger: 'axis' },
+                legend: { data: ['+DI', '-DI', 'ADX'], top: 0, textStyle: { fontSize: 10 } },
+                grid: { left: 50, right: 15, top: 30, bottom: 25 },
+                xAxis: { type: 'category', data: dates, axisLabel: { fontSize: 9 } },
+                yAxis: { type: 'value', scale: true, splitLine: { lineStyle: { color: '#f0f0f0' } } },
+                dataZoom: [{ type: 'inside', start: 50 }],
+                series: [
+                    { name: '+DI', type: 'line', data: s.pdi, symbol: 'none', lineStyle: { width: 1.5, color: '#d32f2f' } },
+                    { name: '-DI', type: 'line', data: s.mdi, symbol: 'none', lineStyle: { width: 1.5, color: '#2e7d32' } },
+                    { name: 'ADX', type: 'line', data: s.adx, symbol: 'none', lineStyle: { width: 1.5, color: '#6a1b9a' } },
+                ]
+            });
+
+            // PSY
+            this._renderChart('psyChart', 'psyChart', {
+                tooltip: { trigger: 'axis' },
+                legend: { data: ['PSY'], top: 0, textStyle: { fontSize: 10 } },
+                grid: { left: 50, right: 15, top: 30, bottom: 25 },
+                xAxis: { type: 'category', data: dates, axisLabel: { fontSize: 9 } },
+                yAxis: { type: 'value', min: 0, max: 100, splitLine: { lineStyle: { color: '#f0f0f0' } } },
+                dataZoom: [{ type: 'inside', start: 50 }],
+                series: [
+                    { name: 'PSY', type: 'line', data: s.psy, symbol: 'none', areaStyle: { opacity: 0.1 }, lineStyle: { width: 1.5, color: '#3949ab' } },
+                    { type: 'line', data: dates.map(() => 50), symbol: 'none', lineStyle: { width: 1, color: '#ccc', type: 'dashed' } },
+                ]
+            });
+
+            // BIAS
+            this._renderChart('biasChart', 'biasChart', {
+                tooltip: { trigger: 'axis' },
+                legend: { data: ['BIAS1', 'BIAS2', 'BIAS3'], top: 0, textStyle: { fontSize: 10 } },
+                grid: { left: 50, right: 15, top: 30, bottom: 25 },
+                xAxis: { type: 'category', data: dates, axisLabel: { fontSize: 9 } },
+                yAxis: { type: 'value', scale: true, splitLine: { lineStyle: { color: '#f0f0f0' } } },
+                dataZoom: [{ type: 'inside', start: 50 }],
+                series: [
+                    { name: 'BIAS1', type: 'line', data: s.bias1, symbol: 'none', lineStyle: { width: 1.5, color: '#1565c0' } },
+                    { name: 'BIAS2', type: 'line', data: s.bias2, symbol: 'none', lineStyle: { width: 1.5, color: '#e65100' } },
+                    { name: 'BIAS3', type: 'line', data: s.bias3, symbol: 'none', lineStyle: { width: 1.5, color: '#6a1b9a' } },
+                ]
+            });
+        },
+
+        _renderChart(domId, chartProp, option) {
+            const el = document.getElementById(domId);
+            if (!el) return;
+            if (!this[chartProp]) this[chartProp] = echarts.init(el);
+            this[chartProp].setOption(option, true);
         },
 
         // ---------- strategies ----------
@@ -532,6 +664,7 @@ createApp({
             try {
                 const r = await (await fetch('/api/yujie/picks')).json();
                 this.yjPicks = r.picks || [];
+                this.yjPage = 1;
             } catch (e) {}
         },
         yjSelectStock(p) {
@@ -549,7 +682,12 @@ createApp({
             if (this.yjKlineChart) { this.yjKlineChart.dispose(); this.yjKlineChart = null; }
         },
         yjGoPage(n) {
-            if (n >= 1 && n <= this.yjTotalPages) this.yjPage = n;
+            if (n >= 1 && n <= this.yjTotalPages) { this.yjPage = n; window.scrollTo({ top: 0, behavior: 'smooth' }); }
+        },
+        yjDoJump() {
+            const n = parseInt(this.yjJumpPage);
+            if (n >= 1 && n <= this.yjTotalPages) this.yjGoPage(n);
+            this.yjJumpPage = '';
         },
         async loadYjKline(code) {
             this.yjKlineLoading = false;

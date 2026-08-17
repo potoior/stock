@@ -1,7 +1,7 @@
 """玉姐精选：每日全市场扫描打分
 
 每天早上 09:00（服务进程内调度）按玉姐的条件对全 A 股打分，
-返回最匹配的 Top 10 股票。所有规则参数可配置（config.json -> yujie）。
+返回全部命中股票（按分数降序）。所有规则参数可配置（config.json -> yujie）。
 
 打分规则（对应玉姐同花顺条件，默认满分 11）：
   1. MACD 金叉            +2   DIFF 上穿 DEA
@@ -391,13 +391,12 @@ def run_once(limit=0):
         lf.write(f"扫描完成 命中 {len(results)} 只，耗时见上方\n")
 
     results.sort(key=lambda x: -x["score"])
-    top = results[:50]
-    print(f"\n扫描完成，命中 {len(results)} 只，Top 50:")
-    for p in top:
+    print(f"\n扫描完成，命中 {len(results)} 只，全部入库")
+    for p in results[:20]:
         print(f"  {p['score']:>5}  {p['code']} {p['name']}  {p['price']:>8}  {','.join(p['hits'])}")
 
-    save_picks(date_str, top)
-    return len(top)
+    save_picks(date_str, results)
+    return len(results)
 
 
 if __name__ == "__main__":

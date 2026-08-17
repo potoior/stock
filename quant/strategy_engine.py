@@ -1349,10 +1349,47 @@ def analyze(code, use_ai=True):
     kdf = df.tail(120)[["date", "open", "close", "high", "low", "volume"]].copy()
     kdf["date"] = kdf["date"].dt.strftime("%Y-%m-%d")
     kdf = kdf.astype({"open": float, "close": float, "high": float, "low": float, "volume": float})
+    dates_tail = kdf["date"].tolist()
+
+    def _tail(s):
+        s = s.tail(120).reset_index(drop=True)
+        return [None if pd.isna(v) else round(float(v), 3) for v in s]
+
+    def _tail2(s):
+        s = s.tail(120).reset_index(drop=True)
+        return [None if pd.isna(v) else round(float(v), 2) for v in s]
+
+    indicator_series = {
+        "dates": dates_tail,
+        "macd_diff": _tail(macd_diff),
+        "macd_dea": _tail(macd_dea),
+        "macd_bar": _tail(macd_bar),
+        "k": _tail(k),
+        "d": _tail(d),
+        "j": _tail(j),
+        "boll_u": _tail2(boll_u),
+        "boll_m": _tail2(boll_m),
+        "boll_l": _tail2(boll_l),
+        "pdi": _tail(pdi),
+        "mdi": _tail(mdi),
+        "adx": _tail(adx),
+        "psy": _tail(psy),
+        "bias1": _tail(bias1),
+        "bias2": _tail(bias2),
+        "bias3": _tail(bias3),
+        "ma5": _tail2(df["ma5"]),
+        "ma10": _tail2(df["ma10"]),
+        "ma20": _tail2(df["ma20"]),
+        "ma60": _tail2(df["ma60"]),
+        "bbiboll_u": _tail2(bbiboll_u),
+        "bbiboll_m": _tail2(bbiboll_m),
+        "bbiboll_l": _tail2(bbiboll_l),
+    }
 
     return {
         "realtime": realtime,
         "indicators": indicators,
+        "indicator_series": indicator_series,
         "signals": signals,
         "summary": {"buy": buy_n, "sell": sell_n, "hold": hold_n, "total": len(signals)},
         "verdict": verdict,

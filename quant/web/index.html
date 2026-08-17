@@ -118,6 +118,11 @@
         .indicator-item .k { color: #888; }
         .indicator-item .v { font-weight: 600; }
         .chart { height: 320px; }
+        .chart-sm { height: 220px; }
+        .indicator-chart-grid {
+            display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px;
+        }
+        @media (max-width: 900px) { .indicator-chart-grid { grid-template-columns: 1fr; } }
         .rule-editor { border: 1px solid #e5e5e5; border-radius: 8px; padding: 12px; margin-bottom: 10px; background: #fafafa; }
         .rule-editor .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
         .rule-editor select, .rule-editor input {
@@ -137,6 +142,89 @@
         .report-md hr { border: none; border-top: 1px solid #ddd; margin: 12px 0; }
         .report-md ul { margin: 6px 0 6px 20px; }
         .report-md p { margin: 6px 0; }
+
+        /* ===== 每日扫描 ===== */
+        .ds-banner {
+            background: linear-gradient(135deg, #1a237e 0%, #283593 40%, #3949ab 100%);
+            border-radius: 12px; padding: 24px 28px; margin-bottom: 16px;
+            display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px;
+            box-shadow: 0 4px 20px rgba(26,35,126,0.25);
+        }
+        .ds-banner-title { font-size: 20px; font-weight: 700; color: #fff; }
+        .ds-banner-sub { font-size: 13px; color: rgba(255,255,255,0.7); margin-top: 4px; }
+        .ds-banner-stats { display: flex; gap: 20px; flex-wrap: wrap; }
+        .ds-stat { text-align: center; min-width: 60px; }
+        .ds-stat-val { font-size: 22px; font-weight: 700; }
+        .ds-stat-label { font-size: 11px; color: rgba(255,255,255,0.7); margin-top: 2px; }
+
+        .ds-toolbar {
+            display: flex; align-items: center; gap: 10px; margin-bottom: 14px; flex-wrap: wrap;
+            background: #fff; border-radius: 10px; padding: 12px 16px;
+            border: 1px solid #e5e5e5; box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+        }
+        .ds-btn {
+            border: none; border-radius: 8px; padding: 8px 18px; font-size: 13px; font-weight: 500;
+            cursor: pointer; transition: all 0.2s; display: flex; align-items: center; gap: 6px;
+        }
+        .ds-btn-primary {
+            background: linear-gradient(135deg, #1a237e, #3949ab); color: #fff;
+            box-shadow: 0 2px 8px rgba(26,35,126,0.3);
+        }
+        .ds-btn-primary:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 4px 14px rgba(26,35,126,0.4); }
+        .ds-btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
+        .ds-btn-ghost { background: #f5f5f5; color: #333; border: 1px solid #e0e0e0; }
+        .ds-btn-ghost:hover { background: #eee; }
+        .ds-btn-icon { font-size: 12px; }
+        .ds-spin { animation: ds-spin 1s linear infinite; }
+        @keyframes ds-spin { 0%{transform:rotate(0deg)} 100%{transform:rotate(360deg)} }
+
+        .ds-status { display: flex; align-items: center; gap: 6px; font-size: 13px; color: #666; }
+        .ds-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+        .ds-dot-idle { background: #bbb; }
+        .ds-dot-ok { background: #2e7d32; }
+        .ds-dot-running {
+            background: #f57c00; animation: ds-pulse 0.8s ease-in-out infinite;
+        }
+        @keyframes ds-pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.5; transform: scale(1.3); }
+        }
+
+        .ds-select {
+            padding: 6px 12px; border: 1px solid #d0d0d0; border-radius: 6px;
+            font-size: 12px; outline: none; background: #fff; cursor: pointer;
+        }
+
+        .ds-progress {
+            height: 3px; background: #e0e0e0; border-radius: 2px; margin-bottom: 14px; overflow: hidden;
+        }
+        .ds-progress-bar {
+            height: 100%; width: 30%; background: linear-gradient(90deg, #3949ab, #f57c00, #2e7d32);
+            border-radius: 2px; animation: ds-progress 2s ease-in-out infinite;
+        }
+        @keyframes ds-progress {
+            0% { transform: translateX(-100%); }
+            100% { transform: translateX(400%); }
+        }
+
+        .ds-report {
+            background: #fff; border-radius: 10px; border: 1px solid #e5e5e5;
+            padding: 24px 28px; box-shadow: 0 1px 6px rgba(0,0,0,0.06);
+        }
+        .ds-report .report-md h1 { font-size: 20px; border-bottom: 2px solid #1a237e; padding-bottom: 8px; margin-bottom: 16px; }
+        .ds-report .report-md h2 {
+            font-size: 16px; background: linear-gradient(135deg, #1a237e, #3949ab);
+            color: #fff !important; padding: 8px 14px; border-radius: 6px; margin: 20px 0 12px;
+        }
+        .ds-report .report-md h3 { font-size: 14px; color: #1a237e !important; border-left: 3px solid #3949ab; padding-left: 10px; margin: 14px 0 8px; }
+
+        .ds-empty {
+            text-align: center; padding: 60px 20px; background: #fff;
+            border-radius: 10px; border: 1px solid #e5e5e5;
+        }
+        .ds-empty-icon { font-size: 48px; margin-bottom: 12px; }
+        .ds-empty-text { font-size: 16px; color: #666; margin-bottom: 6px; }
+        .ds-empty-hint { font-size: 13px; color: #999; }
         @media (max-width: 768px) {
             .layout { flex-direction: column; }
             .sidebar { width: 100%; height: auto; position: static; }
@@ -307,8 +395,35 @@
                 <div id="analyzeChart" class="chart"></div>
             </div>
 
+            <div class="indicator-chart-grid">
+                <div class="card">
+                    <div class="card-title">📊 MACD</div>
+                    <div id="macdChart" class="chart-sm"></div>
+                </div>
+                <div class="card">
+                    <div class="card-title">📊 KDJ</div>
+                    <div id="kdjChart" class="chart-sm"></div>
+                </div>
+                <div class="card">
+                    <div class="card-title">📊 BOLL 布林带</div>
+                    <div id="bollChart" class="chart-sm"></div>
+                </div>
+                <div class="card">
+                    <div class="card-title">📊 DMI 趋向</div>
+                    <div id="dmiChart" class="chart-sm"></div>
+                </div>
+                <div class="card">
+                    <div class="card-title">📊 PSY 心理线</div>
+                    <div id="psyChart" class="chart-sm"></div>
+                </div>
+                <div class="card">
+                    <div class="card-title">📊 BIAS 乖离率</div>
+                    <div id="biasChart" class="chart-sm"></div>
+                </div>
+            </div>
+
             <div class="card">
-                <div class="card-title">📊 技术指标</div>
+                <div class="card-title">📋 技术指标数值</div>
                 <div class="indicator-list">
                     <div class="indicator-item" v-for="(val, key) in analysis.indicators" :key="key">
                         <span class="k">{{ indicatorName(key) }}</span>
@@ -509,31 +624,54 @@
     </div>
 
     <div v-show="tab === 'dailyscan'" class="container">
-        <div class="toolbar">
-            <button class="button" @click="runDailyScan" :disabled="dsRunning">▶ 立即扫描</button>
-            <button class="button ghost" @click="loadDailyScanReport">⟳ 刷新日报</button>
-            <span :class="'badge ' + (dsRunning ? 'badge-neutral' : (dsStatus.last_status === 'ok' ? 'badge-buy' : 'badge-neutral'))" style="font-size:13px;padding:4px 12px;">
-                {{ dsRunning ? '🟢 扫描中…' : (dsStatus.last_status === 'ok' ? '✅ 已完成' : '⚪ 待运行') }}
-            </span>
-            <span class="hint" v-if="dsStatus.next_run">下次自动: {{ dsStatus.next_run }}</span>
-            <span class="hint" v-if="dsStatus.last_run">上次: {{ dsStatus.last_run }}</span>
-        </div>
-
-        <div class="card" style="margin-bottom:16px;" v-if="dsReportDates.length">
-            <div class="toolbar" style="margin:0 0 8px;">
-                <strong style="font-size:14px;">📅 历史日报</strong>
-                <select class="input" v-model="dsSelectedDate" @change="loadDailyScanReport" style="width:auto;min-width:160px;">
-                    <option value="">今天</option>
-                    <option v-for="d in dsReportDates" :key="d" :value="d">{{ d.slice(0,4) }}-{{ d.slice(4,6) }}-{{ d.slice(6,8) }}</option>
-                </select>
+        <!-- 顶部渐变横幅 -->
+        <div class="ds-banner">
+            <div class="ds-banner-content">
+                <div class="ds-banner-title">📰 每日开盘扫描</div>
+                <div class="ds-banner-sub">全市场 A 股扫描 · 策略信号 · AI 综合日报</div>
+            </div>
+            <div class="ds-banner-stats" v-if="dsReport.exists && dsReport.markdown">
+                <div class="ds-stat" v-for="s in dsParsedStats" :key="s.label">
+                    <div class="ds-stat-val" :style="'color:' + s.color">{{ s.val }}</div>
+                    <div class="ds-stat-label">{{ s.label }}</div>
+                </div>
             </div>
         </div>
 
-        <div class="card" style="margin:0;" v-if="dsReport.exists">
+        <!-- 工具栏 -->
+        <div class="ds-toolbar">
+            <button class="ds-btn ds-btn-primary" @click="runDailyScan" :disabled="dsRunning">
+                <span class="ds-btn-icon" :class="{ 'ds-spin': dsRunning }">▶</span>
+                {{ dsRunning ? '扫描中…' : '立即扫描' }}
+            </button>
+            <button class="ds-btn ds-btn-ghost" @click="loadDailyScanReport">⟳ 刷新</button>
+            <div class="ds-status">
+                <span class="ds-dot" :class="dsRunning ? 'ds-dot-running' : (dsStatus.last_status === 'ok' ? 'ds-dot-ok' : 'ds-dot-idle')"></span>
+                <span>{{ dsRunning ? '扫描中' : (dsStatus.last_status === 'ok' ? '已完成' : '待运行') }}</span>
+            </div>
+            <span class="hint" v-if="dsStatus.next_run">⏰ {{ dsStatus.next_run }}</span>
+            <span class="hint" v-if="dsStatus.last_run">📅 {{ dsStatus.last_run }}</span>
+
+            <div style="flex:1;"></div>
+            <select class="ds-select" v-model="dsSelectedDate" @change="loadDailyScanReport" v-if="dsReportDates.length">
+                <option value="">📅 今日</option>
+                <option v-for="d in dsReportDates" :key="d" :value="d">{{ d.slice(0,4) }}-{{ d.slice(4,6) }}-{{ d.slice(6,8) }}</option>
+            </select>
+        </div>
+
+        <!-- 进度条 -->
+        <div class="ds-progress" v-if="dsRunning">
+            <div class="ds-progress-bar"></div>
+        </div>
+
+        <!-- 日报内容 -->
+        <div class="ds-report" v-if="dsReport.exists">
             <div class="report-md" v-html="dsReportHtml"></div>
         </div>
-        <div class="card empty" style="margin:0;" v-else>
-            暂无日报。点击「立即扫描」生成今日日报，或等待每天 09:00 自动生成。
+        <div class="ds-empty" v-else>
+            <div class="ds-empty-icon">📋</div>
+            <div class="ds-empty-text">暂无日报</div>
+            <div class="ds-empty-hint">点击「立即扫描」生成今日日报，或等待每天 09:00 自动生成</div>
         </div>
     </div>
 
@@ -590,7 +728,7 @@
 
         <!-- 榜单 + 分页 -->
         <div class="card" style="margin:0;">
-            <div class="card-title" style="font-size:14px;">🏆 Top 50 榜单 <span class="hint" style="font-size:11px;">共 {{ yjPicks.length }} 只，点击名称进详情</span></div>
+            <div class="card-title" style="font-size:14px;">🏆 全部榜单 <span class="hint" style="font-size:11px;">共 {{ yjPicks.length }} 只，每页 {{ yjPageSize }} 条，点击名称进详情</span></div>
             <table style="font-size:12px;">
                 <thead><tr><th>#</th><th>代码</th><th>名称</th><th>现价</th><th>涨跌%</th><th>分</th><th>命中信号</th></tr></thead>
                 <tbody>
@@ -608,12 +746,18 @@
                 </tbody>
             </table>
             <!-- 分页器 -->
-            <div v-if="yjTotalPages > 1" style="display:flex;justify-content:center;gap:4px;padding:10px 0 4px;">
+            <div v-if="yjTotalPages > 1" style="display:flex;justify-content:center;align-items:center;gap:4px;padding:10px 0 4px;flex-wrap:wrap;">
+                <button class="button sm ghost" :disabled="yjPage <= 1" @click="yjGoPage(1)" style="font-size:12px;">«</button>
                 <button class="button sm ghost" :disabled="yjPage <= 1" @click="yjGoPage(yjPage - 1)" style="font-size:12px;">‹</button>
-                <button v-for="n in yjTotalPages" :key="n" class="button sm"
+                <button v-for="n in yjPageRange" :key="n" class="button sm"
                         :class="n === yjPage ? '' : 'ghost'"
                         @click="yjGoPage(n)" style="font-size:12px;min-width:30px;">{{ n }}</button>
                 <button class="button sm ghost" :disabled="yjPage >= yjTotalPages" @click="yjGoPage(yjPage + 1)" style="font-size:12px;">›</button>
+                <button class="button sm ghost" :disabled="yjPage >= yjTotalPages" @click="yjGoPage(yjTotalPages)" style="font-size:12px;">»</button>
+                <span class="hint" style="margin-left:8px;font-size:11px;">{{ yjPage }}/{{ yjTotalPages }}</span>
+                <input class="input sm" type="number" min="1" :max="yjTotalPages" v-model.number="yjJumpPage"
+                       @keyup.enter="yjDoJump" style="width:50px;text-align:center;font-size:12px;" placeholder="页">
+                <button class="button sm ghost" @click="yjDoJump" style="font-size:12px;">跳转</button>
             </div>
         </div>
         </template>
