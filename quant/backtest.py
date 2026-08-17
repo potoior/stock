@@ -4,6 +4,7 @@ import backtrader as bt
 
 from data_fetcher import get_backtrader_data
 from strategies import (
+    BBIBOLLStrategy,
     BIASStrategy,
     BOLLStrategy,
     BounceStrategy,
@@ -19,6 +20,7 @@ from strategies import (
     SARStrategy,
     SparrowStrategy,
     ThreeThirdStrategy,
+    TOWERStrategy,
     TwoLineStrategy,
     VolumePriceDivergenceStrategy,
 )
@@ -103,6 +105,8 @@ def main():
         (PSYStrategy, "PSY心理线"),
         (BIASStrategy, "乖离率BIAS(±3%)"),
         (SARStrategy, "SAR止损"),
+        (BBIBOLLStrategy, "BBIBOLL多空布林"),
+        (TOWERStrategy, "宝塔线TOWER"),
         (MACDKDJBOLLStrategy, "三指标共振"),
         (MACombinationStrategy, "均线组合"),
         (VolumePriceDivergenceStrategy, "量价背离"),

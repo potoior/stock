@@ -1,6 +1,110 @@
 import backtrader as bt
 
 
+class BBI(bt.Indicator):
+    """多空布林: BBI=(MA3+MA6+MA12+MA24)/4, 上下轨=BBI±m*std(n)"""
+
+    lines = ("upper", "mid", "lower")
+    params = (("m1", 3), ("m2", 6), ("m3", 12), ("m4", 24), ("n", 11), ("m", 2))
+
+    def __init__(self):
+        ma1 = bt.indicators.SMA(self.data.close, period=self.p.m1)
+        ma2 = bt.indicators.SMA(self.data.close, period=self.p.m2)
+        ma3 = bt.indicators.SMA(self.data.close, period=self.p.m3)
+        ma4 = bt.indicators.SMA(self.data.close, period=self.p.m4)
+        self.l.mid = (ma1 + ma2 + ma3 + ma4) / 4.0
+        std = bt.indicators.StdDev(self.l.mid, period=self.p.n)
+        self.l.upper = self.l.mid + std * self.p.m
+        self.l.lower = self.l.mid - std * self.p.m
+
+
+class BBIBOLLStrategy(bt.Strategy):
+    """BBIBOLL多空布林：跌破下轨买入，突破上轨卖出，中轨上方做多"""
+
+    params = (("printlog", False),)
+
+    def __init__(self):
+        self.bbiboll = BBI(self.data)
+        self.order = None
+
+    def log(self, txt):
+        if self.params.printlog:
+            dt = self.datas[0].datetime.date(0)
+            print(f"{dt} {txt}")
+
+    def notify_order(self, order):
+        if order.status in [order.Completed, order.Canceled, order.Margin]:
+            self.order = None
+
+    def next(self):
+        if self.order:
+            return
+        price = self.data.close[0]
+        u = self.bbiboll.upper[0]
+        m = self.bbiboll.mid[0]
+        lo = self.bbiboll.lower[0]
+        if not self.position:
+            if price <= lo:
+                size = int(self.broker.getcash() / price * 0.95)
+                self.buy(size=size)
+                self.log(f"BBIBOLL跌破下轨买入 {price:.2f}")
+            elif price > m:
+                size = int(self.broker.getcash() / price * 0.95)
+                self.buy(size=size)
+                self.log(f"BBIBOLL中轨上方买入 {price:.2f}")
+        else:
+            if price >= u:
+                self.close()
+                self.log(f"BBIBOLL突破上轨卖出 {price:.2f}")
+            elif price < m:
+                self.close()
+                self.log(f"BBIBOLL跌破中轨卖出 {price:.2f}")
+
+
+class TOWERStrategy(bt.Strategy):
+    """宝塔线：翻红买入，翻绿卖出，持续方向持仓"""
+
+    params = (("printlog", False),)
+
+    def __init__(self):
+        self.order = None
+        self.prev_tower = 0
+
+    def log(self, txt):
+        if self.params.printlog:
+            dt = self.datas[0].datetime.date(0)
+            print(f"{dt} {txt}")
+
+    def notify_order(self, order):
+        if order.status in [order.Completed, order.Canceled, order.Margin]:
+            self.order = None
+            self.prev_tower = self.tower_now
+
+    def next(self):
+        if self.order:
+            return
+        if len(self.data) < 2:
+            return
+        price = self.data.close[0]
+        if price > self.data.high[-1]:
+            self.tower_now = 1
+        elif price < self.data.low[-1]:
+            self.tower_now = -1
+        else:
+            self.tower_now = self.prev_tower
+        tw = self.tower_now
+        pre = self.prev_tower
+        if not self.position:
+            if tw == 1 and pre != 1:
+                size = int(self.broker.getcash() / price * 0.95)
+                self.buy(size=size)
+                self.log(f"宝塔线翻红买入 {price:.2f}")
+        else:
+            if tw == -1 and pre != -1:
+                self.close()
+                self.log(f"宝塔线翻绿卖出 {price:.2f}")
+
+
 class MACDStrategy(bt.Strategy):
     """MACD三板斧：零上金叉/底背离抄底/顶背离逃顶/零下死叉卖"""
 
