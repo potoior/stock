@@ -662,6 +662,42 @@ def daily_scan_status():
     }
 
 
+@app.get("/api/daily-scan/report")
+def daily_scan_report(date: str = None):
+    """返回某日日报（默认今天）。返回 markdown 原文。"""
+    from datetime import datetime
+    from pathlib import Path
+
+    reports_dir = Path(__file__).parent / "reports"
+    if not date:
+        date = datetime.now().strftime("%Y%m%d")
+    # 兼容 YYYYMMDD 与 YYYY-MM-DD
+    date_compact = date.replace("-", "")
+    fp = reports_dir / f"daily_{date_compact}.md"
+    if not fp.exists():
+        # 找最近一份
+        files = sorted(reports_dir.glob("daily_*.md"), reverse=True)
+        if files:
+            fp = files[0]
+        else:
+            return {"exists": False, "date": date, "markdown": ""}
+    return {
+        "exists": True,
+        "date": fp.stem.replace("daily_", ""),
+        "markdown": fp.read_text(encoding="utf-8"),
+    }
+
+
+@app.get("/api/daily-scan/reports")
+def daily_scan_reports():
+    """列出所有已生成的日报日期。"""
+    from pathlib import Path
+
+    reports_dir = Path(__file__).parent / "reports"
+    files = sorted(reports_dir.glob("daily_*.md"), reverse=True)
+    return {"dates": [f.stem.replace("daily_", "") for f in files]}
+
+
 @app.post("/api/daily-scan/run")
 def daily_scan_run():
     """手动触发一次每日扫描（异步，后台线程执行）。"""
