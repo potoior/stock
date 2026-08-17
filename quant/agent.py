@@ -1,8 +1,16 @@
+"""CLI 单进程交易 Agent 入口。
+
+与 `agent_engine.py` 的分工：
+- 本文件 (`agent.py`)：命令行单进程循环，`python agent.py [codes...] [--rule]`。
+- `agent_engine.py`：Web 后端双引擎（AI vs 规则）对比，被 `api.py` 调用。
+"""
+
 import sys
 import time
 from datetime import datetime
 
-from data_fetcher import fetch_realtime, get_daily_data
+import strategy_engine as se
+from data_fetcher import fetch_realtime
 from executor import SimExecutor
 from feedback import Feedback
 
@@ -24,45 +32,11 @@ class TradingAgent:
             self.ai_decider = AIDecider()
 
     def compute_signals(self, code, price):
-        try:
-            df = get_daily_data(code, "20240101")
-            if len(df) < 60:
-                return {}
-            close = df["close"].astype(float)
-            high = df["high"].astype(float)
-            low = df["low"].astype(float)
-
-            if price is not None:
-                import pandas as pd
-
-                close = pd.concat([close[:-1], pd.Series([price])], ignore_index=True)
-                high = pd.concat([high[:-1], pd.Series([max(high.iloc[-1], price)])], ignore_index=True)
-                low = pd.concat([low[:-1], pd.Series([min(low.iloc[-1], price)])], ignore_index=True)
-
-            ma5 = close.rolling(5).mean().iloc[-1]
-            ma10 = close.rolling(10).mean().iloc[-1]
-            ma20 = close.rolling(20).mean().iloc[-1]
-            ema12 = close.ewm(span=12, adjust=False).mean()
-            ema26 = close.ewm(span=26, adjust=False).mean()
-            dif = ema12 - ema26
-            dea = dif.ewm(span=9, adjust=False).mean()
-            macd_bull = dif.iloc[-1] > dea.iloc[-1]
-            low9 = low.rolling(9).min()
-            high9 = high.rolling(9).max()
-            rsv = (close - low9) / (high9 - low9) * 100
-            k = rsv.ewm(com=2, adjust=False).mean().iloc[-1]
-            return {
-                "ma5": round(ma5, 2),
-                "ma10": round(ma10, 2),
-                "ma20": round(ma20, 2),
-                "macd_bull": bool(macd_bull),
-                "k": round(k, 1),
-                "kdj_signal": "超卖" if k < 20 else ("超买" if k > 80 else "中性"),
-                "above_ma5": price > ma5,
-                "score": (1 if price > ma5 else 0) + (1 if macd_bull else 0),
-            }
-        except:
+        sig = se.compute_basic_signals(code, price)
+        if not sig:
             return {}
+        sig["score"] = (1 if sig["above_ma5"] else 0) + (1 if sig["macd_bull"] else 0)
+        return sig
 
     def scan(self):
         quotes = fetch_realtime(self.codes)

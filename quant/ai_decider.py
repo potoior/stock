@@ -11,7 +11,7 @@ _MIN_INTERVAL = 0.8  # 两次AI调用最小间隔，降频避免触发限流
 
 def load_api_key():
     text = CONFIG_PATH.read_text(encoding="utf-8")
-    lines = [l for l in text.split("\n") if not l.lstrip().startswith("//")]
+    lines = [line for line in text.split("\n") if not line.lstrip().startswith("//")]
     text = re.sub(r",\s*}", "}", re.sub(r",\s*]", "]", "\n".join(lines)))
     config = json.loads(text)
     return config["provider"]["sensenova"]["options"]["apiKey"]

@@ -7,6 +7,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from data_fetcher import fetch_realtime  # re-export: 保持 se.fetch_realtime 向后兼容
+
 ENGINE_HOME = Path(__file__).parent
 CACHE_DB = ENGINE_HOME / "stock_cache.db"
 CONFIG_PATH = ENGINE_HOME / "config.json"
@@ -85,6 +87,60 @@ def get_daily_data(code, days=320):
 
 
 # ---------------- 指标计算（通达信口径） ----------------
+
+
+def compute_basic_signals(code, current_price=None):
+    """统一的简化信号计算：返回 MA/MACD/KDJ 基础指标字典。
+
+    被 api.py / dashboard.py / realtime.py / agent.py 共用，避免四份重复实现。
+    若 current_price 给定，则用其替换最后一根 K 线的收盘价/最高/最低，模拟实时价。
+    """
+    try:
+        df = get_daily_data(code)
+        if len(df) < 60:
+            return {}
+        df = df.sort_values("date").reset_index(drop=True)
+        close = df["close"].astype(float)
+        high = df["high"].astype(float)
+        low = df["low"].astype(float)
+
+        if current_price is not None:
+            close = pd.concat([close[:-1], pd.Series([current_price])], ignore_index=True)
+            high = pd.concat([high[:-1], pd.Series([max(high.iloc[-1], current_price)])], ignore_index=True)
+            low = pd.concat([low[:-1], pd.Series([min(low.iloc[-1], current_price)])], ignore_index=True)
+
+        last_price = float(current_price if current_price is not None else close.iloc[-1])
+        ma5 = close.rolling(5).mean().iloc[-1]
+        ma10 = close.rolling(10).mean().iloc[-1]
+        ma20 = close.rolling(20).mean().iloc[-1]
+        ema12 = close.ewm(span=12, adjust=False).mean()
+        ema26 = close.ewm(span=26, adjust=False).mean()
+        dif = ema12 - ema26
+        dea = dif.ewm(span=9, adjust=False).mean()
+        macd_val = 2 * (dif.iloc[-1] - dea.iloc[-1])
+        low9 = low.rolling(9).min()
+        high9 = high.rolling(9).max()
+        rsv = (close - low9) / (high9 - low9) * 100
+        k = rsv.ewm(com=2, adjust=False).mean()
+        d = k.ewm(com=2, adjust=False).mean()
+        k_val = k.iloc[-1]
+        d_val = d.iloc[-1]
+        j_val = 3 * k_val - 2 * d_val
+        return {
+            "price": last_price,
+            "ma5": round(ma5, 2),
+            "ma10": round(ma10, 2),
+            "ma20": round(ma20, 2),
+            "macd": round(macd_val, 3),
+            "macd_bull": bool(dif.iloc[-1] > dea.iloc[-1]),
+            "k": round(k_val, 1),
+            "d": round(d_val, 1),
+            "j": round(j_val, 1),
+            "kdj_signal": "超卖" if k_val < 20 else ("超买" if k_val > 80 else "中性"),
+            "above_ma5": bool(last_price > ma5),
+        }
+    except Exception:
+        return {}
 
 
 def compute_macd(df, fast=12, slow=26, signal=9):
@@ -488,14 +544,14 @@ def strategy_ma_stop(ctx, params):
 def strategy_boll(ctx, params):
     period = int(params.get("period", 20))
     std = float(params.get("std", 2))
-    u, m, l = compute_boll(ctx["df"], period=period, std=std)
+    u, m, lo = compute_boll(ctx["df"], period=period, std=std)
     i = ctx["i"]
-    u, m, l = u.iloc[i], m.iloc[i], l.iloc[i]
+    u, m, lo = u.iloc[i], m.iloc[i], lo.iloc[i]
     price = ctx["price"]
-    if pd.isna(l):
+    if pd.isna(lo):
         return "hold", "BOLL数据不足"
-    if price <= l:
-        return "buy", f"价格({price:.2f})触及下轨({l:.2f})"
+    if price <= lo:
+        return "buy", f"价格({price:.2f})触及下轨({lo:.2f})"
     if price >= u:
         return "sell", f"价格({price:.2f})触及上轨({u:.2f})"
     if price > m:
@@ -563,9 +619,9 @@ def strategy_sar(ctx, params):
 
 
 def strategy_burnal(ctx, params):
-    u, m, l = compute_bbiboll(ctx["df"])
+    u, m, lo = compute_bbiboll(ctx["df"])
     i = ctx["i"]
-    bu, bm, bl = u.iloc[i], m.iloc[i], l.iloc[i]
+    bu, bm, bl = u.iloc[i], m.iloc[i], lo.iloc[i]
     price = ctx["price"]
     if pd.isna(bm):
         return "hold", "BBIBOLL数据不足"
@@ -1225,45 +1281,6 @@ def analyze(code, use_ai=True):
         "hold_reasons": hold_sigs,
         "kline": kdf.to_dict("records"),
     }
-
-
-def fetch_realtime(codes):
-    symbols = [_sina_symbol(c) for c in codes]
-    url = "http://hq.sinajs.cn/list=" + ",".join(symbols)
-    req = urllib.request.Request(url, headers={"Referer": "https://finance.sina.com.cn/"})
-    try:
-        resp = urllib.request.urlopen(req, timeout=10)
-        data = resp.read().decode("gbk")
-    except Exception:
-        return []
-    results = []
-    for i, code in enumerate(codes):
-        lines = data.strip().split("\n")
-        if i >= len(lines):
-            continue
-        line = lines[i]
-        if f"hq_str_{symbols[i]}" not in line:
-            continue
-        parts = line.split('"')[1].split(",") if '"' in line else []
-        if len(parts) < 30:
-            continue
-        change = float(parts[3]) - float(parts[2])
-        pct = change / float(parts[2]) * 100 if float(parts[2]) else 0
-        results.append(
-            {
-                "code": code,
-                "name": parts[0],
-                "price": float(parts[3]),
-                "change": round(change, 2),
-                "pct": round(pct, 2),
-                "high": float(parts[4]),
-                "low": float(parts[5]),
-                "open": float(parts[1]),
-                "yclose": float(parts[2]),
-                "volume": int(parts[8]) if parts[8] else 0,
-            }
-        )
-    return results
 
 
 if __name__ == "__main__":

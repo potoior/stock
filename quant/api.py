@@ -1,7 +1,6 @@
 from datetime import datetime
 from pathlib import Path
 
-import pandas as pd
 from fastapi import FastAPI
 from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
@@ -19,50 +18,20 @@ DEFAULT_CODES = ["600789", "000001", "600519", "601318", "000333", "002415"]
 
 
 def compute_signals(code, current_price=None):
-    try:
-        df = se.get_daily_data(code)
-        if len(df) < 60:
-            return {}
-        df = df.sort_values("date").reset_index(drop=True)
-        close = df["close"].astype(float)
-        high = df["high"].astype(float)
-        low = df["low"].astype(float)
-
-        if current_price is not None:
-            close = pd.concat([close[:-1], pd.Series([current_price])], ignore_index=True)
-            high = pd.concat([high[:-1], pd.Series([max(high.iloc[-1], current_price)])], ignore_index=True)
-            low = pd.concat([low[:-1], pd.Series([min(low.iloc[-1], current_price)])], ignore_index=True)
-
-        current_price if current_price is not None else close.iloc[-1]
-        ma5 = close.rolling(5).mean().iloc[-1]
-        ma10 = close.rolling(10).mean().iloc[-1]
-        ma20 = close.rolling(20).mean().iloc[-1]
-        ema12 = close.ewm(span=12, adjust=False).mean()
-        ema26 = close.ewm(span=26, adjust=False).mean()
-        dif = ema12 - ema26
-        dea = dif.ewm(span=9, adjust=False).mean()
-        macd_val = 2 * (dif.iloc[-1] - dea.iloc[-1])
-        low9 = low.rolling(9).min()
-        high9 = high.rolling(9).max()
-        rsv = (close - low9) / (high9 - low9) * 100
-        k = rsv.ewm(com=2, adjust=False).mean()
-        d = k.ewm(com=2, adjust=False).mean()
-        k_val = k.iloc[-1]
-        d_val = d.iloc[-1]
-        j_val = 3 * k_val - 2 * d_val
-        return {
-            "ma5": round(ma5, 2),
-            "ma10": round(ma10, 2),
-            "ma20": round(ma20, 2),
-            "macd": round(macd_val, 3),
-            "macd_bull": bool(dif.iloc[-1] > dea.iloc[-1]),
-            "k": round(k_val, 1),
-            "d": round(d_val, 1),
-            "j": round(j_val, 1),
-            "kdj_signal": "超卖" if k_val < 20 else ("超买" if k_val > 80 else "中性"),
-        }
-    except Exception:
+    sig = se.compute_basic_signals(code, current_price)
+    if not sig:
         return {}
+    return {
+        "ma5": sig["ma5"],
+        "ma10": sig["ma10"],
+        "ma20": sig["ma20"],
+        "macd": sig["macd"],
+        "macd_bull": sig["macd_bull"],
+        "k": sig["k"],
+        "d": sig["d"],
+        "j": sig["j"],
+        "kdj_signal": sig["kdj_signal"],
+    }
 
 
 @app.get("/api/quotes")

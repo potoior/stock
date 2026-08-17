@@ -42,7 +42,7 @@
 
 ### 2. 回测系统 (`backtest.py` / `strategies.py`)
 
-**11 个可回测策略：**
+**17 个可回测策略：**
 
 | # | 策略 | 买入逻辑 | 卖出逻辑 | 参数 |
 |---|------|---------|---------|------|
@@ -57,14 +57,26 @@
 | 9 | 三指标共振 | MACD+KDJ+BOLL 综合评分 | 任一指标走坏 | — |
 | 10 | 均线组合 | 5>10>60 多头排列 | 跌破 5/10 | 5/10/60 |
 | 11 | 量价背离 | 价创新高量萎缩 | 放量下跌 | 10 |
+| 12 | DMI+PSY | DMI 多头且 PSY≤25 | DMI 空头或 PSY≥75 | 14/12 |
+| 13 | 三分法 | 分批建仓 | 分批减仓 | — |
+| 14 | 麻雀战法 | 小仓位多次低吸 | 小仓位多次高抛 | — |
+| 15 | 反弹策略 | 跌幅过大短线反弹 | 短线获利了结 | — |
+| 16 | 二线法 | 短期均线上穿长期 | 短期均线下穿长期 | 5/20 |
+| 17 | 60日生命线 | 站上 60 日线 | 跌破 60 日线 | 60 |
 
-### 3. AI 交易 Agent (`agent.py` / `ai_decider.py`)
+### 3. AI 交易 Agent
 
+两套 Agent 实现，分工不同：
+
+- **`agent.py` (CLI 单进程)**：命令行入口，`python agent.py [codes...] [--rule]`，单组合循环扫描。
+- **`agent_engine.py` (Web 后端双引擎)**：被 `api.py` 调用，AI vs 规则两个 1 万元组合并行对比，落库权益曲线。
+
+共同特性：
 - 调用 SenseNova 6.7 多模态模型做决策
 - 输入：实时行情 + 技术指标 + 持仓状态
 - 输出：每只股票操作建议（buy/sell/hold）
 - 受风控约束：止损 5%、单股仓位 20%、单日交易 5 次上限
-- 支持两种模式：`python agent.py --ai`（AI 决策）/ `python agent.py --rule`（规则决策）
+- 支持两种模式：`python agent.py --ai`（AI 决策，默认）/ `python agent.py --rule`（规则决策）
 
 ### 4. 知识库 (`output/`)
 
@@ -85,16 +97,16 @@
 cd quant
 
 # 安装依赖
-pip install pandas backtrader fastapi uvicorn httpx
+pip install -r requirements.txt   # pandas/numpy/backtrader/fastapi/uvicorn/gradio/httpx
 
 # 启动 Web 前端
 python api.py                    # 访问 http://127.0.0.1:8000
 
 # 运行回测
-python backtest.py               # 11 个策略全量回测
+python backtest.py               # 17 个策略全量回测
 
-# 运行 AI Agent
-python agent.py 600789 000001    # AI 决策模式
+# 运行 AI Agent (CLI 单进程)
+python agent.py 600789 000001    # AI 决策模式（默认）
 python agent.py 600789 --rule    # 规则决策模式
 
 # 实时行情信号
@@ -125,4 +137,4 @@ docker compose up -d
 
 ---
 
-*最后更新：2026-08-10*
+*最后更新：2026-08-17*

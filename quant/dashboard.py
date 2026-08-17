@@ -4,46 +4,14 @@ from pathlib import Path
 
 import gradio as gr
 
-from data_fetcher import fetch_realtime, get_daily_data
+import strategy_engine as se
+from data_fetcher import fetch_realtime
 
 DB_PATH = Path(__file__).parent / "stock_cache.db"
 
 
 def compute_signals(code):
-    try:
-        df = get_daily_data(code, "20240101")
-        if len(df) < 60:
-            return {}
-        close = df["close"].astype(float)
-        high = df["high"].astype(float)
-        low = df["low"].astype(float)
-        price = close.iloc[-1]
-        ma5 = close.rolling(5).mean().iloc[-1]
-        ma10 = close.rolling(10).mean().iloc[-1]
-        ma20 = close.rolling(20).mean().iloc[-1]
-        ema12 = close.ewm(span=12, adjust=False).mean()
-        ema26 = close.ewm(span=26, adjust=False).mean()
-        dif = ema12 - ema26
-        dea = dif.ewm(span=9, adjust=False).mean()
-        macd_val = 2 * (dif.iloc[-1] - dea.iloc[-1])
-        low9 = low.rolling(9).min()
-        high9 = high.rolling(9).max()
-        rsv = (close - low9) / (high9 - low9) * 100
-        k = rsv.ewm(com=2, adjust=False).mean()
-        d = k.ewm(com=2, adjust=False).mean()
-        return {
-            "price": round(price, 2),
-            "ma5": round(ma5, 2),
-            "ma10": round(ma10, 2),
-            "ma20": round(ma20, 2),
-            "macd": round(macd_val, 3),
-            "macd_bull": dif.iloc[-1] > dea.iloc[-1],
-            "k": round(k.iloc[-1], 1),
-            "d": round(d.iloc[-1], 1),
-            "kdj_signal": "超卖" if k.iloc[-1] < 20 else ("超买" if k.iloc[-1] > 80 else "中性"),
-        }
-    except:
-        return {}
+    return se.compute_basic_signals(code)
 
 
 def create_portfolio_table():

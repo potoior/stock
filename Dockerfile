@@ -8,4 +8,5 @@ COPY . .
 
 EXPOSE 8000 7860
 
+WORKDIR /app/quant
 CMD ["python", "api.py"]

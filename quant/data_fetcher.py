@@ -110,14 +110,22 @@ def get_backtrader_data(code, start_date="20220101", end_date=None):
 def fetch_realtime(codes):
     import urllib.request
 
+    if not codes:
+        return []
     symbols = [sina_symbol(c) for c in codes]
     url = "http://hq.sinajs.cn/list=" + ",".join(symbols)
     req = urllib.request.Request(url, headers={"Referer": "https://finance.sina.com.cn/"})
-    resp = urllib.request.urlopen(req, timeout=10)
-    data = resp.read().decode("gbk")
+    try:
+        resp = urllib.request.urlopen(req, timeout=10)
+        data = resp.read().decode("gbk")
+    except Exception:
+        return []
     results = []
+    lines = data.strip().split("\n")
     for i, code in enumerate(codes):
-        line = data.split("\n")[i] if i < len(data.split("\n")) else ""
+        if i >= len(lines):
+            continue
+        line = lines[i]
         if f"hq_str_{symbols[i]}" not in line:
             continue
         parts = line.split('"')[1].split(",") if '"' in line else []

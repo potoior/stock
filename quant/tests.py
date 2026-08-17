@@ -103,7 +103,7 @@ except Exception as e:
 print("\n6. Agent 主循环")
 from agent import TradingAgent
 
-agent = TradingAgent(codes=["600789"], interval=5)
+agent = TradingAgent(codes=["600789"], interval=5, mode="rule")
 agent.run(max_cycles=1)
 agent.feedback.close()
 test("Agent 运行", agent.cycle_count == 1)
