@@ -1,14 +1,19 @@
+# Python / 虚拟环境
 .venv/
-stock_cache.db
-agent_data.db
+venv/
 __pycache__/
 *.pyc
-.DS_Store
-*.pdf
+.pytest_cache/
+.ruff_cache/
+
+# 系统本地数据文件
+*.db
 *.dbconfig.json
 quant/config.json
 
-agent_data_ai.db
-agent_data_rule.db
+# OCR 中间产物（源书逐页拆分，已整理入 book/）
+output/
 
-agent_data.db
+# 编辑器 / 系统
+.DS_Store
+*.pdf
