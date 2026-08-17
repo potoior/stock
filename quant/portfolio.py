@@ -1,9 +1,9 @@
-import json
 import sqlite3
 from datetime import datetime
 from pathlib import Path
 
 DEFAULT_DB = Path(__file__).parent / "agent_data.db"
+
 
 def init_db(db_path=None):
     path = Path(db_path) if db_path else DEFAULT_DB
@@ -31,6 +31,7 @@ def init_db(db_path=None):
     """)
     conn.commit()
     return conn
+
 
 class Portfolio:
     def __init__(self, initial_cash=100000.0, db_path=None):
@@ -90,7 +91,7 @@ class Portfolio:
         conn = init_db(self.db_path)
         conn.execute(
             "INSERT INTO trades (code, name, action, price, qty, amount, pnl, date) VALUES (?,?,?,?,?,?,?,?)",
-            (code, name, action, price, qty, amount, pnl, datetime.now().isoformat())
+            (code, name, action, price, qty, amount, pnl, datetime.now().isoformat()),
         )
         conn.commit()
         conn.close()
@@ -101,7 +102,7 @@ class Portfolio:
         for code, p in self.positions.items():
             conn.execute(
                 "INSERT INTO positions (code, qty, cost, buy_date) VALUES (?,?,?,?)",
-                (code, p["qty"], p["cost"], p["buy_date"])
+                (code, p["qty"], p["cost"], p["buy_date"]),
             )
         conn.commit()
         conn.close()

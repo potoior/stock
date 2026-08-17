@@ -1,10 +1,13 @@
-import gradio as gr
-import json
+import sqlite3
 from datetime import datetime
 from pathlib import Path
-from data_fetcher import get_daily_data, fetch_realtime
+
+import gradio as gr
+
+from data_fetcher import fetch_realtime, get_daily_data
 
 DB_PATH = Path(__file__).parent / "stock_cache.db"
+
 
 def compute_signals(code):
     try:
@@ -29,14 +32,19 @@ def compute_signals(code):
         k = rsv.ewm(com=2, adjust=False).mean()
         d = k.ewm(com=2, adjust=False).mean()
         return {
-            "price": round(price, 2), "ma5": round(ma5, 2),
-            "ma10": round(ma10, 2), "ma20": round(ma20, 2),
-            "macd": round(macd_val, 3), "macd_bull": dif.iloc[-1] > dea.iloc[-1],
-            "k": round(k.iloc[-1], 1), "d": round(d.iloc[-1], 1),
+            "price": round(price, 2),
+            "ma5": round(ma5, 2),
+            "ma10": round(ma10, 2),
+            "ma20": round(ma20, 2),
+            "macd": round(macd_val, 3),
+            "macd_bull": dif.iloc[-1] > dea.iloc[-1],
+            "k": round(k.iloc[-1], 1),
+            "d": round(d.iloc[-1], 1),
             "kdj_signal": "超卖" if k.iloc[-1] < 20 else ("超买" if k.iloc[-1] > 80 else "中性"),
         }
     except:
         return {}
+
 
 def create_portfolio_table():
     conn = sqlite3.connect(str(DB_PATH))
@@ -48,22 +56,35 @@ def create_portfolio_table():
     for q in quotes:
         sig = compute_signals(q["code"])
         trend = "↗" if q["pct"] > 0 else ("↘" if q["pct"] < 0 else "→")
-        data.append([q["code"], q["name"], q["price"], f"{trend} {q['pct']:+.2f}%",
-                     sig.get("ma5", "-"), sig.get("macd", "-"), sig.get("kdj_signal", "-")])
+        data.append(
+            [
+                q["code"],
+                q["name"],
+                q["price"],
+                f"{trend} {q['pct']:+.2f}%",
+                sig.get("ma5", "-"),
+                sig.get("macd", "-"),
+                sig.get("kdj_signal", "-"),
+            ]
+        )
     return data
+
 
 def refresh():
     data = create_portfolio_table()
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     return data, f"最后更新: {now}"
 
+
 columns = ["代码", "名称", "现价", "涨跌幅", "MA5", "MACD", "KDJ"]
 
-with gr.Blocks(theme=gr.themes.Soft(
-    primary_hue=gr.themes.colors.gray,
-    neutral_hue=gr.themes.colors.gray,
-    font=gr.themes.GoogleFont("Inter"),
-), css="""
+with gr.Blocks(
+    theme=gr.themes.Soft(
+        primary_hue=gr.themes.colors.gray,
+        neutral_hue=gr.themes.colors.gray,
+        font=gr.themes.GoogleFont("Inter"),
+    ),
+    css="""
     .header { text-align: center; padding: 20px 0; }
     .header h1 { font-size: 28px; font-weight: 600; color: #1a1a1a; margin: 0; }
     .header p { font-size: 14px; color: #666; margin: 5px 0 0; }
@@ -72,7 +93,8 @@ with gr.Blocks(theme=gr.themes.Soft(
     .down { color: #2e7d32; font-weight: 500; }
     .flat { color: #666; }
     footer { text-align: center; padding: 20px; color: #999; font-size: 12px; }
-""") as demo:
+""",
+) as demo:
     gr.HTML("""
     <div class="header">
         <h1>📊 A股量化监控</h1>

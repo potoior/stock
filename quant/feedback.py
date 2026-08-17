@@ -4,15 +4,15 @@ from pathlib import Path
 
 DB_PATH = Path(__file__).parent / "agent_data.db"
 
+
 class Feedback:
     """自我反馈模块：分析交易表现，检测策略失效，给出优化建议"""
+
     def __init__(self):
         self.conn = sqlite3.connect(str(DB_PATH))
 
     def recent_trades(self, limit=100):
-        rows = self.conn.execute(
-            "SELECT * FROM trades ORDER BY id DESC LIMIT ?", (limit,)
-        ).fetchall()
+        rows = self.conn.execute("SELECT * FROM trades ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
         return rows
 
     def win_rate(self, limit=20):
@@ -67,8 +67,14 @@ class Feedback:
 
     def _format_trade(self, t):
         return {
-            "id": t[0], "code": t[1], "name": t[2], "action": t[3],
-            "price": t[4], "qty": t[5], "amount": t[6], "pnl": t[7],
+            "id": t[0],
+            "code": t[1],
+            "name": t[2],
+            "action": t[3],
+            "price": t[4],
+            "qty": t[5],
+            "amount": t[6],
+            "pnl": t[7],
             "date": t[8],
         }
 

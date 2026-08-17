@@ -38,8 +38,7 @@ _init_log_db()
 
 def _save_equity_point(agent_type, ts, value):
     conn = sqlite3.connect(str(LOG_DB))
-    conn.execute("INSERT INTO equity_curve (agent_type, ts, value) VALUES (?,?,?)",
-                 (agent_type, ts, value))
+    conn.execute("INSERT INTO equity_curve (agent_type, ts, value) VALUES (?,?,?)", (agent_type, ts, value))
     conn.commit()
     conn.close()
 
@@ -49,7 +48,7 @@ def _save_log(agent_type, ts, code, name, action, price, qty, reason):
     conn.execute(
         "INSERT INTO agent_logs (ts, agent_type, code, name, action, price, qty, reason) "
         "VALUES (?,?,?,?,?,?,?,?)",
-        (ts, agent_type, code, name, action, price, qty, reason)
+        (ts, agent_type, code, name, action, price, qty, reason),
     )
     conn.commit()
     conn.close()
@@ -58,8 +57,7 @@ def _save_log(agent_type, ts, code, name, action, price, qty, reason):
 def _load_equity_curve(agent_type, limit=500):
     conn = sqlite3.connect(str(LOG_DB))
     rows = conn.execute(
-        "SELECT ts, value FROM equity_curve WHERE agent_type=? ORDER BY id DESC LIMIT ?",
-        (agent_type, limit)
+        "SELECT ts, value FROM equity_curve WHERE agent_type=? ORDER BY id DESC LIMIT ?", (agent_type, limit)
     ).fetchall()
     conn.close()
     rows = list(reversed(rows))
@@ -70,11 +68,23 @@ def _load_logs(limit=100):
     conn = sqlite3.connect(str(LOG_DB))
     rows = conn.execute(
         "SELECT ts, agent_type, code, name, action, price, qty, reason "
-        "FROM agent_logs ORDER BY id DESC LIMIT ?", (limit,)
+        "FROM agent_logs ORDER BY id DESC LIMIT ?",
+        (limit,),
     ).fetchall()
     conn.close()
-    return [{"ts": r[0], "agent_type": r[1], "code": r[2], "name": r[3],
-             "action": r[4], "price": r[5], "qty": r[6], "reason": r[7]} for r in rows]
+    return [
+        {
+            "ts": r[0],
+            "agent_type": r[1],
+            "code": r[2],
+            "name": r[3],
+            "action": r[4],
+            "price": r[5],
+            "qty": r[6],
+            "reason": r[7],
+        }
+        for r in rows
+    ]
 
 
 def _clear_logs():
@@ -105,6 +115,7 @@ class AgentEngine:
     def _init_ai_decider(self):
         try:
             from ai_decider import AIDecider
+
             self.ai_decider = AIDecider()
         except Exception:
             self.ai_decider = None
@@ -148,12 +159,17 @@ class AgentEngine:
                 price = prices.get(code, 0)
                 pnl = (price - p["cost"]) * p["qty"]
                 pnl_pct = (price - p["cost"]) / p["cost"] * 100 if p["cost"] else 0
-                rows.append({
-                    "code": code, "qty": p["qty"], "cost": round(p["cost"], 2),
-                    "price": round(price, 2), "pnl": round(pnl, 2),
-                    "pnl_pct": round(pnl_pct, 2),
-                    "buy_date": p.get("buy_date", ""),
-                })
+                rows.append(
+                    {
+                        "code": code,
+                        "qty": p["qty"],
+                        "cost": round(p["cost"], 2),
+                        "price": round(price, 2),
+                        "pnl": round(pnl, 2),
+                        "pnl_pct": round(pnl_pct, 2),
+                        "buy_date": p.get("buy_date", ""),
+                    }
+                )
             return rows
 
         return {
@@ -192,12 +208,20 @@ class AgentEngine:
         all_trades = []
         for atype, ex in executors:
             for t in ex.portfolio.get_trades(limit=limit):
-                all_trades.append({
-                    "id": t[0], "code": t[1], "name": t[2],
-                    "action": t[3], "price": t[4], "qty": t[5],
-                    "amount": t[6], "pnl": t[7], "date": t[8],
-                    "agent_type": atype,
-                })
+                all_trades.append(
+                    {
+                        "id": t[0],
+                        "code": t[1],
+                        "name": t[2],
+                        "action": t[3],
+                        "price": t[4],
+                        "qty": t[5],
+                        "amount": t[6],
+                        "pnl": t[7],
+                        "date": t[8],
+                        "agent_type": atype,
+                    }
+                )
         all_trades.sort(key=lambda x: x["date"], reverse=True)
         return all_trades[:limit]
 
@@ -209,8 +233,9 @@ class AgentEngine:
             if self._is_market_hours():
                 try:
                     self._cycle()
-                except Exception as e:
+                except Exception:
                     import traceback
+
                     traceback.print_exc()
                 self.last_run = datetime.now()
                 self.cycle_count += 1
@@ -290,9 +315,9 @@ class AgentEngine:
                 if pnl_pct <= -0.05:
                     ex.execute(code, q["name"], price, "sell")
                     daily_trades += 1
-                    reason = f"止损卖出({pnl_pct*100:.1f}%)"
+                    reason = f"止损卖出({pnl_pct * 100:.1f}%)"
                     _save_log("rule", ts, code, q["name"], "sell", price, pos["qty"], reason)
-                    actions.append(f"卖出{code}止损({pnl_pct*100:.1f}%)")
+                    actions.append(f"卖出{code}止损({pnl_pct * 100:.1f}%)")
                     continue
 
             can_sell = not (pos and pos.get("buy_date") == today)
@@ -330,9 +355,9 @@ class AgentEngine:
                 pnl_pct = (q["price"] - pos["cost"]) / pos["cost"]
                 if pnl_pct <= -0.05:
                     ex.execute(code, q["name"], q["price"], "sell")
-                    reason = f"硬性止损({pnl_pct*100:.1f}%)"
+                    reason = f"硬性止损({pnl_pct * 100:.1f}%)"
                     _save_log("ai", ts, code, q["name"], "sell", q["price"], pos["qty"], reason)
-                    actions.append(f"卖出{code}止损({pnl_pct*100:.1f}%)")
+                    actions.append(f"卖出{code}止损({pnl_pct * 100:.1f}%)")
 
         market_data = []
         for q in quotes:
@@ -346,18 +371,20 @@ class AgentEngine:
             sell_n = sum(1 for s in sigs if s["signal"] == "sell")
             hold_n = sum(1 for s in sigs if s["signal"] == "hold")
             info = {
-                "code": code, "name": q["name"],
-                "price": q["price"], "pct": q.get("pct", 0),
+                "code": code,
+                "name": q["name"],
+                "price": q["price"],
+                "pct": q.get("pct", 0),
                 "indicators": {
-                    "macd": f"{ind.get('macd_diff',0)}/{ind.get('macd_dea',0)}",
-                    "kdj": f"{ind.get('k',0)}/{ind.get('d',0)}/{ind.get('j',0)}",
-                    "boll": f"{ind.get('boll_u',0)}/{ind.get('boll_m',0)}/{ind.get('boll_l',0)}",
-                    "ma": f"{ind.get('ma5',0)}/{ind.get('ma10',0)}/{ind.get('ma60',0)}",
-                    "psy": ind.get('psy', 0),
-                    "bias": f"{ind.get('bias1',0)}/{ind.get('bias2',0)}/{ind.get('bias3',0)}",
-                    "dmi": f"{ind.get('pdi',0)}/{ind.get('mdi',0)}/{ind.get('adx',0)}",
-                    "sar": ind.get('sar', 0),
-                    "tower": ind.get('tower', 0),
+                    "macd": f"{ind.get('macd_diff', 0)}/{ind.get('macd_dea', 0)}",
+                    "kdj": f"{ind.get('k', 0)}/{ind.get('d', 0)}/{ind.get('j', 0)}",
+                    "boll": f"{ind.get('boll_u', 0)}/{ind.get('boll_m', 0)}/{ind.get('boll_l', 0)}",
+                    "ma": f"{ind.get('ma5', 0)}/{ind.get('ma10', 0)}/{ind.get('ma60', 0)}",
+                    "psy": ind.get("psy", 0),
+                    "bias": f"{ind.get('bias1', 0)}/{ind.get('bias2', 0)}/{ind.get('bias3', 0)}",
+                    "dmi": f"{ind.get('pdi', 0)}/{ind.get('mdi', 0)}/{ind.get('adx', 0)}",
+                    "sar": ind.get("sar", 0),
+                    "tower": ind.get("tower", 0),
                 },
                 "verdict": result.get("verdict", "观望"),
                 "votes": f"买入{buy_n}票/卖出{sell_n}票/观望{hold_n}票",
@@ -412,7 +439,7 @@ class AgentEngine:
             price = prices.get(code, 0)
             pnl_pct = (price - p["cost"]) / p["cost"] * 100 if p["cost"] else 0
             position_lines.append(
-                f"- {code}: {p['qty']}股, 成本{p['cost']:.2f}, 现价{price:.2f}, 盈亏{pnl_pct:+.1f}%, 买入日{p.get('buy_date','')}"
+                f"- {code}: {p['qty']}股, 成本{p['cost']:.2f}, 现价{price:.2f}, 盈亏{pnl_pct:+.1f}%, 买入日{p.get('buy_date', '')}"
             )
         stock_lines = []
         for s in market_data:
@@ -453,6 +480,7 @@ class AgentEngine:
 
     def _parse_agent_response(self, text, market_data):
         import re
+
         expected = {s["code"] for s in market_data}
         try:
             m = re.search(r"\[.*\]", text, re.DOTALL)

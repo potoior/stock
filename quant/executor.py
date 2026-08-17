@@ -1,7 +1,8 @@
-import time
 from datetime import datetime
+
 from portfolio import Portfolio
 from risk_manager import RiskManager
+
 
 class SimExecutor:
     def __init__(self, initial_cash=100000.0, db_path=None):

@@ -8,12 +8,14 @@ CONFIG_PATH = Path.home() / ".config" / "opencode" / "opencode.jsonc"
 _last_call_ts = 0.0
 _MIN_INTERVAL = 0.8  # 两次AI调用最小间隔，降频避免触发限流
 
+
 def load_api_key():
     text = CONFIG_PATH.read_text(encoding="utf-8")
     lines = [l for l in text.split("\n") if not l.lstrip().startswith("//")]
     text = re.sub(r",\s*}", "}", re.sub(r",\s*]", "]", "\n".join(lines)))
     config = json.loads(text)
     return config["provider"]["sensenova"]["options"]["apiKey"]
+
 
 class AIDecider:
     def __init__(self, model="sensenova-6.7-flash-lite"):
@@ -32,9 +34,9 @@ class AIDecider:
         for s in stocks:
             lines.append(
                 f"- {s['name']}({s['code']}): 现价{s['price']:.2f}, "
-                f"涨跌{s['pct']:+.2f}%, MA5={s.get('ma5','-')}, "
+                f"涨跌{s['pct']:+.2f}%, MA5={s.get('ma5', '-')}, "
                 f"MACD={'多头' if s.get('macd_bull') else '空头'}, "
-                f"KDJ={s.get('kdj_signal','-')}"
+                f"KDJ={s.get('kdj_signal', '-')}"
             )
         pos_lines = []
         for code, p in portfolio.positions.items():
@@ -68,10 +70,8 @@ class AIDecider:
 
     def _call_api(self, prompt, timeout=60):
         import httpx
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
+
+        headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
         payload = {
             "model": self.model,
             "messages": [{"role": "user", "content": prompt}],
@@ -81,8 +81,7 @@ class AIDecider:
         try:
             with httpx.Client(timeout=timeout, verify=False) as client:
                 resp = client.post(
-                    "https://token.sensenova.cn/v1/chat/completions",
-                    json=payload, headers=headers
+                    "https://token.sensenova.cn/v1/chat/completions", json=payload, headers=headers
                 )
                 if resp.status_code == 200:
                     msg = resp.json()["choices"][0]["message"]
@@ -132,8 +131,7 @@ class AIDecider:
             if attempt < max_retries:
                 time.sleep(1.5)
         if not isinstance(raw, str) or raw.startswith(("API错误", "调用失败", "API限流")):
-            fallback = [{"id": r["id"], "signal": "hold",
-                         "reason": f"AI判定不可用: {raw}"} for r in rules]
+            fallback = [{"id": r["id"], "signal": "hold", "reason": f"AI判定不可用: {raw}"} for r in rules]
             return {"code": code, "results": fallback}
         parsed = self._parse_judge_response(raw, [r["id"] for r in rules])
         return {"code": code, "results": parsed}
@@ -142,8 +140,8 @@ class AIDecider:
         rule_lines = []
         for r in rules:
             rule_lines.append(
-                f"- 规则[{r['id']}] {r['name']}：买入条件「{r.get('buy_rule','')}」；"
-                f"卖出条件「{r.get('sell_rule','')}」"
+                f"- 规则[{r['id']}] {r['name']}：买入条件「{r.get('buy_rule', '')}」；"
+                f"卖出条件「{r.get('sell_rule', '')}」"
             )
         return f"""你是一位资深A股短线技术分析师。请根据给定的技术指标，严格套用下面的用户规则，判断每个规则当前应该发出什么信号。
 
@@ -181,8 +179,10 @@ class AIDecider:
         except Exception:
             return [{"id": i, "signal": "hold", "reason": "AI解析失败"} for i in expected_ids]
 
+
 if __name__ == "__main__":
     from executor import SimExecutor
+
     ex = SimExecutor()
     d = AIDecider()
     result = d.decide({"quotes": []}, ex.portfolio)

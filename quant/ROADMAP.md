@@ -257,7 +257,7 @@ class TradingAgent:
     def __init__(self, mode="simulation"):
         self.mode = mode  # simulation / real
         self.portfolio = {}  # code -> {qty, cost, buy_date}
-        self.trades = []     # 交易历史
+        self.trades = []  # 交易历史
         self.strategies = [...]  # 策略列表
 
     def run(self, interval=300):

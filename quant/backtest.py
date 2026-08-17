@@ -1,23 +1,45 @@
-import backtrader as bt
 from pathlib import Path
-from datetime import datetime
+
+import backtrader as bt
+
 from data_fetcher import get_backtrader_data
 from strategies import (
-    MACDStrategy, KDJStrategy, MAStopStrategy,
-    BOLLStrategy, DMIStrategy, PSYStrategy, BIASStrategy, SARStrategy,
-    MACDKDJBOLLStrategy, MACombinationStrategy, VolumePriceDivergenceStrategy,
-    DMIAndPSYStrategy, ThreeThirdStrategy, SparrowStrategy, BounceStrategy,
-    TwoLineStrategy, LifeLine60Strategy,
+    BIASStrategy,
+    BOLLStrategy,
+    BounceStrategy,
+    DMIAndPSYStrategy,
+    DMIStrategy,
+    KDJStrategy,
+    LifeLine60Strategy,
+    MACDKDJBOLLStrategy,
+    MACDStrategy,
+    MACombinationStrategy,
+    MAStopStrategy,
+    PSYStrategy,
+    SARStrategy,
+    SparrowStrategy,
+    ThreeThirdStrategy,
+    TwoLineStrategy,
+    VolumePriceDivergenceStrategy,
 )
 
 STOCKS = [
-    "600789", "000001", "002446", "300750", "600519",
-    "000858", "002415", "600036", "601318", "000333",
+    "600789",
+    "000001",
+    "002446",
+    "300750",
+    "600519",
+    "000858",
+    "002415",
+    "600036",
+    "601318",
+    "000333",
 ]
 START = "20220601"
 END = "20240801"
 CASH = 100000.0
 COMMISSION = 0.00025
+
 
 def run_single_strategy(strategy_cls, name, stock, params=None):
     cerebro = bt.Cerebro()
@@ -69,7 +91,7 @@ def main():
     print("A股量化策略回测系统")
     print(f"回测区间: {START} ~ {END}")
     print(f"初始资金: {CASH:,.0f} 元")
-    print(f"佣金: {COMMISSION*100:.3f}%")
+    print(f"佣金: {COMMISSION * 100:.3f}%")
     print("=" * 80)
 
     strategies = [
@@ -94,34 +116,39 @@ def main():
 
     all_results = []
     for strategy_cls, name in strategies:
-        print(f"\n{'='*80}")
+        print(f"\n{'=' * 80}")
         print(f"策略: {name}")
-        print(f"{'='*80}")
+        print(f"{'=' * 80}")
         for stock in STOCKS:
             result = run_single_strategy(strategy_cls, name, stock)
             if result:
                 if "error" in result:
                     print(f"  {stock}: {result['error']}")
                 else:
-                    print(f"  {stock}: 总收益{result['total_return_pct']:+.2f}% | "
-                          f"年化{result['annual_return_pct']:+.2f}% | "
-                          f"夏普{result['sharpe_ratio']} | "
-                          f"回撤{result['max_drawdown_pct']:.2f}%")
+                    print(
+                        f"  {stock}: 总收益{result['total_return_pct']:+.2f}% | "
+                        f"年化{result['annual_return_pct']:+.2f}% | "
+                        f"夏普{result['sharpe_ratio']} | "
+                        f"回撤{result['max_drawdown_pct']:.2f}%"
+                    )
                     all_results.append(result)
 
-    print(f"\n{'='*80}")
+    print(f"\n{'=' * 80}")
     print("汇总结果")
-    print(f"{'='*80}")
+    print(f"{'=' * 80}")
     if all_results:
         for r in all_results:
             if "error" not in r:
-                print(f"  {r['strategy']:12s} | {r['stock']} | "
-                      f"收益{r['total_return_pct']:>+7.2f}% | "
-                      f"年化{r['annual_return_pct']:>+6.2f}% | "
-                      f"夏普{r['sharpe_ratio']} | "
-                      f"回撤{r['max_drawdown_pct']:>5.2f}%")
+                print(
+                    f"  {r['strategy']:12s} | {r['stock']} | "
+                    f"收益{r['total_return_pct']:>+7.2f}% | "
+                    f"年化{r['annual_return_pct']:>+6.2f}% | "
+                    f"夏普{r['sharpe_ratio']} | "
+                    f"回撤{r['max_drawdown_pct']:>5.2f}%"
+                )
 
     import json
+
     report_path = Path(__file__).parent / "backtest_report.json"
     report_path.write_text(json.dumps(all_results, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"\n报告已保存: {report_path}")
