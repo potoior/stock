@@ -122,6 +122,11 @@ python news_digest.py --schedule "08:30" # 纯 Python 定时，每天到点自�
 python daily_scan.py                     # 立即跑一次
 python daily_scan.py --schedule "09:00"  # 纯 Python 定时，每个交易日 09:00 自动跑
 
+# 定时任务已内置于 quant-api 服务：每交易日 09:00 自动跑 daily_scan
+# 查看状态/手动触发（服务跑在 18000）：
+curl http://127.0.0.1:18000/api/daily-scan/status
+curl -X POST http://127.0.0.1:18000/api/daily-scan/run
+
 # 启动 Web 前端（port 可用环境变量覆盖，默认 8000）
 python api.py                        # http://127.0.0.1:8000
 PORT=18000 python api.py             # 自定义端口示例

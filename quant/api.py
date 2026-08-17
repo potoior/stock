@@ -610,11 +610,85 @@ def index():
     return FileResponse(str(WEB_DIR / "index.html"))
 
 
+_daily_scan_state = {"next_run": None, "last_run": None, "last_status": "idle"}
+
+
+def _start_daily_scan_scheduler():
+    """在 API 服务进程内挂一个后台线程，每个交易日定时跑 daily_scan。"""
+    import os
+    import threading
+    import time as _time
+    from datetime import datetime, timedelta
+
+    enabled = os.environ.get("DAILY_SCAN_ENABLED", "1") == "1"
+    if not enabled:
+        _daily_scan_state["last_status"] = "disabled"
+        return
+    scan_time = os.environ.get("DAILY_SCAN_TIME", "09:00")
+    hh, mm = scan_time.split(":")
+
+    def loop():
+        while True:
+            now = datetime.now()
+            target = now.replace(hour=int(hh), minute=int(mm), second=0, microsecond=0)
+            if now >= target:
+                target = target + timedelta(days=1)
+            _daily_scan_state["next_run"] = target.strftime("%Y-%m-%d %H:%M:%S")
+            sleep_secs = (target - now).total_seconds()
+            _time.sleep(sleep_secs)
+            if datetime.now().weekday() >= 5:
+                continue
+            _daily_scan_state["last_status"] = "running"
+            _daily_scan_state["last_run"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            try:
+                import daily_scan
+
+                daily_scan.run_once(limit=0, top=5, news_limit=20)
+                _daily_scan_state["last_status"] = "ok"
+            except Exception as e:
+                _daily_scan_state["last_status"] = f"error: {e}"
+
+    t = threading.Thread(target=loop, name="daily_scan_scheduler", daemon=True)
+    t.start()
+
+
+@app.get("/api/daily-scan/status")
+def daily_scan_status():
+    return {
+        "enabled": _daily_scan_state["last_status"] != "disabled",
+        "next_run": _daily_scan_state["next_run"],
+        "last_run": _daily_scan_state["last_run"],
+        "last_status": _daily_scan_state["last_status"],
+    }
+
+
+@app.post("/api/daily-scan/run")
+def daily_scan_run():
+    """手动触发一次每日扫描（异步，后台线程执行）。"""
+    import threading
+    from datetime import datetime
+
+    def _run():
+        _daily_scan_state["last_status"] = "running"
+        _daily_scan_state["last_run"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        try:
+            import daily_scan
+
+            daily_scan.run_once(limit=0, top=5, news_limit=20)
+            _daily_scan_state["last_status"] = "ok"
+        except Exception as e:
+            _daily_scan_state["last_status"] = f"error: {e}"
+
+    threading.Thread(target=_run, name="daily_scan_manual", daemon=True).start()
+    return {"started": True, "message": "已在后台启动，查看 /api/daily-scan/status 获取进度"}
+
+
 if __name__ == "__main__":
     import os
 
     import uvicorn
 
+    _start_daily_scan_scheduler()
     port = int(os.environ.get("PORT", "8000"))
     host = os.environ.get("HOST", "127.0.0.1")
     uvicorn.run(app, host=host, port=port)
