@@ -166,6 +166,22 @@ def score_stock(code, params):
     hits = []
     detail = {}
 
+    # 指标数值明细（供前端"强势明细表"展示）
+    ma5_v = float(close.rolling(5).mean().iloc[i])
+    ma10_v = float(close.rolling(10).mean().iloc[i])
+    ma20_v = float(close.rolling(20).mean().iloc[i])
+    ma60_v = float(close.rolling(60).mean().iloc[i]) if len(df) >= 60 else None
+    detail.update({
+        "price": round(price, 2),
+        "ma5": round(ma5_v, 2), "ma10": round(ma10_v, 2),
+        "ma20": round(ma20_v, 2), "ma60": round(ma60_v, 2),
+        "macd_dif": round(d, 3), "macd_dea": round(e, 3),
+        "macd_bar": round(bar_v, 3),
+        "rsi6": round(r1, 1), "rsi12": round(r2, 1),
+        "cl1": mos["cl1"], "cl2": mos["cl2"],
+        "difl1": mos["difl1"], "difl2": mos["difl2"],
+    })
+
     # 1. MACD 金叉 + 6. 突破信号（金叉判定）
     golden = bool(diff.iloc[i] > dea.iloc[i] and diff.iloc[i - 1] <= dea.iloc[i - 1])
     if golden:
@@ -280,19 +296,22 @@ def load_picks(date_str=None):
         date_str = datetime.now().strftime("%Y%m%d")
     conn = _db()
     rows = conn.execute(
-        "SELECT rank,code,name,score,hits FROM yujie_picks WHERE date=? ORDER BY rank", (date_str,)
+        "SELECT rank,code,name,score,hits,detail FROM yujie_picks WHERE date=? ORDER BY rank", (date_str,)
     ).fetchall()
     conn.close()
-    return [
-        {
+    out = []
+    for r in rows:
+        item = {
             "rank": r[0],
             "code": r[1],
             "name": r[2],
             "score": r[3],
             "hits": json.loads(r[4]) if r[4] else [],
         }
-        for r in rows
-    ]
+        if r[5]:
+            item["detail"] = json.loads(r[5])
+        out.append(item)
+    return out
 
 
 # ---------------- 全市场扫描 ----------------
