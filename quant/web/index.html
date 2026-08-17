@@ -613,7 +613,7 @@
                 </div>
                 <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px;">
                     <div v-for="(val, key) in group" :key="gkey + '.' + key">
-                        <label style="font-size:12px;color:#666;">{{ key }} <span v-if="Array.isArray(val)" style="color:#bbb;">(逗号分隔)</span></label>
+                        <label style="font-size:12px;color:#666;">{{ yjParamLabel(gkey, key) || key }} <span v-if="Array.isArray(val)" style="color:#bbb;">(逗号分隔)</span></label>
                         <input v-if="Array.isArray(val)" class="input"
                                :value="((yjParams[gkey][key] || [])).join(',')"
                                @input="yjParams[gkey][key] = $event.target.value.split(',').map(s => s.trim()).filter(Boolean)"
@@ -1099,6 +1099,19 @@ createApp({
             } catch (e) { this.toastMsg('触发失败'); }
         },
         // ===== 玉姐精选 =====
+        yjParamLabel(gkey, key) {
+            const map = {
+                scope: { min_history_days: '最少历史天数', min_amount_yi: '最低成交额(亿)', exclude_sz_code: '剔除板块代码' },
+                macd: { golden_score: '金叉分数', near_size: '即将金叉差值阈值', near_score: '即将金叉分数', green_shrink_score: '绿柱缩短分数' },
+                mos: { bottom_score: '低点分数', green_shrink_score: '绿柱缩短分数' },
+                breakout: { score: '突破分数', period: '突破回看周期(日)' },
+                rsi: { score: '金叉分数', p1: '短线周期', p2: '长线周期' },
+                bull_ma: { score: '多头分数', m1: '短期均线1', m2: '短期均线2', m3: '中期均线', m4: '长期均线' },
+                low_pos: { score: '低位分数', period: '回看周期(日)', ratio: '低位比例' },
+                drawdown: { score: '回撤分数', period: '回看周期(日)', threshold: '回撤阈值' },
+            };
+            return (map[gkey] || {})[key] || key;
+        },
         async loadYujie() {
             await Promise.all([this.loadYujieStatus(), this.loadYujiePicks()]);
         },

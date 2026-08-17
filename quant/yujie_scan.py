@@ -22,7 +22,9 @@
 
 import json
 import sqlite3
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 
@@ -306,6 +308,12 @@ def run_once(limit=0):
         print("行情抓取失败")
         return 0
     print(f"全市场 {len(rows)} 只")
+    log_fp = HOME / "yujie_scan.log"
+    with open(log_fp, "a", encoding="utf-8") as lf:
+        lf.write(
+            f"== {datetime.now():%Y-%m-%d %H:%M:%S} 玉姐精选扫描 {date_str} "
+            f"全市场实时清单 {len(rows)} 只 ==\n"
+        )
 
     excl = params["scope"].get("exclude_sz_code", [])
     min_amt = float(params["scope"].get("min_amount_yi", 0.5))
@@ -325,16 +333,43 @@ def run_once(limit=0):
 
     results = []
     scanned = 0
-    for code, name, price, pct in pool:
-        try:
-            sc, hits, detail = score_stock(code, params)
-        except Exception:
-            sc, hits, detail = 0, [], None
-        if sc > 0:
-            results.append({"code": code, "name": name, "price": price, "pct": round(pct, 2), "score": sc, "hits": hits, "detail": detail or {}})
-        scanned += 1
-        if scanned % 500 == 0:
-            print(f"  已扫描 {scanned}/{len(pool)}，命中 {len(results)}")
+    lock = threading.Lock()
+    with open(log_fp, "a", encoding="utf-8") as lf:
+        lf.write(f"候选池 {len(pool)} 只\n")
+        msg0 = f"  已扫描 0/{len(pool)} 开始并发扫描...\n"
+        lf.write(msg0)
+
+        def _worker(item):
+            code, name, price, pct = item
+            try:
+                sc, hits, detail = score_stock(code, params)
+            except Exception:
+                sc, hits, detail = 0, [], None
+            return code, name, price, pct, sc, hits, detail or {}
+
+        def _on_done(fut):
+            nonlocal scanned
+            code, name, price, pct, sc, hits, detail = fut.result()
+            with lock:
+                scanned += 1
+                if sc > 0:
+                    results.append({"code": code, "name": name, "price": price, "pct": round(pct, 2), "score": sc, "hits": hits, "detail": detail})
+                if scanned % 1000 == 0:
+                    msg = f"  已扫描 {scanned}/{len(pool)} (含缓存，命中 {len(results)})"
+                    print(msg)
+                    lf.write(msg + "\n")
+                    lf.flush()
+
+        with ThreadPoolExecutor(max_workers=16) as ex:
+            futs = [ex.submit(_worker, item) for item in pool]
+            for f in futs:
+                f.add_done_callback(_on_done)
+            for f in futs:
+                try:
+                    f.result()
+                except Exception:
+                    pass
+        lf.write(f"扫描完成 命中 {len(results)} 只，耗时见上方\n")
 
     results.sort(key=lambda x: -x["score"])
     top = results[:10]
