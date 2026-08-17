@@ -1,7 +1,21 @@
-import time
 from datetime import datetime
+
 from portfolio import Portfolio
 from risk_manager import RiskManager
+
+
+def is_market_open(now=None):
+    """A股交易时段判断：周一至五 9:30-11:30 / 13:00-15:00"""
+    now = now or datetime.now()
+    if now.weekday() >= 5:
+        return False, "周末休市"
+    hour, minute = now.hour, now.minute
+    if (hour == 9 and minute >= 30) or (hour == 10) or (hour == 11 and minute <= 30):
+        return True, "交易中"
+    if (hour == 13) or (hour == 14) or (hour == 15 and minute == 0):
+        return True, "交易中"
+    return False, "非交易时间"
+
 
 class SimExecutor:
     def __init__(self, initial_cash=100000.0, db_path=None):
@@ -54,12 +68,4 @@ class SimExecutor:
         }
 
     def is_market_open(self):
-        now = datetime.now()
-        weekday = now.weekday()
-        if weekday >= 5:
-            return False, "周末休市"
-        hour = now.hour
-        minute = now.minute
-        if (hour == 9 and minute >= 30) or (10 <= hour <= 11) or (13 <= hour <= 14):
-            return True, "交易中"
-        return False, "非交易时间"
+        return is_market_open()

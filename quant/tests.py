@@ -1,8 +1,10 @@
 """完整测试脚本：测试所有 Agent 模块 + API 接口"""
-import sys, json, time
-from pathlib import Path
+
+import json
+import time
 
 failed = 0
+
 
 def test(name, ok, detail=""):
     global failed
@@ -12,6 +14,7 @@ def test(name, ok, detail=""):
         print(f"  ✗ {name}: {detail}")
         failed += 1
 
+
 print("=" * 60)
 print("量化系统完整测试")
 print("=" * 60)
@@ -19,6 +22,7 @@ print("=" * 60)
 # 1. 测试 portfolio
 print("\n1. Portfolio 持仓管理")
 from portfolio import Portfolio
+
 p = Portfolio(100000)
 p.reset()
 test("初始化", p.cash == 100000 and len(p.positions) == 0)
@@ -36,6 +40,7 @@ test("重置", p.cash == 100000)
 # 2. 测试 risk_manager
 print("\n2. Risk Manager 风险控制")
 from risk_manager import RiskManager
+
 rm = RiskManager()
 test("初始化", rm.config["max_single_position"] == 0.20)
 today = time.strftime("%Y-%m-%d")
@@ -44,12 +49,15 @@ ok, _, _ = rm.check_buy("600789", 10.0, p, 0, False)
 test("允许买入", ok)
 rm.record_trade()
 test("交易次数记录", rm.daily_trades == 1)
-sell, reason = rm.check_sell("600789", 9.0, type("obj", (object,), {"positions": {"600789": {"cost": 10.0}}})())
+sell, reason = rm.check_sell(
+    "600789", 9.0, type("obj", (object,), {"positions": {"600789": {"cost": 10.0}}})()
+)
 test("止损触发", sell and "止损" in reason)
 
 # 3. 测试 executor
 print("\n3. Executor 交易执行")
 from executor import SimExecutor
+
 ex = SimExecutor(100000)
 ex.portfolio.reset()
 quotes = [{"code": "600789", "name": "鲁抗医药", "price": 10.0, "pct": 0.5}]
@@ -66,6 +74,7 @@ test("卖出后盈利", summary["total_value"] > 100000, f"当前 {summary['tota
 # 4. 测试 feedback
 print("\n4. Feedback 自我反馈")
 from feedback import Feedback
+
 fb = Feedback()
 analysis = fb.analyze()
 test("反馈分析正常", "recent_win_rate" in analysis)
@@ -75,6 +84,7 @@ test("有建议", len(analysis["suggestions"]) > 0)
 # 5. 测试 API
 print("\n5. API 接口")
 import urllib.request
+
 try:
     resp = urllib.request.urlopen("http://127.0.0.1:8000/api/quotes", timeout=10)
     data = json.loads(resp.read())
@@ -92,7 +102,8 @@ except Exception as e:
 # 6. 测试 agent
 print("\n6. Agent 主循环")
 from agent import TradingAgent
-agent = TradingAgent(codes=["600789"], interval=5)
+
+agent = TradingAgent(codes=["600789"], interval=5, mode="rule")
 agent.run(max_cycles=1)
 agent.feedback.close()
 test("Agent 运行", agent.cycle_count == 1)

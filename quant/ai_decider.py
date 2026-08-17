@@ -1,24 +1,70 @@
 import json
+import os
 import re
 import time
 from pathlib import Path
 
-CONFIG_PATH = Path.home() / ".config" / "opencode" / "opencode.jsonc"
+CONFIG_DIR = Path.home() / ".config" / "opencode"
+CONFIG_PATHS = [CONFIG_DIR / "opencode.json", CONFIG_DIR / "opencode.jsonc"]
 
 _last_call_ts = 0.0
 _MIN_INTERVAL = 0.8  # 两次AI调用最小间隔，降频避免触发限流
 
+DEFAULT_BASE_URL = "https://token.sensenova.cn/v1/chat/completions"
+DEFAULT_MODEL = "sensenova-6.7-flash-lite"
+
+
+def _load_env_file(path):
+    """手动解析 .env（KEY=VALUE，# 为注释），不覆盖已存在的环境变量。"""
+    if not path.exists():
+        return
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        k, _, v = line.partition("=")
+        k = k.strip()
+        v = v.strip().strip('"').strip("'")
+        if k:
+            os.environ.setdefault(k, v)
+
+
+def load_env():
+    """加载 quant/.env 与项目根 .env，供本模块及其他模块使用。"""
+    here = Path(__file__).resolve().parent
+    for p in (here / ".env", here.parent / ".env"):
+        _load_env_file(p)
+
+
+load_env()
+
+
 def load_api_key():
-    text = CONFIG_PATH.read_text(encoding="utf-8")
-    lines = [l for l in text.split("\n") if not l.lstrip().startswith("//")]
+    # 优先级：环境变量(含 .env) > opencode 配置文件（向后兼容）
+    env_key = os.environ.get("SENSENOVA_API_KEY") or os.environ.get("AI_API_KEY")
+    if env_key:
+        return env_key
+    for path in CONFIG_PATHS:
+        if path.exists():
+            text = path.read_text(encoding="utf-8")
+            break
+    else:
+        raise FileNotFoundError("未配置 AI 密钥：请复制 quant/.env.example 为 quant/.env 并设置 AI_API_KEY")
+    lines = [line for line in text.split("\n") if not line.lstrip().startswith("//")]
     text = re.sub(r",\s*}", "}", re.sub(r",\s*]", "]", "\n".join(lines)))
     config = json.loads(text)
     return config["provider"]["sensenova"]["options"]["apiKey"]
 
+
 class AIDecider:
-    def __init__(self, model="sensenova-6.7-flash-lite"):
+    def __init__(self, model=None):
         self.api_key = load_api_key()
-        self.model = model
+        self.base_url = os.environ.get("AI_BASE_URL", DEFAULT_BASE_URL)
+        self.model = model or os.environ.get("AI_MODEL", DEFAULT_MODEL)
+
+    def generate(self, prompt, timeout=90):
+        """通用文本生成（新闻分析等非交易场景），返回模型原始文本。"""
+        return self._call_api(prompt, timeout=timeout)
 
     def decide(self, market_data, portfolio):
         """AI 综合决策：分析市场并给出交易建议"""
@@ -32,9 +78,9 @@ class AIDecider:
         for s in stocks:
             lines.append(
                 f"- {s['name']}({s['code']}): 现价{s['price']:.2f}, "
-                f"涨跌{s['pct']:+.2f}%, MA5={s.get('ma5','-')}, "
+                f"涨跌{s['pct']:+.2f}%, MA5={s.get('ma5', '-')}, "
                 f"MACD={'多头' if s.get('macd_bull') else '空头'}, "
-                f"KDJ={s.get('kdj_signal','-')}"
+                f"KDJ={s.get('kdj_signal', '-')}"
             )
         pos_lines = []
         for code, p in portfolio.positions.items():
@@ -68,10 +114,8 @@ class AIDecider:
 
     def _call_api(self, prompt, timeout=60):
         import httpx
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
+
+        headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
         payload = {
             "model": self.model,
             "messages": [{"role": "user", "content": prompt}],
@@ -79,11 +123,8 @@ class AIDecider:
             "max_tokens": 4096,
         }
         try:
-            with httpx.Client(timeout=timeout, verify=False) as client:
-                resp = client.post(
-                    "https://token.sensenova.cn/v1/chat/completions",
-                    json=payload, headers=headers
-                )
+            with httpx.Client(timeout=timeout, trust_env=False) as client:
+                resp = client.post(self.base_url, json=payload, headers=headers)
                 if resp.status_code == 200:
                     msg = resp.json()["choices"][0]["message"]
                     content = msg.get("content") or ""
@@ -132,8 +173,7 @@ class AIDecider:
             if attempt < max_retries:
                 time.sleep(1.5)
         if not isinstance(raw, str) or raw.startswith(("API错误", "调用失败", "API限流")):
-            fallback = [{"id": r["id"], "signal": "hold",
-                         "reason": f"AI判定不可用: {raw}"} for r in rules]
+            fallback = [{"id": r["id"], "signal": "hold", "reason": f"AI判定不可用: {raw}"} for r in rules]
             return {"code": code, "results": fallback}
         parsed = self._parse_judge_response(raw, [r["id"] for r in rules])
         return {"code": code, "results": parsed}
@@ -142,8 +182,8 @@ class AIDecider:
         rule_lines = []
         for r in rules:
             rule_lines.append(
-                f"- 规则[{r['id']}] {r['name']}：买入条件「{r.get('buy_rule','')}」；"
-                f"卖出条件「{r.get('sell_rule','')}」"
+                f"- 规则[{r['id']}] {r['name']}：买入条件「{r.get('buy_rule', '')}」；"
+                f"卖出条件「{r.get('sell_rule', '')}」"
             )
         return f"""你是一位资深A股短线技术分析师。请根据给定的技术指标，严格套用下面的用户规则，判断每个规则当前应该发出什么信号。
 
@@ -181,8 +221,10 @@ class AIDecider:
         except Exception:
             return [{"id": i, "signal": "hold", "reason": "AI解析失败"} for i in expected_ids]
 
+
 if __name__ == "__main__":
     from executor import SimExecutor
+
     ex = SimExecutor()
     d = AIDecider()
     result = d.decide({"quotes": []}, ex.portfolio)

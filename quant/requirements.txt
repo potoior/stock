@@ -1,5 +1,7 @@
-pandas
-backtrader
-fastapi
-uvicorn
-gradio
+pandas>=2.0
+numpy>=1.24
+backtrader>=1.9.78
+fastapi>=0.100
+uvicorn>=0.20
+gradio>=4.0
+httpx>=0.24

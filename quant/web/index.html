@@ -126,6 +126,12 @@
         .modal-title { font-size: 16px; font-weight: 600; margin-bottom: 16px; }
         .footer { text-align: center; padding: 20px; color: #999; font-size: 12px; }
         .toast { position: fixed; top: 20px; right: 20px; background: #333; color: #fff; padding: 10px 18px; border-radius: 6px; font-size: 13px; z-index: 200; }
+        .report-md { font-size: 14px; line-height: 1.75; color: #ddd; }
+        .report-md h1, .report-md h2, .report-md h3 { color: #fff; }
+        .report-md table { margin: 8px 0; }
+        .report-md strong { color: #ffd54f; }
+        .report-md hr { border: none; border-top: 1px solid #444; margin: 12px 0; }
+        .report-md ul { margin: 6px 0 6px 20px; }
         @media (max-width: 768px) {
             .layout { flex-direction: column; }
             .sidebar { width: 100%; height: auto; position: static; }
@@ -164,6 +170,9 @@
                 </button>
                 <button :class="{active: tab === 'agent'}" @click="tab='agent'; loadAgentStatus()">
                     <span class="icon">🤖</span> 实盘模拟
+                </button>
+                <button :class="{active: tab === 'dailyscan'}" @click="tab='dailyscan'; loadDailyScan()">
+                    <span class="icon">📰</span> 每日扫描
                 </button>
             </nav>
             <div class="side-footer">
@@ -491,7 +500,36 @@
         </div>
     </div>
 
-        </main>
+    <div v-show="tab === 'dailyscan'" class="container">
+        <div class="toolbar">
+            <button class="button" @click="runDailyScan" :disabled="dsRunning">▶ 立即扫描</button>
+            <button class="button ghost" @click="loadDailyScanReport">⟳ 刷新日报</button>
+            <span :class="'badge ' + (dsRunning ? 'badge-neutral' : (dsStatus.last_status === 'ok' ? 'badge-buy' : 'badge-neutral'))" style="font-size:13px;padding:4px 12px;">
+                {{ dsRunning ? '🟢 扫描中…' : (dsStatus.last_status === 'ok' ? '✅ 已完成' : '⚪ 待运行') }}
+            </span>
+            <span class="hint" v-if="dsStatus.next_run">下次自动: {{ dsStatus.next_run }}</span>
+            <span class="hint" v-if="dsStatus.last_run">上次: {{ dsStatus.last_run }}</span>
+        </div>
+
+        <div class="card" style="margin-bottom:16px;" v-if="dsReportDates.length">
+            <div class="toolbar" style="margin:0 0 8px;">
+                <strong style="font-size:14px;">📅 历史日报</strong>
+                <select class="input" v-model="dsSelectedDate" @change="loadDailyScanReport" style="width:auto;min-width:160px;">
+                    <option value="">今天</option>
+                    <option v-for="d in dsReportDates" :key="d" :value="d">{{ d.slice(0,4) }}-{{ d.slice(4,6) }}-{{ d.slice(6,8) }}</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="card" style="margin:0;" v-if="dsReport.exists">
+            <div class="report-md" v-html="dsReportHtml"></div>
+        </div>
+        <div class="card empty" style="margin:0;" v-else>
+            暂无日报。点击「立即扫描」生成今日日报，或等待每天 09:00 自动生成。
+        </div>
+    </div>
+
+    </main>
     </div><!-- /layout -->
 
     <div class="footer">⚠️ 本系统仅供学习研究，不构成投资建议。<br>数据来源：腾讯/新浪财经 | 技术指标基于前复权日K线</div>
@@ -553,11 +591,16 @@ createApp({
                 ai_history: [], rule_history: [],
             },
             agentTrades: [], agentLogs: [], agentChart: null, agentTimer: null,
+            // daily scan
+            dsStatus: { next_run: null, last_run: null, last_status: 'idle' },
+            dsRunning: false, dsReport: { exists: false, markdown: '' },
+            dsReportDates: [], dsSelectedDate: '', dsPollTimer: null,
         };
     },
     computed: {
         builtinStrategies() { return this.strategies.filter(s => s.builtin); },
-        customStrategies() { return this.strategies.filter(s => !s.builtin); }
+        customStrategies() { return this.strategies.filter(s => !s.builtin); },
+        dsReportHtml() { return this.mdToHtml(this.dsReport.markdown || ''); }
     },
     methods: {
         toastMsg(msg) { this.toast = msg; setTimeout(() => this.toast = '', 2500); },
@@ -938,6 +981,84 @@ createApp({
                 legend: { data: ['AI Agent', '规则 Agent'], bottom: 0 },
             }, true);
         },
+        // ===== 每日扫描 =====
+        async loadDailyScan() {
+            await Promise.all([this.loadDailyScanStatus(), this.loadDailyScanReports(), this.loadDailyScanReport()]);
+        },
+        async loadDailyScanStatus() {
+            try {
+                const r = await (await fetch('/api/daily-scan/status')).json();
+                this.dsStatus = r;
+                this.dsRunning = r.last_status === 'running';
+            } catch (e) {}
+        },
+        async loadDailyScanReports() {
+            try {
+                const r = await (await fetch('/api/daily-scan/reports')).json();
+                this.dsReportDates = r.dates || [];
+            } catch (e) {}
+        },
+        async loadDailyScanReport() {
+            try {
+                const url = '/api/daily-scan/report' + (this.dsSelectedDate ? '?date=' + this.dsSelectedDate : '');
+                const r = await (await fetch(url)).json();
+                this.dsReport = r;
+            } catch (e) {}
+        },
+        async runDailyScan() {
+            try {
+                await fetch('/api/daily-scan/run', { method: 'POST' });
+                this.toastMsg('已触发扫描，后台执行中…');
+                this.dsRunning = true;
+                // 轮询状态直到完成
+                if (this.dsPollTimer) clearInterval(this.dsPollTimer);
+                this.dsPollTimer = setInterval(async () => {
+                    await this.loadDailyScanStatus();
+                    if (this.dsStatus.last_status !== 'running') {
+                        clearInterval(this.dsPollTimer);
+                        this.dsPollTimer = null;
+                        this.dsRunning = false;
+                        await this.loadDailyScanReport();
+                        await this.loadDailyScanReports();
+                        this.toastMsg('扫描完成，日报已更新');
+                    }
+                }, 5000);
+            } catch (e) { this.toastMsg('触发失败'); }
+        },
+        mdToHtml(md) {
+            if (!md) return '';
+            const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+            const lines = md.split('\n');
+            let html = '', inList = false, inTable = false, tableRows = [];
+            const flushTable = () => {
+                if (!tableRows.length) return;
+                const rows = tableRows.map(r => r.split('|').map(c => c.trim()).filter(Boolean));
+                if (rows.length >= 2) {
+                    html += '<table style="width:100%;border-collapse:collapse;font-size:13px;margin:8px 0;">';
+                    html += '<thead><tr>' + rows[0].map(c => `<th style="border:1px solid #444;padding:4px 8px;background:#2a2a2e;">${esc(c)}</th>`).join('') + '</tr></thead>';
+                    // rows[1] 是分隔行 |---|---|
+                    for (let i = 2; i < rows.length; i++) {
+                        html += '<tr>' + rows[i].map(c => `<td style="border:1px solid #444;padding:4px 8px;">${esc(c)}</td>`).join('') + '</tr>';
+                    }
+                    html += '</table>';
+                }
+                tableRows = [];
+            };
+            for (let line of lines) {
+                if (line.trim().startsWith('|')) { if (inList) { html += '</ul>'; inList = false; } inTable = true; tableRows.push(line.trim()); continue; }
+                else { if (inTable) { flushTable(); inTable = false; } }
+                if (/^###\s/.test(line)) { if (inList) { html += '</ul>'; inList = false; } html += `<h3 style="margin:14px 0 6px;color:#7ec;">${esc(line.replace(/^###\s/,''))}</h3>`; }
+                else if (/^##\s/.test(line)) { if (inList) { html += '</ul>'; inList = false; } html += `<h2 style="margin:16px 0 8px;color:#9e7ec;border-bottom:1px solid #444;padding-bottom:4px;">${esc(line.replace(/^##\s/,''))}</h2>`; }
+                else if (/^#\s/.test(line)) { if (inList) { html += '</ul>'; inList = false; } html += `<h1 style="margin:18px 0 10px;color:#fff;">${esc(line.replace(/^#\s/,''))}</h1>`; }
+                else if (/^\s*[-*]\s/.test(line)) { if (!inList) { html += '<ul style="margin:6px 0 6px 20px;">'; inList = true; } html += `<li>${esc(line.replace(/^\s*[-*]\s/,'')).replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>')}</li>`; }
+                else if (line.trim() === '---') { if (inList) { html += '</ul>'; inList = false; } html += '<hr style="border:none;border-top:1px solid #444;margin:12px 0;">'; }
+                else if (line.trim() === '') { if (inList) { html += '</ul>'; inList = false; } }
+                else { if (inList) { html += '</ul>'; inList = false; } html += `<p style="margin:6px 0;line-height:1.7;">${esc(line).replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>')}</p>`; }
+            }
+            if (inList) html += '</ul>';
+            if (inTable) flushTable();
+            return html;
+        },
     },
     mounted() {
         this.loadWatchlist().then(() => this.loadQuotes());
@@ -958,7 +1079,11 @@ createApp({
             }
         }, 5000);
     },
-    beforeUnmount() { if (this.timer) clearInterval(this.timer); if (this.agentTimer) clearInterval(this.agentTimer); }
+    beforeUnmount() {
+        if (this.timer) clearInterval(this.timer);
+        if (this.agentTimer) clearInterval(this.agentTimer);
+        if (this.dsPollTimer) clearInterval(this.dsPollTimer);
+    }
 }).mount('#app');
 </script>
 </body>
