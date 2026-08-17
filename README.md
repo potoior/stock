@@ -118,6 +118,10 @@ cp .env.example .env        # 编辑 AI_API_KEY / AI_BASE_URL / AI_MODEL
 python news_digest.py                    # 抓当天新闻 + AI 生成日报
 python news_digest.py --schedule "08:30" # 纯 Python 定时，每天到点自动跑
 
+# 每日开盘扫描（全市场≈5500只 + 新闻 + 候选策略信号 综合日报）
+python daily_scan.py                     # 立即跑一次
+python daily_scan.py --schedule "09:00"  # 纯 Python 定时，每个交易日 09:00 自动跑
+
 # 启动 Web 前端（port 可用环境变量覆盖，默认 8000）
 python api.py                        # http://127.0.0.1:8000
 PORT=18000 python api.py             # 自定义端口示例
