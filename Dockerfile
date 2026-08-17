@@ -2,11 +2,15 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-RUN pip install --no-cache-dir pandas backtrader fastapi uvicorn gradio
+COPY quant/requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt
 
-COPY . .
-
-EXPOSE 8000 7860
+COPY . /app
 
 WORKDIR /app/quant
+
+ENV HOST=0.0.0.0
+ENV PORT=8000
+EXPOSE 8000 7860
+
 CMD ["python", "api.py"]

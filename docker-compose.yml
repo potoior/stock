@@ -6,9 +6,14 @@ services:
       - "8000:8000"
       - "7860:7860"
     volumes:
+      - ./quant/config.json:/app/quant/config.json
       - ./quant/agent_data.db:/app/quant/agent_data.db
+      - ./quant/agent_data_ai.db:/app/quant/agent_data_ai.db
+      - ./quant/agent_data_rule.db:/app/quant/agent_data_rule.db
       - ./quant/stock_cache.db:/app/quant/stock_cache.db
     environment:
+      - HOST=0.0.0.0
+      - PORT=8000
       - HTTP_PROXY=${HTTP_PROXY:-}
       - HTTPS_PROXY=${HTTPS_PROXY:-}
       - NO_PROXY=localhost,127.0.0.1

@@ -1,0 +1,21 @@
+# 虚拟环境 / 缓存
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+
+# 本地数据（不入镜像，宿主机挂载）
+*.db
+quant/config.json
+output/
+book/
+
+# git / 系统
+.git/
+.DS_Store
+README.md
+docker-compose.yml
+Dockerfile
+.editorconfig
