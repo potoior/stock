@@ -630,6 +630,12 @@
                     </tbody>
                 </table>
             </div>
+
+            <!-- 右侧：K线走势图 -->
+            <div class="card" style="margin:0;flex:1 1 340px;min-width:300px;" v-if="yjSelected">
+                <div class="card-title">📈 {{ yjSelected.name }} 走势图 <span class="hint">日K前复权</span></div>
+                <div id="yjKlineChart" class="chart" style="height:280px;"></div>
+            </div>
         </div>
     </div>
 
@@ -735,7 +741,7 @@ createApp({
             yjParams: null, yjDefaults: null, showYjParams: false, yjSaving: false,
             yjSearchQ: '', yjSearchResults: [], showYjSearch: false,
             yjScoreItem: null, yjScoreScoring: false,
-            yjSelected: null,
+            yjSelected: null, yjKlineChart: null, yjKlineLoading: false,
         };
     },
     computed: {
@@ -1229,6 +1235,73 @@ createApp({
         },
         yjSelectStock(p) {
             this.yjSelected = p;
+            this.loadYjKline(p.code);
+        },
+        async loadYjKline(code) {
+            this.yjKlineLoading = false;
+            try {
+                const r = await (await fetch('/api/kline/' + code + '?days=120')).json();
+                const kl = r.data || [];
+                this.$nextTick(() => this.renderYjKline(kl));
+            } catch (e) {}
+        },
+        renderYjKline(kl) {
+            const el = document.getElementById('yjKlineChart');
+            if (!el || !kl.length) return;
+            if (!this.yjKlineChart) this.yjKlineChart = echarts.init(el);
+            const dates = kl.map(d => d.date);
+            const ohlc = kl.map(d => [d.open, d.close, d.low, d.high]);
+            const volumes = kl.map(d => ({
+                value: d.volume,
+                itemStyle: { color: d.close >= d.open ? '#d32f2f' : '#2e7d32' }
+            }));
+            const closes = kl.map(d => d.close);
+            const ma5 = closes.map((_, i) => {
+                if (i < 4) return '-';
+                const s = closes.slice(i - 4, i + 1);
+                return +(s.reduce((a, b) => a + b, 0) / 5).toFixed(2);
+            });
+            const ma10 = closes.map((_, i) => {
+                if (i < 9) return '-';
+                const s = closes.slice(i - 9, i + 1);
+                return +(s.reduce((a, b) => a + b, 0) / 10).toFixed(2);
+            });
+            this.yjKlineChart.setOption({
+                tooltip: {
+                    trigger: 'axis', axisPointer: { type: 'cross' },
+                    formatter: function (params) {
+                        const p = params.find(x => x.seriesType === 'candlestick');
+                        if (!p) return '';
+                        const d = kl[p.dataIndex];
+                        return `${d.date}<br>开: ${d.open.toFixed(2)}  收: ${d.close.toFixed(2)}<br>高: ${d.high.toFixed(2)}  低: ${d.low.toFixed(2)}<br>量: ${d.volume.toLocaleString()}`;
+                    }
+                },
+                grid: [
+                    { left: 50, right: 16, top: 20, height: '58%' },
+                    { left: 50, right: 16, top: '76%', height: '14%' }
+                ],
+                xAxis: [
+                    { type: 'category', data: dates, boundaryGap: true, axisLabel: { show: false }, axisLine: { lineStyle: { color: '#ccc' } } },
+                    { type: 'category', data: dates, axisLabel: { show: false }, axisLine: { lineStyle: { color: '#ccc' } } }
+                ],
+                yAxis: [
+                    { type: 'value', scale: true, splitLine: { lineStyle: { color: '#f0f0f0' } } },
+                    { type: 'value', axisLabel: { show: false }, splitLine: { show: false } }
+                ],
+                dataZoom: [{ type: 'inside', xAxisIndex: [0, 1], start: 60, end: 100 }],
+                series: [
+                    {
+                        name: 'K线', type: 'candlestick', data: ohlc,
+                        itemStyle: {
+                            color: '#d32f2f', color0: '#2e7d32',
+                            borderColor: '#d32f2f', borderColor0: '#2e7d32'
+                        }
+                    },
+                    { name: 'MA5', type: 'line', data: ma5, smooth: true, symbol: 'none', lineStyle: { width: 1, color: '#f9a825' } },
+                    { name: 'MA10', type: 'line', data: ma10, smooth: true, symbol: 'none', lineStyle: { width: 1, color: '#283593' } },
+                    { name: '成交量', type: 'bar', xAxisIndex: 1, yAxisIndex: 1, data: volumes }
+                ]
+            }, true);
         },
         yjSearchKeyup() {
             const q = this.yjSearchQ.trim();
