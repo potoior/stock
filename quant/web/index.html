@@ -75,6 +75,7 @@
         .badge-buy { background: #e8f5e9; color: #2e7d32; }
         .badge-sell { background: #ffebee; color: #d32f2f; }
         .badge-neutral { background: #f5f5f5; color: #666; }
+        .rule-chip { background: #e3f2fd; color: #1565c0; padding: 2px 8px; border-radius: 10px; font-size: 11px; }
         .empty { text-align: center; padding: 40px; color: #999; }
         .toolbar { display: flex; gap: 8px; margin-bottom: 16px; align-items: center; flex-wrap: wrap; }
         .switch { position: relative; display: inline-block; width: 38px; height: 20px; }
@@ -173,6 +174,9 @@
                 </button>
                 <button :class="{active: tab === 'dailyscan'}" @click="tab='dailyscan'; loadDailyScan()">
                     <span class="icon">📰</span> 每日扫描
+                </button>
+                <button :class="{active: tab === 'yujie'}" @click="tab='yujie'; loadYujie()">
+                    <span class="icon">💠</span> 玉姐精选
                 </button>
             </nav>
             <div class="side-footer">
@@ -529,6 +533,41 @@
         </div>
     </div>
 
+    <!-- ============ 玉姐精选 ============ -->
+    <div v-show="tab === 'yujie'" class="container">
+        <div class="toolbar">
+            <button class="button" @click="runYujieScan" :disabled="yjRunning">▶ 立即扫描</button>
+            <button class="button ghost" @click="openYjParams">⚙️ 参数设置</button>
+            <span :class="'badge ' + (yjRunning ? 'badge-neutral' : (yjStatus.last_status === 'ok' ? 'badge-buy' : 'badge-neutral'))" style="font-size:13px;padding:4px 12px;">
+                {{ yjRunning ? '🟢 扫描中…' : (yjStatus.last_status === 'ok' ? '✅ 已完成' : '⚪ 待运行') }}
+            </span>
+            <span class="hint" v-if="yjStatus.next_run">下次自动: {{ yjStatus.next_run }}</span>
+            <span class="hint" v-if="yjStatus.last_run">上次: {{ yjStatus.last_run }}</span>
+        </div>
+        <div class="hint" style="margin:8px 0 12px;" v-if="yjRunning">全市场扫描约需 30-60 分钟，请稍候，页面会自动刷新…</div>
+
+        <div class="card" style="margin:0;">
+            <div class="card-title">🏆 玉姐精选 Top 榜单</div>
+            <table>
+                <thead>
+                    <tr><th>排名</th><th>代码</th><th>名称</th><th>现价</th><th>涨跌%</th><th>分数</th><th>命中信号</th></tr>
+                </thead>
+                <tbody>
+                    <tr v-for="p in yjPicks" :key="p.code" style="cursor:pointer;" @click="openAnalysis(p.code)">
+                        <td><span :class="'badge ' + (p.rank <= 3 ? 'badge-buy' : 'badge-neutral')">{{ p.rank }}</span></td>
+                        <td>{{ p.code }}</td>
+                        <td><b>{{ p.name }}</b></td>
+                        <td>{{ Number(p.price ?? 0).toFixed(2) }}</td>
+                        <td :class="(p.pct ?? 0) >= 0 ? 'up' : 'down'">{{ (p.pct ?? 0) >= 0 ? '+' : '' }}{{ Number(p.pct ?? 0).toFixed(2) }}</td>
+                        <td><b style="color:#c62828;font-size:15px;">{{ p.score }}</b></td>
+                        <td><span v-for="h in p.hits" :key="h" class="rule-chip" style="display:inline-block;margin:2px 4px 2px 0;">{{ h }}</span></td>
+                    </tr>
+                    <tr v-if="!yjPicks.length"><td colspan="7" class="empty">{{ yjRunning ? '扫描进行中，暂无结果' : '暂无数据。点击「立即扫描」或等待每天 09:00 自动扫描。' }}</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
     </main>
     </div><!-- /layout -->
 
@@ -558,6 +597,36 @@
             <div class="toolbar" style="justify-content:flex-end;margin-top:20px;">
                 <button class="button ghost" @click="showEditor=false">取消</button>
                 <button class="button" @click="saveStrategy">保存策略</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 玉姐精选参数设置弹窗 -->
+    <div class="modal" v-if="showYjParams && yjParams">
+        <div class="modal-box">
+            <div class="modal-title">⚙️ 玉姐精选 - 评分参数设置</div>
+            <div style="font-size:12px;color:#888;margin-bottom:12px;">修改后点击保存，下次扫描生效。所有数值均可调整。</div>
+
+            <div v-for="(group, gkey) in yjParams" :key="gkey" style="margin-bottom:16px;">
+                <div style="font-weight:600;font-size:13px;margin-bottom:6px;border-left:3px solid #4caf50;padding-left:8px;">
+                    {{ {'scope':'过滤范围','macd':'MACD规则','mos':'MOS规则','breakout':'突破规则','rsi':'RSI规则','bull_ma':'多头均线','low_pos':'低位区','drawdown':'深回撤'}[gkey] || gkey }}
+                </div>
+                <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px;">
+                    <div v-for="(val, key) in group" :key="gkey + '.' + key">
+                        <label style="font-size:12px;color:#666;">{{ key }} <span v-if="Array.isArray(val)" style="color:#bbb;">(逗号分隔)</span></label>
+                        <input v-if="Array.isArray(val)" class="input"
+                               :value="((yjParams[gkey][key] || [])).join(',')"
+                               @input="yjParams[gkey][key] = $event.target.value.split(',').map(s => s.trim()).filter(Boolean)"
+                               style="width:100%;" />
+                        <input v-else class="input" v-model.number="yjParams[gkey][key]"
+                               :type="typeof val === 'number' ? 'number' : 'text'" step="0.01" style="width:100%;" />
+                    </div>
+                </div>
+            </div>
+
+            <div class="toolbar" style="justify-content:flex-end;margin-top:20px;">
+                <button class="button ghost" @click="showYjParams=false" :disabled="yjSaving">取消</button>
+                <button class="button" @click="saveYjParams" :disabled="yjSaving">{{ yjSaving ? '保存中…' : '保存参数' }}</button>
             </div>
         </div>
     </div>
@@ -595,6 +664,10 @@ createApp({
             dsStatus: { next_run: null, last_run: null, last_status: 'idle' },
             dsRunning: false, dsReport: { exists: false, markdown: '' },
             dsReportDates: [], dsSelectedDate: '', dsPollTimer: null,
+            // yujie picks
+            yjStatus: { next_run: null, last_run: null, last_status: 'idle' },
+            yjPicks: [], yjRunning: false, yjPollTimer: null, yjTimer: null,
+            yjParams: null, yjDefaults: null, showYjParams: false, yjSaving: false,
         };
     },
     computed: {
@@ -1025,6 +1098,73 @@ createApp({
                 }, 5000);
             } catch (e) { this.toastMsg('触发失败'); }
         },
+        // ===== 玉姐精选 =====
+        async loadYujie() {
+            await Promise.all([this.loadYujieStatus(), this.loadYujiePicks()]);
+        },
+        async loadYujieStatus() {
+            try {
+                const r = await (await fetch('/api/yujie/status')).json();
+                this.yjStatus = r;
+                this.yjRunning = r.last_status === 'running';
+            } catch (e) {}
+        },
+        async loadYujiePicks() {
+            try {
+                const r = await (await fetch('/api/yujie/picks')).json();
+                this.yjPicks = r.picks || [];
+            } catch (e) {}
+        },
+        async runYujieScan() {
+            try {
+                const r = await (await fetch('/api/yujie/run', { method: 'POST' })).json();
+                this.toastMsg(r.message || '已触发扫描');
+                if (r.started) {
+                    this.yjRunning = true;
+                    if (this.yjPollTimer) clearInterval(this.yjPollTimer);
+                    this.yjPollTimer = setInterval(async () => {
+                        await this.loadYujieStatus();
+                        if (this.yjStatus.last_status !== 'running') {
+                            clearInterval(this.yjPollTimer);
+                            this.yjPollTimer = null;
+                            this.yjRunning = false;
+                            await this.loadYujiePicks();
+                            this.toastMsg('玉姐精选扫描完成');
+                        }
+                    }, 5000);
+                }
+            } catch (e) { this.toastMsg('触发失败'); }
+        },
+        async openYjParams() {
+            try {
+                const r = await (await fetch('/api/yujie/params')).json();
+                this.yjParams = r.params || {};
+                this.yjDefaults = r.defaults || {};
+                this.showYjParams = true;
+            } catch (e) { this.toastMsg('参数加载失败'); }
+        },
+        async saveYjParams() {
+            try {
+                this.yjSaving = true;
+                const r = await (await fetch('/api/yujie/params', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ params: this.yjParams }),
+                })).json();
+                this.yjSaving = false;
+                if (r.ok) {
+                    this.toastMsg('参数已保存，下次扫描生效');
+                    this.showYjParams = false;
+                } else {
+                    this.toastMsg('保存失败');
+                }
+            } catch (e) { this.yjSaving = false; this.toastMsg('保存失败'); }
+        },
+        openAnalysis(code) {
+            this.analyzeCode = code;
+            this.tab = 'analyze';
+            this.doAnalyze();
+        },
         mdToHtml(md) {
             if (!md) return '';
             const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
@@ -1078,11 +1218,20 @@ createApp({
                 this.loadAgentLogs();
             }
         }, 5000);
+        // 玉姐精选 tab 30秒轮询状态
+        this.yjTimer = setInterval(() => {
+            if (this.tab === 'yujie') {
+                this.loadYujieStatus();
+                if (this.yjStatus.last_status !== 'running') this.loadYujiePicks();
+            }
+        }, 30000);
     },
     beforeUnmount() {
         if (this.timer) clearInterval(this.timer);
         if (this.agentTimer) clearInterval(this.agentTimer);
+        if (this.yjTimer) clearInterval(this.yjTimer);
         if (this.dsPollTimer) clearInterval(this.dsPollTimer);
+        if (this.yjPollTimer) clearInterval(this.yjPollTimer);
     }
 }).mount('#app');
 </script>

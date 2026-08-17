@@ -719,12 +719,116 @@ def daily_scan_run():
     return {"started": True, "message": "已在后台启动，查看 /api/daily-scan/status 获取进度"}
 
 
+# ---------------- 玉姐精选 ----------------
+
+_yujie_state = {"next_run": None, "last_run": None, "last_status": "idle"}
+
+
+@app.get("/api/yujie/params")
+def yujie_params():
+    import yujie_scan
+
+    return {"params": yujie_scan.get_params(), "defaults": yujie_scan.DEFAULT_PARAMS}
+
+
+@app.put("/api/yujie/params")
+async def yujie_params_update(body: dict):
+    import yujie_scan
+
+    merged = yujie_scan.get_params()
+    incoming = body.get("params", body)
+
+    def _deep_merge(dst, src):
+        for k, v in src.items():
+            if isinstance(v, dict) and isinstance(dst.get(k), dict):
+                _deep_merge(dst[k], v)
+            else:
+                dst[k] = v
+
+    _deep_merge(merged, incoming)
+    yujie_scan.save_params(merged)
+    return {"ok": True, "params": merged}
+
+
+@app.get("/api/yujie/status")
+def yujie_status():
+    return _yujie_state
+
+
+@app.get("/api/yujie/picks")
+def yujie_picks():
+    import yujie_scan
+
+    return {"date": datetime.now().strftime("%Y-%m-%d"), "picks": yujie_scan.load_picks()}
+
+
+@app.post("/api/yujie/run")
+def yujie_run():
+    import threading
+    from datetime import datetime
+
+    if _yujie_state["last_status"] == "running":
+        return {"started": False, "message": "扫描已在运行中"}
+
+    def _run():
+        import yujie_scan
+
+        _yujie_state["last_status"] = "running"
+        _yujie_state["last_run"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        try:
+            yujie_scan.run_once(limit=0)
+            _yujie_state["last_status"] = "ok"
+        except Exception as e:
+            _yujie_state["last_status"] = f"error: {e}"
+
+    threading.Thread(target=_run, name="yujie_scan", daemon=True).start()
+    return {"started": True, "message": "已在后台启动，全市场扫描约需30-60分钟"}
+
+
+def _start_yujie_scheduler():
+    """每个交易日 09:00 自动跑玉姐精选扫描。"""
+    import os
+    import threading
+    import time as _time
+    from datetime import datetime as dt, timedelta
+
+    enabled = os.environ.get("YUJIE_SCAN_ENABLED", "1") == "1"
+    if not enabled:
+        _yujie_state["last_status"] = "disabled"
+        return
+    scan_time = os.environ.get("YUJIE_SCAN_TIME", os.environ.get("DAILY_SCAN_TIME", "09:00"))
+    hh, mm = scan_time.split(":")
+
+    def loop():
+        while True:
+            now = dt.now()
+            target = now.replace(hour=int(hh), minute=int(mm), second=10, microsecond=0)
+            if now >= target:
+                target = target + timedelta(days=1)
+            _yujie_state["next_run"] = target.strftime("%Y-%m-%d %H:%M:%S")
+            _time.sleep((target - now).total_seconds())
+            if dt.now().weekday() >= 5:
+                continue
+            _yujie_state["last_status"] = "running"
+            _yujie_state["last_run"] = dt.now().strftime("%Y-%m-%d %H:%M:%S")
+            try:
+                import yujie_scan
+
+                yujie_scan.run_once(limit=0)
+                _yujie_state["last_status"] = "ok"
+            except Exception as e:
+                _yujie_state["last_status"] = f"error: {e}"
+
+    threading.Thread(target=loop, name="yujie_scan_scheduler", daemon=True).start()
+
+
 if __name__ == "__main__":
     import os
 
     import uvicorn
 
     _start_daily_scan_scheduler()
+    _start_yujie_scheduler()
     port = int(os.environ.get("PORT", "8000"))
     host = os.environ.get("HOST", "127.0.0.1")
     uvicorn.run(app, host=host, port=port)

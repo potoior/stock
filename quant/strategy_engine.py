@@ -208,7 +208,88 @@ def compute_tower(df):
     return pd.Series(tower, index=df.index)
 
 
-def compute_dmi(df, n=14, m=6):
+def compute_rsi(df, p1=6, p2=12):
+    """RSI 相对强弱指标，返回 (RSI短线, RSI长线)。"""
+    close = df["close"]
+    delta = close.diff()
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+
+    def _rsi(period):
+        avg_gain = gain.ewm(alpha=1 / period, adjust=False).mean()
+        avg_loss = loss.ewm(alpha=1 / period, adjust=False).mean()
+        rs = avg_gain / avg_loss.replace(0, np.nan)
+        rsi = 100 - 100 / (1 + rs)
+        return rsi.fillna(50)
+
+    return _rsi(p1), _rsi(p2)
+
+
+def compute_mos_lows(df, diff=None, dea=None):
+    """MOS 看盘系统（通达信公式精确实现）。
+
+    原公式：
+      DIFF:=100*(EMA(CLOSE,12)-EMA(CLOSE,26))
+      DEA:=EMA(DIFF,9)
+      死叉:=CROSS(DEA,DIFF)
+      N1:=BARSLAST(死叉)  N2:=REF(BARSLAST(死叉),N1+1)
+      CL1:=LLV(LOW,N1+1)  DIFL1:=LLV(DIFF,N1+1)
+      CL2:=REF(CL1,N1+1)  DIFL2:=REF(DIFL1,N1+1)
+    返回 dict: cl1/cl2/cl3, difl1/difl2/difl3, n1, 以及
+      bottom  = CL1<CL2 且 DIFL1>=DIFL2（底背离低点）
+    """
+    if diff is None:
+        diff, dea, _ = compute_macd(df)
+    low = df["low"].values
+    dif_arr = diff.values
+    n = len(df)
+
+    # 死叉点: DEA 上穿 DIFF
+    death = np.zeros(n, dtype=bool)
+    for i in range(1, n):
+        if dea.iloc[i] > diff.iloc[i] and dea.iloc[i - 1] <= diff.iloc[i - 1]:
+            death[i] = True
+
+    if death.sum() == 0:
+        return {
+            "cl1": None, "cl2": None, "cl3": None,
+            "difl1": None, "difl2": None, "difl3": None,
+            "n1": n, "bottom": False,
+        }
+
+    death_idx = np.where(death)[0]
+    last = death_idx[-1]
+    n1 = n - 1 - last
+    _cl1 = low[last:].min()
+    _dl1 = dif_arr[last:].min()
+    if len(death_idx) >= 2:
+        prev = death_idx[-2]
+        cl2 = low[prev : last + 1].min()
+        dl2 = dif_arr[prev : last + 1].min()
+    else:
+        cl2 = low[: last + 1].min()
+        dl2 = dif_arr[: last + 1].min()
+    if len(death_idx) >= 3:
+        pp = death_idx[-3]
+        cl3 = low[pp : prev + 1].min()
+        dl3 = dif_arr[pp : prev + 1].min()
+    else:
+        cl3 = low.min()
+        dl3 = dif_arr.min()
+
+    return {
+        "cl1": float(_cl1),
+        "cl2": float(cl2),
+        "cl3": float(cl3),
+        "difl1": float(_dl1),
+        "difl2": float(dl2),
+        "difl3": float(dl3),
+        "n1": int(n1),
+        "bottom": bool(_cl1 < cl2 and _dl1 >= dl2),
+    }
+
+
+def compute_tower(df):
     high, low, close = df["high"], df["low"], df["close"]
     ph, pl, pc = high.shift(1), low.shift(1), close.shift(1)
     tr = pd.concat([high - low, (high - pc).abs(), (low - pc).abs()], axis=1).max(axis=1)
