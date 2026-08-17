@@ -1,0 +1,4 @@
+# 开发/测试依赖（运行时依赖见同级目录 requirements.txt）
+-r requirements.txt
+ruff
+pytest
