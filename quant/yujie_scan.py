@@ -372,8 +372,8 @@ def run_once(limit=0):
         lf.write(f"扫描完成 命中 {len(results)} 只，耗时见上方\n")
 
     results.sort(key=lambda x: -x["score"])
-    top = results[:10]
-    print(f"\n扫描完成，命中 {len(results)} 只，Top 10:")
+    top = results[:50]
+    print(f"\n扫描完成，命中 {len(results)} 只，Top 50:")
     for p in top:
         print(f"  {p['score']:>5}  {p['code']} {p['name']}  {p['price']:>8}  {','.join(p['hits'])}")
 
