@@ -47,8 +47,8 @@ CACHE_DB = HOME / "stock_cache.db"
 DEFAULT_PARAMS = {
     "scope": {
         "min_history_days": 60,
-        "min_amount_yi": 0.5,  # 成交额下限(亿)，过滤无量垃圾股
-        "exclude_sz_code": ["688", "300", "301", "8"],  # 科创板/创业板/北交默认剔除
+        "min_amount_yi": 0.0,  # 成交额下限(亿)，0=不限制
+        "exclude_sz_code": [],  # 不剔除任何板块，全 A 股扫描
     },
     "macd": {
         "golden_score": 2,

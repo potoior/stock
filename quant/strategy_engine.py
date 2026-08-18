@@ -105,7 +105,7 @@ def fetch_qfq_tencent(code, datalen=320):
         resp = _http_client.get(url)
         raw = resp.json()
     except Exception:
-        return pd.DataFrame()
+        return _fetch_kline_sina(code, datalen)
     node = raw.get("data", {}).get(symbol, {})
     rows_raw = node.get("qfqday") or node.get("day") or []
     rows = []
@@ -120,6 +120,46 @@ def fetch_qfq_tencent(code, datalen=320):
                 "high": float(item[3]),
                 "low": float(item[4]),
                 "volume": vol,
+            }
+        )
+    if not rows:
+        # 腾讯返回空, fallback 到新浪
+        return _fetch_kline_sina(code, datalen)
+    return pd.DataFrame(rows)
+
+
+def _fetch_kline_sina(code, datalen=320):
+    """新浪日 K 线接口(腾讯 WAF 拦截时的 fallback)。
+    URL: quotes.sina.cn/cn/api/jsonp_v2.php/.../CN_MarketDataService.getKLineData
+    返回 JSONP: var=([{day,open,high,low,close,volume,...}, ...])
+    """
+    symbol = _sina_symbol(code)
+    url = (
+        f"https://quotes.sina.cn/cn/api/jsonp_v2.php/var=/CN_MarketDataService.getKLineData"
+        f"?symbol={symbol}&scale=240&datalen={datalen}"
+    )
+    try:
+        resp = _http_client.get(url)
+        text = resp.text
+        # 提取 var=(...) 中的 JSON
+        start = text.find("=(")
+        if start < 0:
+            return pd.DataFrame()
+        json_str = text[start + 2 : text.rfind(")")]
+        items = json.loads(json_str)
+    except Exception:
+        return pd.DataFrame()
+    rows = []
+    for item in items:
+        rows.append(
+            {
+                "code": code,
+                "date": item["day"].replace("-", ""),
+                "open": float(item["open"]),
+                "close": float(item["close"]),
+                "high": float(item["high"]),
+                "low": float(item["low"]),
+                "volume": float(item["volume"]),
             }
         )
     return pd.DataFrame(rows)
