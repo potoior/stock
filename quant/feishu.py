@@ -99,6 +99,67 @@ class FeishuBot:
             card = json.dumps(card, ensure_ascii=False)
         return self._send("interactive", card, chat_id)
 
+    def send_image(self, png_bytes, chat_id=None):
+        """发送图片消息。png_bytes 是 PNG 二进制数据。
+
+        流程: 上传到飞书资源 → 得 image_key → 发 image 消息。
+        需要权限: im:resource 或 im:resource:upload
+        """
+        if not self.enabled:
+            log.info("feishu 未启用,跳过图片推送")
+            return None
+        target = chat_id or self.chat_id
+        if not target:
+            log.warning("feishu chat_id 未配置,跳过图片推送")
+            return None
+        try:
+            token = self._get_token()
+            image_key = self._upload_image(png_bytes, token)
+            if not image_key:
+                return None
+            content = json.dumps({"image_key": image_key})
+            return self._send("image", content, target)
+        except Exception as e:
+            log.error("feishu 推送图片异常: %s", e)
+            return None
+
+    def _upload_image(self, png_bytes, token):
+        """上传图片到飞书,返回 image_key。"""
+        import uuid
+
+        boundary = "----lark" + uuid.uuid4().hex
+        parts = [
+            f"--{boundary}\r\nContent-Disposition: form-data; name=\"image_type\"\r\n\r\nmessage\r\n".encode(),
+            (
+                f"--{boundary}\r\nContent-Disposition: form-data; name=\"image\"; "
+                f"filename=\"chart.png\"\r\nContent-Type: image/png\r\n\r\n"
+            ).encode() + png_bytes + b"\r\n",
+            f"--{boundary}--\r\n".encode(),
+        ]
+        body = b"".join(parts)
+        req = urllib.request.Request(
+            "https://open.feishu.cn/open-apis/im/v1/images",
+            data=body,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": f"multipart/form-data; boundary={boundary}",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout) as r:
+                resp = json.loads(r.read().decode("utf-8"))
+            if resp.get("code") != 0:
+                log.error("feishu 上传图片失败: %s", resp.get("msg"))
+                return None
+            return resp.get("data", {}).get("image_key")
+        except urllib.error.HTTPError as e:
+            log.error("feishu 上传图片 HTTP %d: %s", e.code, e.read().decode("utf-8", "replace")[:200])
+            return None
+        except Exception as e:
+            log.error("feishu 上传图片异常: %s", e)
+            return None
+
     def _send(self, msg_type, content_str, chat_id):
         if not self.enabled:
             log.info("feishu 未启用,跳过推送")
