@@ -163,3 +163,71 @@ def test_aggregate_basic():
 def test_aggregate_empty():
     report = bt._aggregate([], {h: [0.0, 0] for h in bt.HORIZONS})
     assert report["signal_count"] == 0
+
+
+def _populate_multi(tmp_path, codes_seeds):
+    """填充多只股票合成数据到临时 db。codes_seeds: [(code, seed), ...]"""
+    import sqlite3
+
+    db = tmp_path / "test_grid.db"
+    conn = sqlite3.connect(str(db))
+    conn.execute(
+        "CREATE TABLE daily(code TEXT, date TEXT, open REAL, close REAL, high REAL, low REAL, "
+        "volume REAL, PRIMARY KEY(code, date))"
+    )
+    for code, seed in codes_seeds:
+        df = _make_df(n=260, seed=seed)
+        rows = [
+            (code, r["date"], r["open"], r["close"], r["high"], r["low"], r["volume"])
+            for _, r in df.iterrows()
+        ]
+        conn.executemany("INSERT INTO daily VALUES(?,?,?,?,?,?,?)", rows)
+    conn.commit()
+    conn.close()
+    return db
+
+
+def test_grid_search_runs_and_ranks(monkeypatch, tmp_path):
+    """grid_search 在小样本上可运行，配置按超额降序，敏感度结构正确。"""
+    codes = [("000001", 1), ("000002", 2), ("600519", 3)]
+    db = _populate_multi(tmp_path, codes)
+    monkeypatch.setattr(bt, "CACHE_DB", db)
+
+    tiny_grid = {
+        "macd.near_size": [0.15, 0.25],
+        "breakout.period": [20, 40],
+        "drawdown.threshold": [0.2, 0.3],
+        "low_pos.ratio": [0.4, 0.5],
+    }
+    r = bt.grid_search(sample=0, horizon=10, grid=tiny_grid, workers=4)
+    assert r["sample"] == 3
+    assert r["horizon"] == 10
+    assert len(r["configs"]) == 16  # 2×2×2×2
+    # 配置按超额降序
+    excesses = [c["excess"] for c in r["configs"]]
+    assert excesses == sorted(excesses, reverse=True)
+    # 敏感度含 4 个参数
+    assert set(r["sensitivity"].keys()) == set(tiny_grid.keys())
+    for vals in r["sensitivity"].values():
+        assert len(vals) == 2  # 每个参数 2 个取值
+        assert all("avg_excess" in v and "n_configs" in v for v in vals)
+    # 基准收益为有限数
+    assert np.isfinite(r["baseline_mean_ret"])
+
+
+def test_grid_report_keys_present(monkeypatch, tmp_path):
+    """write_grid_report 产物含 top 配置表与敏感度表。"""
+    codes = [("000001", 1), ("000002", 2)]
+    db = _populate_multi(tmp_path, codes)
+    monkeypatch.setattr(bt, "CACHE_DB", db)
+    monkeypatch.setattr(bt, "GRID_REPORT_MD", tmp_path / "g.md")
+    monkeypatch.setattr(bt, "GRID_REPORT_JSON", tmp_path / "g.json")
+    r = bt.grid_search(sample=0, horizon=10,
+                       grid={"macd.near_size": [0.2], "breakout.period": [20],
+                             "drawdown.threshold": [0.2, 0.3], "low_pos.ratio": [0.4]},
+                       workers=2)
+    bt.write_grid_report(r)
+    md = (tmp_path / "g.md").read_text(encoding="utf-8")
+    assert "Top 15" in md
+    assert "单参数敏感度" in md
+    assert (tmp_path / "g.json").exists()

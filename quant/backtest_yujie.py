@@ -501,16 +501,270 @@ def print_summary(report: dict) -> None:
 
 
 # ============================================================
+# 5. 参数网格扫描寻优
+# ============================================================
+
+# 网格默认取值：对 4 个阈值参数搜索（其余周期固定 120，权重保持默认）
+GRID_DEFAULT = {
+    "macd.near_size": [0.10, 0.15, 0.20, 0.30],
+    "breakout.period": [10, 20, 40, 60],
+    "drawdown.threshold": [0.15, 0.20, 0.30],
+    "low_pos.ratio": [0.30, 0.40, 0.50],
+}
+GRID_REPORT_MD = HOME / "yujie_grid_report.md"
+GRID_REPORT_JSON = HOME / "yujie_grid_report.json"
+
+
+def _rich_flags(code: str, params: dict, grid: dict, horizon: int) -> pd.DataFrame | None:
+    """一次性算出单只股票所有候选阈值对应的命中标志列 + 前向收益。
+
+    返回列: date, close, ret_H, warmup, 以及各 flag 列(golden/green/mos_bottom/
+    mos_green/rsi_golden/bull_ma 固定；near_*/breakout_*/drawdown_*/lowpos_* 可变)。
+    """
+    conn = sqlite3.connect(str(CACHE_DB), timeout=10)
+    df = pd.read_sql(
+        "SELECT date, close, high, low FROM daily WHERE code=? ORDER BY date",
+        conn, params=(code,),
+    )
+    conn.close()
+    if len(df) < params["scope"]["min_history_days"]:
+        return None
+    df = df.sort_values("date").reset_index(drop=True)
+    close = df["close"].astype(float)
+    high = df["high"].astype(float)
+    low = df["low"].astype(float)
+    n = len(df)
+
+    diff, dea, bar = compute_macd(df)
+    rsi1, rsi2 = compute_rsi(df, int(params["rsi"]["p1"]), int(params["rsi"]["p2"]))
+    _cl1, _difl1, _cl2, _difl2, bottom, has_death = _vectorized_mos(low, diff, dea)
+
+    # 固定规则
+    golden = (diff > dea) & (diff.shift(1) <= dea.shift(1))
+    green = (bar < 0) & (bar > bar.shift(1))
+    mos_bottom = pd.Series(bottom, index=df.index)
+    mos_green = pd.Series(has_death, index=df.index) & (bar < 0) & (bar > bar.shift(1))
+    rsi_golden = (rsi1 > rsi2) & (rsi1.shift(1) <= rsi2.shift(1))
+    m1, m2, m3, m4 = (int(params["bull_ma"][k]) for k in ("m1", "m2", "m3", "m4"))
+    ma_s = close.rolling(m1).mean()
+    ma_m = close.rolling(m2).mean()
+    ma_l = close.rolling(m3).mean()
+    ma_l4 = close.rolling(m4).mean()
+    bull_ma = (close > ma_s) & (ma_s > ma_m) & (ma_m > ma_l) & (ma_l > ma_l4)
+
+    out = pd.DataFrame({"close": close.values})
+    out["golden"] = golden.values
+    out["green"] = green.values
+    out["mos_bottom"] = mos_bottom.values
+    out["mos_green"] = mos_green.values
+    out["rsi_golden"] = rsi_golden.values
+    out["bull_ma"] = bull_ma.values
+
+    # 可变规则：枚举所有候选阈值
+    for s in grid["macd.near_size"]:
+        near = (~golden) & (diff < dea) & ((dea - diff) < s) & (diff > diff.shift(1))
+        out[f"near_{s}"] = near.values
+    for p in grid["breakout.period"]:
+        prev_high = high.rolling(p).max().shift(1)
+        out[f"breakout_{p}"] = (golden & (close > prev_high)).values
+    for t in grid["drawdown.threshold"]:
+        dd_hi = high.rolling(120).max().shift(1)
+        out[f"drawdown_{t}"] = ((dd_hi > 0) & ((dd_hi - close) / dd_hi >= t)).values
+    for r in grid["low_pos.ratio"]:
+        seg_hi = high.rolling(120).max().shift(1)
+        seg_lo = low.rolling(120).min().shift(1)
+        out[f"lowpos_{r}"] = (close <= (seg_hi + seg_lo) * r).values
+
+    # 前向收益
+    out[f"ret_{horizon}"] = (close.shift(-horizon) / close - 1).values
+    out["warmup"] = np.arange(n) >= WARMUP
+    return out
+
+
+def grid_search(sample: int = 400, horizon: int = 20, grid: dict | None = None,
+                workers: int = 16, seed: int = 42) -> dict:
+    """网格搜索：对参数组合按超额收益排序，并给出单参数敏感度。"""
+    import itertools
+    import random
+
+    grid = grid or GRID_DEFAULT
+    params = get_params()
+    codes = _get_universe_codes()
+    if sample and sample < len(codes):
+        rng = random.Random(seed)
+        codes = rng.sample(codes, sample)
+    print(f"== 参数网格扫描 == 抽样 {len(codes)} 只，持有 {horizon} 天，"
+          f"配置数 {np.prod([len(v) for v in grid.values()])}")
+    t0 = time.time()
+
+    pieces: list[pd.DataFrame] = []
+    done = 0
+    lock = threading.Lock()
+
+    def _work(c):
+        try:
+            return _rich_flags(c, params, grid, horizon)
+        except Exception:
+            return None
+
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        futs = [ex.submit(_work, c) for c in codes]
+        for f in futs:
+            d = f.result()
+            with lock:
+                done += 1
+                if done % 100 == 0 or done == len(codes):
+                    print(f"  预计算 {done}/{len(codes)}  耗时 {time.time()-t0:.0f}s")
+            if d is not None and len(d) > 0:
+                pieces.append(d)
+    if not pieces:
+        return {"configs": [], "sensitivity": {}, "sample": 0, "horizon": horizon}
+
+    pool = pd.concat(pieces, ignore_index=True)
+    ret_col = f"ret_{horizon}"
+    valid = pool["warmup"] & pool[ret_col].notna()
+    baseline = float(pool.loc[valid, ret_col].mean())
+    print(f"预计算完成：{len(pool)} 行，基准收益 {_fmt_pct(baseline)}，耗时 {time.time()-t0:.0f}s")
+
+    # 权重（固定，来自 params）
+    w = {
+        "golden": float(params["macd"]["golden_score"]),
+        "near": float(params["macd"]["near_score"]),
+        "green": float(params["macd"]["green_shrink_score"]),
+        "mos_bottom": float(params["mos"]["bottom_score"]),
+        "mos_green": float(params["mos"]["green_shrink_score"]),
+        "breakout": float(params["breakout"]["score"]),
+        "rsi_golden": float(params["rsi"]["score"]),
+        "bull_ma": float(params["bull_ma"]["score"]),
+        "low_pos": float(params["low_pos"]["score"]),
+        "drawdown": float(params["drawdown"]["score"]),
+    }
+
+    fixed_score = (
+        pool["golden"] * w["golden"] + pool["green"] * w["green"]
+        + pool["mos_bottom"] * w["mos_bottom"] + pool["mos_green"] * w["mos_green"]
+        + pool["rsi_golden"] * w["rsi_golden"] + pool["bull_ma"] * w["bull_ma"]
+    )
+
+    configs: list[dict] = []
+    keys = list(grid.keys())
+    # grid 长键名 -> config 短键名
+    short_keys = ["near_size", "breakout_period", "drawdown_threshold", "low_pos_ratio"]
+    for combo in itertools.product(*[grid[k] for k in keys]):
+        s, p, t, r = combo  # near_size, breakout_period, dd_threshold, lp_ratio
+        score = (fixed_score
+                 + pool[f"near_{s}"] * w["near"]
+                 + pool[f"breakout_{p}"] * w["breakout"]
+                 + pool[f"drawdown_{t}"] * w["drawdown"]
+                 + pool[f"lowpos_{r}"] * w["low_pos"])
+        sig = valid & (score > 0)
+        n = int(sig.sum())
+        if n == 0:
+            continue
+        rets = pool.loc[sig, ret_col]
+        mean_ret = float(rets.mean())
+        configs.append({
+            "near_size": s, "breakout_period": p, "drawdown_threshold": t, "low_pos_ratio": r,
+            "n": n, "hit_rate": float((rets > 0).mean()), "mean_ret": mean_ret,
+            "excess": mean_ret - baseline,
+        })
+    configs.sort(key=lambda x: -x["excess"])
+
+    # 单参数敏感度：每个参数取值下，所有含该取值的配置的平均超额
+    sensitivity: dict[str, list[dict]] = {}
+    for gk, sk in zip(keys, short_keys, strict=True):
+        by_val: dict[float, list[float]] = {}
+        for c in configs:
+            by_val.setdefault(c[sk], []).append(c["excess"])
+        sensitivity[gk] = [
+            {"value": v, "avg_excess": float(np.mean(xs)), "n_configs": len(xs)}
+            for v, xs in sorted(by_val.items())
+        ]
+
+    return {
+        "configs": configs, "sensitivity": sensitivity,
+        "baseline_mean_ret": baseline, "sample": len(codes),
+        "horizon": horizon, "grid": grid,
+    }
+
+
+def write_grid_report(report: dict) -> None:
+    GRID_REPORT_JSON.write_text(json.dumps(report, ensure_ascii=False, indent=2),
+                                encoding="utf-8")
+    cfgs = report["configs"]
+    lines: list[str] = []
+    lines.append("# 玉姐精选参数网格扫描报告\n")
+    lines.append(f"抽样股票：{report['sample']} 只\n")
+    lines.append(f"持有期：{report['horizon']} 天\n")
+    lines.append(f"基准收益（同股随机入场）：{_fmt_pct(report['baseline_mean_ret'])}\n")
+    lines.append(f"配置总数：{len(cfgs)}\n\n")
+
+    lines.append("## 一、Top 15 配置（按超额收益排序）\n")
+    lines.append("| 即将金叉阈值 | 突破周期 | 回撤阈值 | 低位比例 | 信号数 | 命中率 | 平均收益 | 超额 |")
+    lines.append("|-------------|---------|---------|---------|--------|--------|---------|------|")
+    for c in cfgs[:15]:
+        lines.append(
+            f"| {c['near_size']} | {c['breakout_period']} | {c['drawdown_threshold']} | "
+            f"{c['low_pos_ratio']} | {c['n']} | {c['hit_rate']*100:.1f}% | "
+            f"{_fmt_pct(c['mean_ret'])} | **{_fmt_pct(c['excess'])}** |"
+        )
+    lines.append("")
+
+    lines.append("## 二、单参数敏感度（平均超额）\n")
+    for k, vals in report["sensitivity"].items():
+        lines.append(f"### {k}\n")
+        lines.append("| 取值 | 平均超额 | 配置数 |")
+        lines.append("|------|---------|--------|")
+        for v in vals:
+            lines.append(f"| {v['value']} | {_fmt_pct(v['avg_excess'])} | {v['n_configs']} |")
+        lines.append("")
+
+    best = cfgs[0] if cfgs else None
+    lines.append("## 结论\n")
+    if best:
+        lines.append(f"- 最优配置：即将金叉 {best['near_size']} / 突破 {best['breakout_period']} 日 / "
+                     f"回撤 {best['drawdown_threshold']} / 低位 {best['low_pos_ratio']}，"
+                     f"超额 {_fmt_pct(best['excess'])}（基准 {_fmt_pct(report['baseline_mean_ret'])}）。\n")
+        lines.append("- 可将最优配置写入 config.json -> yujie 对应字段后重新扫描/回测验证。\n")
+    GRID_REPORT_MD.write_text("\n".join(lines), encoding="utf-8")
+    print(f"报告已写入：{GRID_REPORT_MD}")
+    print(f"报告已写入：{GRID_REPORT_JSON}")
+
+
+def print_grid_summary(report: dict) -> None:
+    cfgs = report["configs"]
+    print("\n" + "=" * 80)
+    print(f"参数网格扫描汇总（抽样 {report['sample']} 只，持有 {report['horizon']} 天）")
+    print(f"基准收益 {_fmt_pct(report['baseline_mean_ret'])}，配置数 {len(cfgs)}")
+    print("=" * 80)
+    print(f"{'即将金叉':>8} {'突破':>4} {'回撤':>5} {'低位':>5} {'信号数':>7} {'命中率':>6} {'平均':>8} {'超额':>8}")
+    for c in cfgs[:10]:
+        print(f"{c['near_size']:>8} {c['breakout_period']:>4} {c['drawdown_threshold']:>5} "
+              f"{c['low_pos_ratio']:>5} {c['n']:>7} {c['hit_rate']*100:>5.1f}% "
+              f"{_fmt_pct(c['mean_ret']):>8} {_fmt_pct(c['excess']):>8}")
+    print("-" * 80)
+    print("单参数敏感度（平均超额）:")
+    for k, vals in report["sensitivity"].items():
+        row = "  " + k + ": " + "  ".join(
+            f"{v['value']}→{_fmt_pct(v['avg_excess'])}" for v in vals
+        )
+        print(row)
+    print("=" * 80)
+
+
+# ============================================================
 # CLI
 # ============================================================
 
 
 def main():
     ap = argparse.ArgumentParser(description="玉姐精选评分回测")
-    ap.add_argument("cmd", choices=["prepare", "backtest", "all"])
+    ap.add_argument("cmd", choices=["prepare", "backtest", "grid", "all"])
     ap.add_argument("--limit", type=int, default=0, help="仅处理前 N 只股票（调试）")
     ap.add_argument("--workers", type=int, default=32, help="并发线程数")
     ap.add_argument("--datalen", type=int, default=1024, help="历史拉取天数")
+    ap.add_argument("--sample", type=int, default=400, help="网格扫描抽样股票数")
+    ap.add_argument("--horizon", type=int, default=20, help="网格扫描持有期")
     args = ap.parse_args()
 
     if args.cmd in ("prepare", "all"):
@@ -519,6 +773,11 @@ def main():
         report = run_backtest(limit=args.limit, workers=max(8, args.workers // 2))
         write_report(report)
         print_summary(report)
+    if args.cmd == "grid":
+        report = grid_search(sample=args.sample, horizon=args.horizon,
+                             workers=max(8, args.workers // 2))
+        write_grid_report(report)
+        print_grid_summary(report)
 
 
 if __name__ == "__main__":

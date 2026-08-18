@@ -1,0 +1,1551 @@
+{
+  "configs": [
+    {
+      "near_size": 0.1,
+      "breakout_period": 10,
+      "drawdown_threshold": 0.3,
+      "low_pos_ratio": 0.4,
+      "n": 200806,
+      "hit_rate": 0.4817535332609583,
+      "mean_ret": 0.012389224074439025,
+      "excess": 0.002993273890261168
+    },
+    {
+      "near_size": 0.1,
+      "breakout_period": 20,
+      "drawdown_threshold": 0.3,
+      "low_pos_ratio": 0.4,
+      "n": 200806,
+      "hit_rate": 0.4817535332609583,
+      "mean_ret": 0.012389224074439025,
+      "excess": 0.002993273890261168
+    },
+    {
+      "near_size": 0.1,
+      "breakout_period": 40,
+      "drawdown_threshold": 0.3,
+      "low_pos_ratio": 0.4,
+      "n": 200806,
+      "hit_rate": 0.4817535332609583,
+      "mean_ret": 0.012389224074439025,
+      "excess": 0.002993273890261168
+    },
+    {
+      "near_size": 0.1,
+      "breakout_period": 60,
+      "drawdown_threshold": 0.3,
+      "low_pos_ratio": 0.4,
+      "n": 200806,
+      "hit_rate": 0.4817535332609583,
+      "mean_ret": 0.012389224074439025,
+      "excess": 0.002993273890261168
+    },
+    {
+      "near_size": 0.15,
+      "breakout_period": 10,
+      "drawdown_threshold": 0.3,
+      "low_pos_ratio": 0.4,
+      "n": 200806,
+      "hit_rate": 0.4817535332609583,
+      "mean_ret": 0.012389224074439025,
+      "excess": 0.002993273890261168
+    },
+    {
+      "near_size": 0.15,
+      "breakout_period": 20,
+      "drawdown_threshold": 0.3,
+      "low_pos_ratio": 0.4,
+      "n": 200806,
+      "hit_rate": 0.4817535332609583,
+      "mean_ret": 0.012389224074439025,
+      "excess": 0.002993273890261168
+    },
+    {
+      "near_size": 0.15,
+      "breakout_period": 40,
+      "drawdown_threshold": 0.3,
+      "low_pos_ratio": 0.4,
+      "n": 200806,
+      "hit_rate": 0.4817535332609583,
+      "mean_ret": 0.012389224074439025,
+      "excess": 0.002993273890261168
+    },
+    {
+      "near_size": 0.15,
+      "breakout_period": 60,
+      "drawdown_threshold": 0.3,
+      "low_pos_ratio": 0.4,
+      "n": 200806,
+      "hit_rate": 0.4817535332609583,
+      "mean_ret": 0.012389224074439025,
+      "excess": 0.002993273890261168
+    },
+    {
+      "near_size": 0.2,
+      "breakout_period": 10,
+      "drawdown_threshold": 0.3,
+      "low_pos_ratio": 0.4,
+      "n": 200806,
+      "hit_rate": 0.4817535332609583,
+      "mean_ret": 0.012389224074439025,
+      "excess": 0.002993273890261168
+    },
+    {
+      "near_size": 0.2,
+      "breakout_period": 20,
+      "drawdown_threshold": 0.3,
+      "low_pos_ratio": 0.4,
+      "n": 200806,
+      "hit_rate": 0.4817535332609583,
+      "mean_ret": 0.012389224074439025,
+      "excess": 0.002993273890261168
+    },
+    {
+      "near_size": 0.2,
+      "breakout_period": 40,
+      "drawdown_threshold": 0.3,
+      "low_pos_ratio": 0.4,
+      "n": 200806,
+      "hit_rate": 0.4817535332609583,
+      "mean_ret": 0.012389224074439025,
+      "excess": 0.002993273890261168
+    },
+    {
+      "near_size": 0.2,
+      "breakout_period": 60,
+      "drawdown_threshold": 0.3,
+      "low_pos_ratio": 0.4,
+      "n": 200806,
+      "hit_rate": 0.4817535332609583,
+      "mean_ret": 0.012389224074439025,
+      "excess": 0.002993273890261168
+    },
+    {
+      "near_size": 0.3,
+      "breakout_period": 10,
+      "drawdown_threshold": 0.3,
+      "low_pos_ratio": 0.4,
+      "n": 200806,
+      "hit_rate": 0.4817535332609583,
+      "mean_ret": 0.012389224074439025,
+      "excess": 0.002993273890261168
+    },
+    {
+      "near_size": 0.3,
+      "breakout_period": 20,
+      "drawdown_threshold": 0.3,
+      "low_pos_ratio": 0.4,
+      "n": 200806,
+      "hit_rate": 0.4817535332609583,
+      "mean_ret": 0.012389224074439025,
+      "excess": 0.002993273890261168
+    },
+    {
+      "near_size": 0.3,
+      "breakout_period": 40,
+      "drawdown_threshold": 0.3,
+      "low_pos_ratio": 0.4,
+      "n": 200806,
+      "hit_rate": 0.4817535332609583,
+      "mean_ret": 0.012389224074439025,
+      "excess": 0.002993273890261168
+    },
+    {
+      "near_size": 0.3,
+      "breakout_period": 60,
+      "drawdown_threshold": 0.3,
+      "low_pos_ratio": 0.4,
+      "n": 200806,
+      "hit_rate": 0.4817535332609583,
+      "mean_ret": 0.012389224074439025,
+      "excess": 0.002993273890261168
+    },
+    {
+      "near_size": 0.1,
+      "breakout_period": 10,
+      "drawdown_threshold": 0.3,
+      "low_pos_ratio": 0.3,
+      "n": 200803,
+      "hit_rate": 0.4817507706558169,
+      "mean_ret": 0.012388106385292244,
+      "excess": 0.0029921562011143866
+    },
+    {
+      "near_size": 0.1,
+      "breakout_period": 20,
+      "drawdown_threshold": 0.3,
+      "low_pos_ratio": 0.3,
+      "n": 200803,
+      "hit_rate": 0.4817507706558169,
+      "mean_ret": 0.012388106385292244,
+      "excess": 0.0029921562011143866
+    },
+    {
+      "near_size": 0.1,
+      "breakout_period": 40,
+      "drawdown_threshold": 0.3,
+      "low_pos_ratio": 0.3,
+      "n": 200803,
+      "hit_rate": 0.4817507706558169,
+      "mean_ret": 0.012388106385292244,
+      "excess": 0.0029921562011143866
+    },
+    {
+      "near_size": 0.1,
+      "breakout_period": 60,
+      "drawdown_threshold": 0.3,
+      "low_pos_ratio": 0.3,
+      "n": 200803,
+      "hit_rate": 0.4817507706558169,
+      "mean_ret": 0.012388106385292244,
+      "excess": 0.0029921562011143866
+    },
+    {
+      "near_size": 0.15,
+      "breakout_period": 10,
+      "drawdown_threshold": 0.3,
+      "low_pos_ratio": 0.3,
+      "n": 200803,
+      "hit_rate": 0.4817507706558169,
+      "mean_ret": 0.012388106385292244,
+      "excess": 0.0029921562011143866
+    },
+    {
+      "near_size": 0.15,
+      "breakout_period": 20,
+      "drawdown_threshold": 0.3,
+      "low_pos_ratio": 0.3,
+      "n": 200803,
+      "hit_rate": 0.4817507706558169,
+      "mean_ret": 0.012388106385292244,
+      "excess": 0.0029921562011143866
+    },
+    {
+      "near_size": 0.15,
+      "breakout_period": 40,
+      "drawdown_threshold": 0.3,
+      "low_pos_ratio": 0.3,
+      "n": 200803,
+      "hit_rate": 0.4817507706558169,
+      "mean_ret": 0.012388106385292244,
+      "excess": 0.0029921562011143866
+    },
+    {
+      "near_size": 0.15,
+      "breakout_period": 60,
+      "drawdown_threshold": 0.3,
+      "low_pos_ratio": 0.3,
+      "n": 200803,
+      "hit_rate": 0.4817507706558169,
+      "mean_ret": 0.012388106385292244,
+      "excess": 0.0029921562011143866
+    },
+    {
+      "near_size": 0.2,
+      "breakout_period": 10,
+      "drawdown_threshold": 0.3,
+      "low_pos_ratio": 0.3,
+      "n": 200803,
+      "hit_rate": 0.4817507706558169,
+      "mean_ret": 0.012388106385292244,
+      "excess": 0.0029921562011143866
+    },
+    {
+      "near_size": 0.2,
+      "breakout_period": 20,
+      "drawdown_threshold": 0.3,
+      "low_pos_ratio": 0.3,
+      "n": 200803,
+      "hit_rate": 0.4817507706558169,
+      "mean_ret": 0.012388106385292244,
+      "excess": 0.0029921562011143866
+    },
+    {
+      "near_size": 0.2,
+      "breakout_period": 40,
+      "drawdown_threshold": 0.3,
+      "low_pos_ratio": 0.3,
+      "n": 200803,
+      "hit_rate": 0.4817507706558169,
+      "mean_ret": 0.012388106385292244,
+      "excess": 0.0029921562011143866
+    },
+    {
+      "near_size": 0.2,
+      "breakout_period": 60,
+      "drawdown_threshold": 0.3,
+      "low_pos_ratio": 0.3,
+      "n": 200803,
+      "hit_rate": 0.4817507706558169,
+      "mean_ret": 0.012388106385292244,
+      "excess": 0.0029921562011143866
+    },
+    {
+      "near_size": 0.3,
+      "breakout_period": 10,
+      "drawdown_threshold": 0.3,
+      "low_pos_ratio": 0.3,
+      "n": 200803,
+      "hit_rate": 0.4817507706558169,
+      "mean_ret": 0.012388106385292244,
+      "excess": 0.0029921562011143866
+    },
+    {
+      "near_size": 0.3,
+      "breakout_period": 20,
+      "drawdown_threshold": 0.3,
+      "low_pos_ratio": 0.3,
+      "n": 200803,
+      "hit_rate": 0.4817507706558169,
+      "mean_ret": 0.012388106385292244,
+      "excess": 0.0029921562011143866
+    },
+    {
+      "near_size": 0.3,
+      "breakout_period": 40,
+      "drawdown_threshold": 0.3,
+      "low_pos_ratio": 0.3,
+      "n": 200803,
+      "hit_rate": 0.4817507706558169,
+      "mean_ret": 0.012388106385292244,
+      "excess": 0.0029921562011143866
+    },
+    {
+      "near_size": 0.3,
+      "breakout_period": 60,
+      "drawdown_threshold": 0.3,
+      "low_pos_ratio": 0.3,
+      "n": 200803,
+      "hit_rate": 0.4817507706558169,
+      "mean_ret": 0.012388106385292244,
+      "excess": 0.0029921562011143866
+    },
+    {
+      "near_size": 0.1,
+      "breakout_period": 10,
+      "drawdown_threshold": 0.2,
+      "low_pos_ratio": 0.3,
+      "n": 252754,
+      "hit_rate": 0.47982623420400866,
+      "mean_ret": 0.010963887312511598,
+      "excess": 0.0015679371283337414
+    },
+    {
+      "near_size": 0.1,
+      "breakout_period": 10,
+      "drawdown_threshold": 0.2,
+      "low_pos_ratio": 0.4,
+      "n": 252754,
+      "hit_rate": 0.47982623420400866,
+      "mean_ret": 0.010963887312511598,
+      "excess": 0.0015679371283337414
+    },
+    {
+      "near_size": 0.1,
+      "breakout_period": 20,
+      "drawdown_threshold": 0.2,
+      "low_pos_ratio": 0.3,
+      "n": 252754,
+      "hit_rate": 0.47982623420400866,
+      "mean_ret": 0.010963887312511598,
+      "excess": 0.0015679371283337414
+    },
+    {
+      "near_size": 0.1,
+      "breakout_period": 20,
+      "drawdown_threshold": 0.2,
+      "low_pos_ratio": 0.4,
+      "n": 252754,
+      "hit_rate": 0.47982623420400866,
+      "mean_ret": 0.010963887312511598,
+      "excess": 0.0015679371283337414
+    },
+    {
+      "near_size": 0.1,
+      "breakout_period": 40,
+      "drawdown_threshold": 0.2,
+      "low_pos_ratio": 0.3,
+      "n": 252754,
+      "hit_rate": 0.47982623420400866,
+      "mean_ret": 0.010963887312511598,
+      "excess": 0.0015679371283337414
+    },
+    {
+      "near_size": 0.1,
+      "breakout_period": 40,
+      "drawdown_threshold": 0.2,
+      "low_pos_ratio": 0.4,
+      "n": 252754,
+      "hit_rate": 0.47982623420400866,
+      "mean_ret": 0.010963887312511598,
+      "excess": 0.0015679371283337414
+    },
+    {
+      "near_size": 0.1,
+      "breakout_period": 60,
+      "drawdown_threshold": 0.2,
+      "low_pos_ratio": 0.3,
+      "n": 252754,
+      "hit_rate": 0.47982623420400866,
+      "mean_ret": 0.010963887312511598,
+      "excess": 0.0015679371283337414
+    },
+    {
+      "near_size": 0.1,
+      "breakout_period": 60,
+      "drawdown_threshold": 0.2,
+      "low_pos_ratio": 0.4,
+      "n": 252754,
+      "hit_rate": 0.47982623420400866,
+      "mean_ret": 0.010963887312511598,
+      "excess": 0.0015679371283337414
+    },
+    {
+      "near_size": 0.15,
+      "breakout_period": 10,
+      "drawdown_threshold": 0.2,
+      "low_pos_ratio": 0.3,
+      "n": 252754,
+      "hit_rate": 0.47982623420400866,
+      "mean_ret": 0.010963887312511598,
+      "excess": 0.0015679371283337414
+    },
+    {
+      "near_size": 0.15,
+      "breakout_period": 10,
+      "drawdown_threshold": 0.2,
+      "low_pos_ratio": 0.4,
+      "n": 252754,
+      "hit_rate": 0.47982623420400866,
+      "mean_ret": 0.010963887312511598,
+      "excess": 0.0015679371283337414
+    },
+    {
+      "near_size": 0.15,
+      "breakout_period": 20,
+      "drawdown_threshold": 0.2,
+      "low_pos_ratio": 0.3,
+      "n": 252754,
+      "hit_rate": 0.47982623420400866,
+      "mean_ret": 0.010963887312511598,
+      "excess": 0.0015679371283337414
+    },
+    {
+      "near_size": 0.15,
+      "breakout_period": 20,
+      "drawdown_threshold": 0.2,
+      "low_pos_ratio": 0.4,
+      "n": 252754,
+      "hit_rate": 0.47982623420400866,
+      "mean_ret": 0.010963887312511598,
+      "excess": 0.0015679371283337414
+    },
+    {
+      "near_size": 0.15,
+      "breakout_period": 40,
+      "drawdown_threshold": 0.2,
+      "low_pos_ratio": 0.3,
+      "n": 252754,
+      "hit_rate": 0.47982623420400866,
+      "mean_ret": 0.010963887312511598,
+      "excess": 0.0015679371283337414
+    },
+    {
+      "near_size": 0.15,
+      "breakout_period": 40,
+      "drawdown_threshold": 0.2,
+      "low_pos_ratio": 0.4,
+      "n": 252754,
+      "hit_rate": 0.47982623420400866,
+      "mean_ret": 0.010963887312511598,
+      "excess": 0.0015679371283337414
+    },
+    {
+      "near_size": 0.15,
+      "breakout_period": 60,
+      "drawdown_threshold": 0.2,
+      "low_pos_ratio": 0.3,
+      "n": 252754,
+      "hit_rate": 0.47982623420400866,
+      "mean_ret": 0.010963887312511598,
+      "excess": 0.0015679371283337414
+    },
+    {
+      "near_size": 0.15,
+      "breakout_period": 60,
+      "drawdown_threshold": 0.2,
+      "low_pos_ratio": 0.4,
+      "n": 252754,
+      "hit_rate": 0.47982623420400866,
+      "mean_ret": 0.010963887312511598,
+      "excess": 0.0015679371283337414
+    },
+    {
+      "near_size": 0.2,
+      "breakout_period": 10,
+      "drawdown_threshold": 0.2,
+      "low_pos_ratio": 0.3,
+      "n": 252754,
+      "hit_rate": 0.47982623420400866,
+      "mean_ret": 0.010963887312511598,
+      "excess": 0.0015679371283337414
+    },
+    {
+      "near_size": 0.2,
+      "breakout_period": 10,
+      "drawdown_threshold": 0.2,
+      "low_pos_ratio": 0.4,
+      "n": 252754,
+      "hit_rate": 0.47982623420400866,
+      "mean_ret": 0.010963887312511598,
+      "excess": 0.0015679371283337414
+    },
+    {
+      "near_size": 0.2,
+      "breakout_period": 20,
+      "drawdown_threshold": 0.2,
+      "low_pos_ratio": 0.3,
+      "n": 252754,
+      "hit_rate": 0.47982623420400866,
+      "mean_ret": 0.010963887312511598,
+      "excess": 0.0015679371283337414
+    },
+    {
+      "near_size": 0.2,
+      "breakout_period": 20,
+      "drawdown_threshold": 0.2,
+      "low_pos_ratio": 0.4,
+      "n": 252754,
+      "hit_rate": 0.47982623420400866,
+      "mean_ret": 0.010963887312511598,
+      "excess": 0.0015679371283337414
+    },
+    {
+      "near_size": 0.2,
+      "breakout_period": 40,
+      "drawdown_threshold": 0.2,
+      "low_pos_ratio": 0.3,
+      "n": 252754,
+      "hit_rate": 0.47982623420400866,
+      "mean_ret": 0.010963887312511598,
+      "excess": 0.0015679371283337414
+    },
+    {
+      "near_size": 0.2,
+      "breakout_period": 40,
+      "drawdown_threshold": 0.2,
+      "low_pos_ratio": 0.4,
+      "n": 252754,
+      "hit_rate": 0.47982623420400866,
+      "mean_ret": 0.010963887312511598,
+      "excess": 0.0015679371283337414
+    },
+    {
+      "near_size": 0.2,
+      "breakout_period": 60,
+      "drawdown_threshold": 0.2,
+      "low_pos_ratio": 0.3,
+      "n": 252754,
+      "hit_rate": 0.47982623420400866,
+      "mean_ret": 0.010963887312511598,
+      "excess": 0.0015679371283337414
+    },
+    {
+      "near_size": 0.2,
+      "breakout_period": 60,
+      "drawdown_threshold": 0.2,
+      "low_pos_ratio": 0.4,
+      "n": 252754,
+      "hit_rate": 0.47982623420400866,
+      "mean_ret": 0.010963887312511598,
+      "excess": 0.0015679371283337414
+    },
+    {
+      "near_size": 0.3,
+      "breakout_period": 10,
+      "drawdown_threshold": 0.2,
+      "low_pos_ratio": 0.3,
+      "n": 252754,
+      "hit_rate": 0.47982623420400866,
+      "mean_ret": 0.010963887312511598,
+      "excess": 0.0015679371283337414
+    },
+    {
+      "near_size": 0.3,
+      "breakout_period": 10,
+      "drawdown_threshold": 0.2,
+      "low_pos_ratio": 0.4,
+      "n": 252754,
+      "hit_rate": 0.47982623420400866,
+      "mean_ret": 0.010963887312511598,
+      "excess": 0.0015679371283337414
+    },
+    {
+      "near_size": 0.3,
+      "breakout_period": 20,
+      "drawdown_threshold": 0.2,
+      "low_pos_ratio": 0.3,
+      "n": 252754,
+      "hit_rate": 0.47982623420400866,
+      "mean_ret": 0.010963887312511598,
+      "excess": 0.0015679371283337414
+    },
+    {
+      "near_size": 0.3,
+      "breakout_period": 20,
+      "drawdown_threshold": 0.2,
+      "low_pos_ratio": 0.4,
+      "n": 252754,
+      "hit_rate": 0.47982623420400866,
+      "mean_ret": 0.010963887312511598,
+      "excess": 0.0015679371283337414
+    },
+    {
+      "near_size": 0.3,
+      "breakout_period": 40,
+      "drawdown_threshold": 0.2,
+      "low_pos_ratio": 0.3,
+      "n": 252754,
+      "hit_rate": 0.47982623420400866,
+      "mean_ret": 0.010963887312511598,
+      "excess": 0.0015679371283337414
+    },
+    {
+      "near_size": 0.3,
+      "breakout_period": 40,
+      "drawdown_threshold": 0.2,
+      "low_pos_ratio": 0.4,
+      "n": 252754,
+      "hit_rate": 0.47982623420400866,
+      "mean_ret": 0.010963887312511598,
+      "excess": 0.0015679371283337414
+    },
+    {
+      "near_size": 0.3,
+      "breakout_period": 60,
+      "drawdown_threshold": 0.2,
+      "low_pos_ratio": 0.3,
+      "n": 252754,
+      "hit_rate": 0.47982623420400866,
+      "mean_ret": 0.010963887312511598,
+      "excess": 0.0015679371283337414
+    },
+    {
+      "near_size": 0.3,
+      "breakout_period": 60,
+      "drawdown_threshold": 0.2,
+      "low_pos_ratio": 0.4,
+      "n": 252754,
+      "hit_rate": 0.47982623420400866,
+      "mean_ret": 0.010963887312511598,
+      "excess": 0.0015679371283337414
+    },
+    {
+      "near_size": 0.1,
+      "breakout_period": 10,
+      "drawdown_threshold": 0.3,
+      "low_pos_ratio": 0.5,
+      "n": 275408,
+      "hit_rate": 0.4811370766281299,
+      "mean_ret": 0.010605258155861493,
+      "excess": 0.001209307971683636
+    },
+    {
+      "near_size": 0.1,
+      "breakout_period": 20,
+      "drawdown_threshold": 0.3,
+      "low_pos_ratio": 0.5,
+      "n": 275408,
+      "hit_rate": 0.4811370766281299,
+      "mean_ret": 0.010605258155861493,
+      "excess": 0.001209307971683636
+    },
+    {
+      "near_size": 0.1,
+      "breakout_period": 40,
+      "drawdown_threshold": 0.3,
+      "low_pos_ratio": 0.5,
+      "n": 275408,
+      "hit_rate": 0.4811370766281299,
+      "mean_ret": 0.010605258155861493,
+      "excess": 0.001209307971683636
+    },
+    {
+      "near_size": 0.1,
+      "breakout_period": 60,
+      "drawdown_threshold": 0.3,
+      "low_pos_ratio": 0.5,
+      "n": 275408,
+      "hit_rate": 0.4811370766281299,
+      "mean_ret": 0.010605258155861493,
+      "excess": 0.001209307971683636
+    },
+    {
+      "near_size": 0.15,
+      "breakout_period": 10,
+      "drawdown_threshold": 0.3,
+      "low_pos_ratio": 0.5,
+      "n": 275408,
+      "hit_rate": 0.4811370766281299,
+      "mean_ret": 0.010605258155861493,
+      "excess": 0.001209307971683636
+    },
+    {
+      "near_size": 0.15,
+      "breakout_period": 20,
+      "drawdown_threshold": 0.3,
+      "low_pos_ratio": 0.5,
+      "n": 275408,
+      "hit_rate": 0.4811370766281299,
+      "mean_ret": 0.010605258155861493,
+      "excess": 0.001209307971683636
+    },
+    {
+      "near_size": 0.15,
+      "breakout_period": 40,
+      "drawdown_threshold": 0.3,
+      "low_pos_ratio": 0.5,
+      "n": 275408,
+      "hit_rate": 0.4811370766281299,
+      "mean_ret": 0.010605258155861493,
+      "excess": 0.001209307971683636
+    },
+    {
+      "near_size": 0.15,
+      "breakout_period": 60,
+      "drawdown_threshold": 0.3,
+      "low_pos_ratio": 0.5,
+      "n": 275408,
+      "hit_rate": 0.4811370766281299,
+      "mean_ret": 0.010605258155861493,
+      "excess": 0.001209307971683636
+    },
+    {
+      "near_size": 0.2,
+      "breakout_period": 10,
+      "drawdown_threshold": 0.3,
+      "low_pos_ratio": 0.5,
+      "n": 275408,
+      "hit_rate": 0.4811370766281299,
+      "mean_ret": 0.010605258155861493,
+      "excess": 0.001209307971683636
+    },
+    {
+      "near_size": 0.2,
+      "breakout_period": 20,
+      "drawdown_threshold": 0.3,
+      "low_pos_ratio": 0.5,
+      "n": 275408,
+      "hit_rate": 0.4811370766281299,
+      "mean_ret": 0.010605258155861493,
+      "excess": 0.001209307971683636
+    },
+    {
+      "near_size": 0.2,
+      "breakout_period": 40,
+      "drawdown_threshold": 0.3,
+      "low_pos_ratio": 0.5,
+      "n": 275408,
+      "hit_rate": 0.4811370766281299,
+      "mean_ret": 0.010605258155861493,
+      "excess": 0.001209307971683636
+    },
+    {
+      "near_size": 0.2,
+      "breakout_period": 60,
+      "drawdown_threshold": 0.3,
+      "low_pos_ratio": 0.5,
+      "n": 275408,
+      "hit_rate": 0.4811370766281299,
+      "mean_ret": 0.010605258155861493,
+      "excess": 0.001209307971683636
+    },
+    {
+      "near_size": 0.3,
+      "breakout_period": 10,
+      "drawdown_threshold": 0.3,
+      "low_pos_ratio": 0.5,
+      "n": 275408,
+      "hit_rate": 0.4811370766281299,
+      "mean_ret": 0.010605258155861493,
+      "excess": 0.001209307971683636
+    },
+    {
+      "near_size": 0.3,
+      "breakout_period": 20,
+      "drawdown_threshold": 0.3,
+      "low_pos_ratio": 0.5,
+      "n": 275408,
+      "hit_rate": 0.4811370766281299,
+      "mean_ret": 0.010605258155861493,
+      "excess": 0.001209307971683636
+    },
+    {
+      "near_size": 0.3,
+      "breakout_period": 40,
+      "drawdown_threshold": 0.3,
+      "low_pos_ratio": 0.5,
+      "n": 275408,
+      "hit_rate": 0.4811370766281299,
+      "mean_ret": 0.010605258155861493,
+      "excess": 0.001209307971683636
+    },
+    {
+      "near_size": 0.3,
+      "breakout_period": 60,
+      "drawdown_threshold": 0.3,
+      "low_pos_ratio": 0.5,
+      "n": 275408,
+      "hit_rate": 0.4811370766281299,
+      "mean_ret": 0.010605258155861493,
+      "excess": 0.001209307971683636
+    },
+    {
+      "near_size": 0.1,
+      "breakout_period": 10,
+      "drawdown_threshold": 0.15,
+      "low_pos_ratio": 0.3,
+      "n": 285031,
+      "hit_rate": 0.47850584673246066,
+      "mean_ret": 0.010296425025587285,
+      "excess": 0.0009004748414094283
+    },
+    {
+      "near_size": 0.1,
+      "breakout_period": 10,
+      "drawdown_threshold": 0.15,
+      "low_pos_ratio": 0.4,
+      "n": 285031,
+      "hit_rate": 0.47850584673246066,
+      "mean_ret": 0.010296425025587285,
+      "excess": 0.0009004748414094283
+    },
+    {
+      "near_size": 0.1,
+      "breakout_period": 20,
+      "drawdown_threshold": 0.15,
+      "low_pos_ratio": 0.3,
+      "n": 285031,
+      "hit_rate": 0.47850584673246066,
+      "mean_ret": 0.010296425025587285,
+      "excess": 0.0009004748414094283
+    },
+    {
+      "near_size": 0.1,
+      "breakout_period": 20,
+      "drawdown_threshold": 0.15,
+      "low_pos_ratio": 0.4,
+      "n": 285031,
+      "hit_rate": 0.47850584673246066,
+      "mean_ret": 0.010296425025587285,
+      "excess": 0.0009004748414094283
+    },
+    {
+      "near_size": 0.1,
+      "breakout_period": 40,
+      "drawdown_threshold": 0.15,
+      "low_pos_ratio": 0.3,
+      "n": 285031,
+      "hit_rate": 0.47850584673246066,
+      "mean_ret": 0.010296425025587285,
+      "excess": 0.0009004748414094283
+    },
+    {
+      "near_size": 0.1,
+      "breakout_period": 40,
+      "drawdown_threshold": 0.15,
+      "low_pos_ratio": 0.4,
+      "n": 285031,
+      "hit_rate": 0.47850584673246066,
+      "mean_ret": 0.010296425025587285,
+      "excess": 0.0009004748414094283
+    },
+    {
+      "near_size": 0.1,
+      "breakout_period": 60,
+      "drawdown_threshold": 0.15,
+      "low_pos_ratio": 0.3,
+      "n": 285031,
+      "hit_rate": 0.47850584673246066,
+      "mean_ret": 0.010296425025587285,
+      "excess": 0.0009004748414094283
+    },
+    {
+      "near_size": 0.1,
+      "breakout_period": 60,
+      "drawdown_threshold": 0.15,
+      "low_pos_ratio": 0.4,
+      "n": 285031,
+      "hit_rate": 0.47850584673246066,
+      "mean_ret": 0.010296425025587285,
+      "excess": 0.0009004748414094283
+    },
+    {
+      "near_size": 0.15,
+      "breakout_period": 10,
+      "drawdown_threshold": 0.15,
+      "low_pos_ratio": 0.3,
+      "n": 285031,
+      "hit_rate": 0.47850584673246066,
+      "mean_ret": 0.010296425025587285,
+      "excess": 0.0009004748414094283
+    },
+    {
+      "near_size": 0.15,
+      "breakout_period": 10,
+      "drawdown_threshold": 0.15,
+      "low_pos_ratio": 0.4,
+      "n": 285031,
+      "hit_rate": 0.47850584673246066,
+      "mean_ret": 0.010296425025587285,
+      "excess": 0.0009004748414094283
+    },
+    {
+      "near_size": 0.15,
+      "breakout_period": 20,
+      "drawdown_threshold": 0.15,
+      "low_pos_ratio": 0.3,
+      "n": 285031,
+      "hit_rate": 0.47850584673246066,
+      "mean_ret": 0.010296425025587285,
+      "excess": 0.0009004748414094283
+    },
+    {
+      "near_size": 0.15,
+      "breakout_period": 20,
+      "drawdown_threshold": 0.15,
+      "low_pos_ratio": 0.4,
+      "n": 285031,
+      "hit_rate": 0.47850584673246066,
+      "mean_ret": 0.010296425025587285,
+      "excess": 0.0009004748414094283
+    },
+    {
+      "near_size": 0.15,
+      "breakout_period": 40,
+      "drawdown_threshold": 0.15,
+      "low_pos_ratio": 0.3,
+      "n": 285031,
+      "hit_rate": 0.47850584673246066,
+      "mean_ret": 0.010296425025587285,
+      "excess": 0.0009004748414094283
+    },
+    {
+      "near_size": 0.15,
+      "breakout_period": 40,
+      "drawdown_threshold": 0.15,
+      "low_pos_ratio": 0.4,
+      "n": 285031,
+      "hit_rate": 0.47850584673246066,
+      "mean_ret": 0.010296425025587285,
+      "excess": 0.0009004748414094283
+    },
+    {
+      "near_size": 0.15,
+      "breakout_period": 60,
+      "drawdown_threshold": 0.15,
+      "low_pos_ratio": 0.3,
+      "n": 285031,
+      "hit_rate": 0.47850584673246066,
+      "mean_ret": 0.010296425025587285,
+      "excess": 0.0009004748414094283
+    },
+    {
+      "near_size": 0.15,
+      "breakout_period": 60,
+      "drawdown_threshold": 0.15,
+      "low_pos_ratio": 0.4,
+      "n": 285031,
+      "hit_rate": 0.47850584673246066,
+      "mean_ret": 0.010296425025587285,
+      "excess": 0.0009004748414094283
+    },
+    {
+      "near_size": 0.2,
+      "breakout_period": 10,
+      "drawdown_threshold": 0.15,
+      "low_pos_ratio": 0.3,
+      "n": 285031,
+      "hit_rate": 0.47850584673246066,
+      "mean_ret": 0.010296425025587285,
+      "excess": 0.0009004748414094283
+    },
+    {
+      "near_size": 0.2,
+      "breakout_period": 10,
+      "drawdown_threshold": 0.15,
+      "low_pos_ratio": 0.4,
+      "n": 285031,
+      "hit_rate": 0.47850584673246066,
+      "mean_ret": 0.010296425025587285,
+      "excess": 0.0009004748414094283
+    },
+    {
+      "near_size": 0.2,
+      "breakout_period": 20,
+      "drawdown_threshold": 0.15,
+      "low_pos_ratio": 0.3,
+      "n": 285031,
+      "hit_rate": 0.47850584673246066,
+      "mean_ret": 0.010296425025587285,
+      "excess": 0.0009004748414094283
+    },
+    {
+      "near_size": 0.2,
+      "breakout_period": 20,
+      "drawdown_threshold": 0.15,
+      "low_pos_ratio": 0.4,
+      "n": 285031,
+      "hit_rate": 0.47850584673246066,
+      "mean_ret": 0.010296425025587285,
+      "excess": 0.0009004748414094283
+    },
+    {
+      "near_size": 0.2,
+      "breakout_period": 40,
+      "drawdown_threshold": 0.15,
+      "low_pos_ratio": 0.3,
+      "n": 285031,
+      "hit_rate": 0.47850584673246066,
+      "mean_ret": 0.010296425025587285,
+      "excess": 0.0009004748414094283
+    },
+    {
+      "near_size": 0.2,
+      "breakout_period": 40,
+      "drawdown_threshold": 0.15,
+      "low_pos_ratio": 0.4,
+      "n": 285031,
+      "hit_rate": 0.47850584673246066,
+      "mean_ret": 0.010296425025587285,
+      "excess": 0.0009004748414094283
+    },
+    {
+      "near_size": 0.2,
+      "breakout_period": 60,
+      "drawdown_threshold": 0.15,
+      "low_pos_ratio": 0.3,
+      "n": 285031,
+      "hit_rate": 0.47850584673246066,
+      "mean_ret": 0.010296425025587285,
+      "excess": 0.0009004748414094283
+    },
+    {
+      "near_size": 0.2,
+      "breakout_period": 60,
+      "drawdown_threshold": 0.15,
+      "low_pos_ratio": 0.4,
+      "n": 285031,
+      "hit_rate": 0.47850584673246066,
+      "mean_ret": 0.010296425025587285,
+      "excess": 0.0009004748414094283
+    },
+    {
+      "near_size": 0.3,
+      "breakout_period": 10,
+      "drawdown_threshold": 0.15,
+      "low_pos_ratio": 0.3,
+      "n": 285031,
+      "hit_rate": 0.47850584673246066,
+      "mean_ret": 0.010296425025587285,
+      "excess": 0.0009004748414094283
+    },
+    {
+      "near_size": 0.3,
+      "breakout_period": 10,
+      "drawdown_threshold": 0.15,
+      "low_pos_ratio": 0.4,
+      "n": 285031,
+      "hit_rate": 0.47850584673246066,
+      "mean_ret": 0.010296425025587285,
+      "excess": 0.0009004748414094283
+    },
+    {
+      "near_size": 0.3,
+      "breakout_period": 20,
+      "drawdown_threshold": 0.15,
+      "low_pos_ratio": 0.3,
+      "n": 285031,
+      "hit_rate": 0.47850584673246066,
+      "mean_ret": 0.010296425025587285,
+      "excess": 0.0009004748414094283
+    },
+    {
+      "near_size": 0.3,
+      "breakout_period": 20,
+      "drawdown_threshold": 0.15,
+      "low_pos_ratio": 0.4,
+      "n": 285031,
+      "hit_rate": 0.47850584673246066,
+      "mean_ret": 0.010296425025587285,
+      "excess": 0.0009004748414094283
+    },
+    {
+      "near_size": 0.3,
+      "breakout_period": 40,
+      "drawdown_threshold": 0.15,
+      "low_pos_ratio": 0.3,
+      "n": 285031,
+      "hit_rate": 0.47850584673246066,
+      "mean_ret": 0.010296425025587285,
+      "excess": 0.0009004748414094283
+    },
+    {
+      "near_size": 0.3,
+      "breakout_period": 40,
+      "drawdown_threshold": 0.15,
+      "low_pos_ratio": 0.4,
+      "n": 285031,
+      "hit_rate": 0.47850584673246066,
+      "mean_ret": 0.010296425025587285,
+      "excess": 0.0009004748414094283
+    },
+    {
+      "near_size": 0.3,
+      "breakout_period": 60,
+      "drawdown_threshold": 0.15,
+      "low_pos_ratio": 0.3,
+      "n": 285031,
+      "hit_rate": 0.47850584673246066,
+      "mean_ret": 0.010296425025587285,
+      "excess": 0.0009004748414094283
+    },
+    {
+      "near_size": 0.3,
+      "breakout_period": 60,
+      "drawdown_threshold": 0.15,
+      "low_pos_ratio": 0.4,
+      "n": 285031,
+      "hit_rate": 0.47850584673246066,
+      "mean_ret": 0.010296425025587285,
+      "excess": 0.0009004748414094283
+    },
+    {
+      "near_size": 0.1,
+      "breakout_period": 10,
+      "drawdown_threshold": 0.2,
+      "low_pos_ratio": 0.5,
+      "n": 283764,
+      "hit_rate": 0.4786688938695536,
+      "mean_ret": 0.009961356113826833,
+      "excess": 0.0005654059296489756
+    },
+    {
+      "near_size": 0.1,
+      "breakout_period": 20,
+      "drawdown_threshold": 0.2,
+      "low_pos_ratio": 0.5,
+      "n": 283764,
+      "hit_rate": 0.4786688938695536,
+      "mean_ret": 0.009961356113826833,
+      "excess": 0.0005654059296489756
+    },
+    {
+      "near_size": 0.1,
+      "breakout_period": 40,
+      "drawdown_threshold": 0.2,
+      "low_pos_ratio": 0.5,
+      "n": 283764,
+      "hit_rate": 0.4786688938695536,
+      "mean_ret": 0.009961356113826833,
+      "excess": 0.0005654059296489756
+    },
+    {
+      "near_size": 0.1,
+      "breakout_period": 60,
+      "drawdown_threshold": 0.2,
+      "low_pos_ratio": 0.5,
+      "n": 283764,
+      "hit_rate": 0.4786688938695536,
+      "mean_ret": 0.009961356113826833,
+      "excess": 0.0005654059296489756
+    },
+    {
+      "near_size": 0.15,
+      "breakout_period": 10,
+      "drawdown_threshold": 0.2,
+      "low_pos_ratio": 0.5,
+      "n": 283764,
+      "hit_rate": 0.4786688938695536,
+      "mean_ret": 0.009961356113826833,
+      "excess": 0.0005654059296489756
+    },
+    {
+      "near_size": 0.15,
+      "breakout_period": 20,
+      "drawdown_threshold": 0.2,
+      "low_pos_ratio": 0.5,
+      "n": 283764,
+      "hit_rate": 0.4786688938695536,
+      "mean_ret": 0.009961356113826833,
+      "excess": 0.0005654059296489756
+    },
+    {
+      "near_size": 0.15,
+      "breakout_period": 40,
+      "drawdown_threshold": 0.2,
+      "low_pos_ratio": 0.5,
+      "n": 283764,
+      "hit_rate": 0.4786688938695536,
+      "mean_ret": 0.009961356113826833,
+      "excess": 0.0005654059296489756
+    },
+    {
+      "near_size": 0.15,
+      "breakout_period": 60,
+      "drawdown_threshold": 0.2,
+      "low_pos_ratio": 0.5,
+      "n": 283764,
+      "hit_rate": 0.4786688938695536,
+      "mean_ret": 0.009961356113826833,
+      "excess": 0.0005654059296489756
+    },
+    {
+      "near_size": 0.2,
+      "breakout_period": 10,
+      "drawdown_threshold": 0.2,
+      "low_pos_ratio": 0.5,
+      "n": 283764,
+      "hit_rate": 0.4786688938695536,
+      "mean_ret": 0.009961356113826833,
+      "excess": 0.0005654059296489756
+    },
+    {
+      "near_size": 0.2,
+      "breakout_period": 20,
+      "drawdown_threshold": 0.2,
+      "low_pos_ratio": 0.5,
+      "n": 283764,
+      "hit_rate": 0.4786688938695536,
+      "mean_ret": 0.009961356113826833,
+      "excess": 0.0005654059296489756
+    },
+    {
+      "near_size": 0.2,
+      "breakout_period": 40,
+      "drawdown_threshold": 0.2,
+      "low_pos_ratio": 0.5,
+      "n": 283764,
+      "hit_rate": 0.4786688938695536,
+      "mean_ret": 0.009961356113826833,
+      "excess": 0.0005654059296489756
+    },
+    {
+      "near_size": 0.2,
+      "breakout_period": 60,
+      "drawdown_threshold": 0.2,
+      "low_pos_ratio": 0.5,
+      "n": 283764,
+      "hit_rate": 0.4786688938695536,
+      "mean_ret": 0.009961356113826833,
+      "excess": 0.0005654059296489756
+    },
+    {
+      "near_size": 0.3,
+      "breakout_period": 10,
+      "drawdown_threshold": 0.2,
+      "low_pos_ratio": 0.5,
+      "n": 283764,
+      "hit_rate": 0.4786688938695536,
+      "mean_ret": 0.009961356113826833,
+      "excess": 0.0005654059296489756
+    },
+    {
+      "near_size": 0.3,
+      "breakout_period": 20,
+      "drawdown_threshold": 0.2,
+      "low_pos_ratio": 0.5,
+      "n": 283764,
+      "hit_rate": 0.4786688938695536,
+      "mean_ret": 0.009961356113826833,
+      "excess": 0.0005654059296489756
+    },
+    {
+      "near_size": 0.3,
+      "breakout_period": 40,
+      "drawdown_threshold": 0.2,
+      "low_pos_ratio": 0.5,
+      "n": 283764,
+      "hit_rate": 0.4786688938695536,
+      "mean_ret": 0.009961356113826833,
+      "excess": 0.0005654059296489756
+    },
+    {
+      "near_size": 0.3,
+      "breakout_period": 60,
+      "drawdown_threshold": 0.2,
+      "low_pos_ratio": 0.5,
+      "n": 283764,
+      "hit_rate": 0.4786688938695536,
+      "mean_ret": 0.009961356113826833,
+      "excess": 0.0005654059296489756
+    },
+    {
+      "near_size": 0.1,
+      "breakout_period": 10,
+      "drawdown_threshold": 0.15,
+      "low_pos_ratio": 0.5,
+      "n": 296850,
+      "hit_rate": 0.47751726461175675,
+      "mean_ret": 0.009843575096733542,
+      "excess": 0.00044762491255568443
+    },
+    {
+      "near_size": 0.1,
+      "breakout_period": 20,
+      "drawdown_threshold": 0.15,
+      "low_pos_ratio": 0.5,
+      "n": 296850,
+      "hit_rate": 0.47751726461175675,
+      "mean_ret": 0.009843575096733542,
+      "excess": 0.00044762491255568443
+    },
+    {
+      "near_size": 0.1,
+      "breakout_period": 40,
+      "drawdown_threshold": 0.15,
+      "low_pos_ratio": 0.5,
+      "n": 296850,
+      "hit_rate": 0.47751726461175675,
+      "mean_ret": 0.009843575096733542,
+      "excess": 0.00044762491255568443
+    },
+    {
+      "near_size": 0.1,
+      "breakout_period": 60,
+      "drawdown_threshold": 0.15,
+      "low_pos_ratio": 0.5,
+      "n": 296850,
+      "hit_rate": 0.47751726461175675,
+      "mean_ret": 0.009843575096733542,
+      "excess": 0.00044762491255568443
+    },
+    {
+      "near_size": 0.15,
+      "breakout_period": 10,
+      "drawdown_threshold": 0.15,
+      "low_pos_ratio": 0.5,
+      "n": 296850,
+      "hit_rate": 0.47751726461175675,
+      "mean_ret": 0.009843575096733542,
+      "excess": 0.00044762491255568443
+    },
+    {
+      "near_size": 0.15,
+      "breakout_period": 20,
+      "drawdown_threshold": 0.15,
+      "low_pos_ratio": 0.5,
+      "n": 296850,
+      "hit_rate": 0.47751726461175675,
+      "mean_ret": 0.009843575096733542,
+      "excess": 0.00044762491255568443
+    },
+    {
+      "near_size": 0.15,
+      "breakout_period": 40,
+      "drawdown_threshold": 0.15,
+      "low_pos_ratio": 0.5,
+      "n": 296850,
+      "hit_rate": 0.47751726461175675,
+      "mean_ret": 0.009843575096733542,
+      "excess": 0.00044762491255568443
+    },
+    {
+      "near_size": 0.15,
+      "breakout_period": 60,
+      "drawdown_threshold": 0.15,
+      "low_pos_ratio": 0.5,
+      "n": 296850,
+      "hit_rate": 0.47751726461175675,
+      "mean_ret": 0.009843575096733542,
+      "excess": 0.00044762491255568443
+    },
+    {
+      "near_size": 0.2,
+      "breakout_period": 10,
+      "drawdown_threshold": 0.15,
+      "low_pos_ratio": 0.5,
+      "n": 296850,
+      "hit_rate": 0.47751726461175675,
+      "mean_ret": 0.009843575096733542,
+      "excess": 0.00044762491255568443
+    },
+    {
+      "near_size": 0.2,
+      "breakout_period": 20,
+      "drawdown_threshold": 0.15,
+      "low_pos_ratio": 0.5,
+      "n": 296850,
+      "hit_rate": 0.47751726461175675,
+      "mean_ret": 0.009843575096733542,
+      "excess": 0.00044762491255568443
+    },
+    {
+      "near_size": 0.2,
+      "breakout_period": 40,
+      "drawdown_threshold": 0.15,
+      "low_pos_ratio": 0.5,
+      "n": 296850,
+      "hit_rate": 0.47751726461175675,
+      "mean_ret": 0.009843575096733542,
+      "excess": 0.00044762491255568443
+    },
+    {
+      "near_size": 0.2,
+      "breakout_period": 60,
+      "drawdown_threshold": 0.15,
+      "low_pos_ratio": 0.5,
+      "n": 296850,
+      "hit_rate": 0.47751726461175675,
+      "mean_ret": 0.009843575096733542,
+      "excess": 0.00044762491255568443
+    },
+    {
+      "near_size": 0.3,
+      "breakout_period": 10,
+      "drawdown_threshold": 0.15,
+      "low_pos_ratio": 0.5,
+      "n": 296850,
+      "hit_rate": 0.47751726461175675,
+      "mean_ret": 0.009843575096733542,
+      "excess": 0.00044762491255568443
+    },
+    {
+      "near_size": 0.3,
+      "breakout_period": 20,
+      "drawdown_threshold": 0.15,
+      "low_pos_ratio": 0.5,
+      "n": 296850,
+      "hit_rate": 0.47751726461175675,
+      "mean_ret": 0.009843575096733542,
+      "excess": 0.00044762491255568443
+    },
+    {
+      "near_size": 0.3,
+      "breakout_period": 40,
+      "drawdown_threshold": 0.15,
+      "low_pos_ratio": 0.5,
+      "n": 296850,
+      "hit_rate": 0.47751726461175675,
+      "mean_ret": 0.009843575096733542,
+      "excess": 0.00044762491255568443
+    },
+    {
+      "near_size": 0.3,
+      "breakout_period": 60,
+      "drawdown_threshold": 0.15,
+      "low_pos_ratio": 0.5,
+      "n": 296850,
+      "hit_rate": 0.47751726461175675,
+      "mean_ret": 0.009843575096733542,
+      "excess": 0.00044762491255568443
+    }
+  ],
+  "sensitivity": {
+    "macd.near_size": [
+      {
+        "value": 0.1,
+        "avg_excess": 0.0014605103160833545,
+        "n_configs": 36
+      },
+      {
+        "value": 0.15,
+        "avg_excess": 0.0014605103160833545,
+        "n_configs": 36
+      },
+      {
+        "value": 0.2,
+        "avg_excess": 0.0014605103160833545,
+        "n_configs": 36
+      },
+      {
+        "value": 0.3,
+        "avg_excess": 0.0014605103160833545,
+        "n_configs": 36
+      }
+    ],
+    "breakout.period": [
+      {
+        "value": 10,
+        "avg_excess": 0.0014605103160833545,
+        "n_configs": 36
+      },
+      {
+        "value": 20,
+        "avg_excess": 0.0014605103160833545,
+        "n_configs": 36
+      },
+      {
+        "value": 40,
+        "avg_excess": 0.0014605103160833545,
+        "n_configs": 36
+      },
+      {
+        "value": 60,
+        "avg_excess": 0.0014605103160833545,
+        "n_configs": 36
+      }
+    ],
+    "drawdown.threshold": [
+      {
+        "value": 0.15,
+        "avg_excess": 0.000749524865124847,
+        "n_configs": 48
+      },
+      {
+        "value": 0.2,
+        "avg_excess": 0.001233760062105486,
+        "n_configs": 48
+      },
+      {
+        "value": 0.3,
+        "avg_excess": 0.0023982460210197304,
+        "n_configs": 48
+      }
+    ],
+    "low_pos.ratio": [
+      {
+        "value": 0.3,
+        "avg_excess": 0.001820189390285852,
+        "n_configs": 48
+      },
+      {
+        "value": 0.4,
+        "avg_excess": 0.0018205619533347792,
+        "n_configs": 48
+      },
+      {
+        "value": 0.5,
+        "avg_excess": 0.000740779604629432,
+        "n_configs": 48
+      }
+    ]
+  },
+  "baseline_mean_ret": 0.009395950184177857,
+  "sample": 400,
+  "horizon": 20,
+  "grid": {
+    "macd.near_size": [
+      0.1,
+      0.15,
+      0.2,
+      0.3
+    ],
+    "breakout.period": [
+      10,
+      20,
+      40,
+      60
+    ],
+    "drawdown.threshold": [
+      0.15,
+      0.2,
+      0.3
+    ],
+    "low_pos.ratio": [
+      0.3,
+      0.4,
+      0.5
+    ]
+  }
+}
