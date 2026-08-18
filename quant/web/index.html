@@ -270,6 +270,9 @@
                 <button :class="{active: tab === 'yujie'}" @click="tab='yujie'; yjView='list'; yjPage=1; loadYujie()">
                     <span class="icon">💠</span> 玉姐精选
                 </button>
+                <button :class="{active: tab === 'btreport'}" @click="tab='btreport'; loadBtReport()">
+                    <span class="icon">📈</span> 回测报告
+                </button>
             </nav>
             <div class="side-footer">
                 数据仅作学习参考<br>不构成投资建议
@@ -683,6 +686,11 @@
         <div class="toolbar" style="margin-bottom:10px;">
             <button class="button" @click="runYujieScan" :disabled="yjRunning" style="white-space:nowrap;">▶ 立即扫描</button>
             <button class="button ghost" @click="openYjParams" style="white-space:nowrap;">⚙️ 参数</button>
+            <span style="display:inline-flex;align-items:center;gap:2px;border:1px solid #d0d0d0;border-radius:6px;overflow:hidden;font-size:12px;">
+                <button v-for="m in [{v:0,l:'全部'},{v:5,l:'5+'},{v:7,l:'7+'}]" :key="m.v"
+                        @click="yjMinScore=m.v"
+                        :style="'border:0;padding:5px 10px;cursor:pointer;white-space:nowrap;font-size:12px;' + (yjMinScore===m.v ? 'background:#1976d2;color:#fff;' : 'background:#fff;color:#333;')">{{ m.l }}</button>
+            </span>
             <span :class="'badge ' + (yjRunning ? 'badge-neutral' : (yjStatus.last_status === 'ok' ? 'badge-buy' : 'badge-neutral'))" style="font-size:12px;padding:3px 10px;white-space:nowrap;">
                 {{ yjRunning ? '🟢 扫描中…' : (yjStatus.last_status === 'ok' ? '✅ 已完成' : '⚪ 待运行') }}
             </span>
@@ -728,7 +736,7 @@
 
         <!-- 榜单 + 分页 -->
         <div class="card" style="margin:0;">
-            <div class="card-title" style="font-size:14px;">🏆 全部榜单 <span class="hint" style="font-size:11px;">共 {{ yjPicks.length }} 只，每页 {{ yjPageSize }} 条，点击名称进详情</span></div>
+            <div class="card-title" style="font-size:14px;">🏆 全部榜单 <span class="hint" style="font-size:11px;">共 {{ yjFilteredPicks.length }} 只（{{ yjMinScore > 0 ? yjMinScore + '分以上' : '全部' }}），每页 {{ yjPageSize }} 条，点击名称进详情</span></div>
             <table style="font-size:12px;">
                 <thead><tr><th>#</th><th>代码</th><th>名称</th><th>现价</th><th>涨跌%</th><th>分</th><th>命中信号</th></tr></thead>
                 <tbody>
@@ -742,7 +750,7 @@
                         <td><b style="color:#c62828;">{{ p.score }}</b></td>
                         <td><span v-for="h in p.hits" :key="h" class="rule-chip" style="font-size:10px;padding:1px 6px;margin:1px 2px;">{{ h }}</span></td>
                     </tr>
-                    <tr v-if="!yjPicks.length"><td colspan="7" class="empty" style="padding:20px;">{{ yjRunning ? '扫描中' : '暂无数据，点击立即扫描' }}</td></tr>
+                    <tr v-if="!yjPagedPicks.length"><td colspan="7" class="empty" style="padding:20px;">{{ yjRunning ? '扫描中' : (yjFilteredPicks.length === 0 && yjPicks.length > 0 ? '当前分数档无股票，可切换「全部」' : '暂无数据，点击立即扫描') }}</td></tr>
                 </tbody>
             </table>
             <!-- 分页器 -->
@@ -794,6 +802,77 @@
                 <div id="yjKlineChart" class="chart" style="height:360px;"></div>
             </div>
         </div>
+        </template>
+    </div>
+
+    <!-- ===== 回测报告 tab ===== -->
+    <div v-show="tab === 'btreport'" class="container">
+        <div v-if="btLoading" class="card" style="padding:20px;text-align:center;color:#888;">加载回测报告中…</div>
+        <div v-else-if="!btReport || !btReport.exists" class="card" style="padding:20px;text-align:center;color:#888;">
+            {{ btReport && btReport.msg ? btReport.msg : '尚未生成回测报告' }}<br>
+            <span class="hint" style="font-size:12px;">在服务器执行 <code>python backtest_yujie.py all</code> 后刷新本页</span>
+        </div>
+        <template v-else>
+            <div class="card" style="margin:0 0 10px;padding:12px 16px;display:flex;flex-wrap:wrap;gap:16px;align-items:center;">
+                <div style="font-size:15px;font-weight:600;">📈 玉姐精选评分回测报告</div>
+                <span class="badge badge-buy" style="font-size:12px;">信号 {{ btReport.report.signal_count.toLocaleString() }} 条</span>
+                <span class="hint" style="font-size:12px;">持有期 5/10/20/60 天 · 信号日收盘买入持有 N 天 · 按评分分桶检验区分度</span>
+            </div>
+
+            <div class="card" style="margin:0 0 10px;padding:14px 16px;">
+                <div class="card-title" style="font-size:14px;margin-bottom:8px;">一、整体表现 vs 同股随机入场基准</div>
+                <table style="font-size:12px;width:100%;">
+                    <thead><tr>
+                        <th style="text-align:left;padding:4px 8px;">持有期</th>
+                        <th style="padding:4px 8px;">信号数</th>
+                        <th style="padding:4px 8px;">命中率</th>
+                        <th style="padding:4px 8px;">平均收益</th>
+                        <th style="padding:4px 8px;">中位收益</th>
+                        <th style="padding:4px 8px;">基准收益</th>
+                        <th style="padding:4px 8px;">超额</th>
+                    </tr></thead>
+                    <tbody>
+                        <tr v-for="h in btHorizons()" :key="h">
+                            <td style="padding:4px 8px;text-align:left;"><b>{{ h }} 天</b></td>
+                            <td style="padding:4px 8px;text-align:center;">{{ btReport.report.horizons[h].n.toLocaleString() }}</td>
+                            <td style="padding:4px 8px;text-align:center;">{{ (btReport.report.horizons[h].hit_rate * 100).toFixed(1) }}%</td>
+                            <td style="padding:4px 8px;text-align:center;" :class="btReport.report.horizons[h].mean_ret >= 0 ? 'up' : 'down'">{{ btFmtPct(btReport.report.horizons[h].mean_ret) }}</td>
+                            <td style="padding:4px 8px;text-align:center;" :class="btReport.report.horizons[h].median_ret >= 0 ? 'up' : 'down'">{{ btFmtPct(btReport.report.horizons[h].median_ret) }}</td>
+                            <td style="padding:4px 8px;text-align:center;color:#888;">{{ btFmtPct(btReport.report.horizons[h].baseline_mean_ret) }}</td>
+                            <td style="padding:4px 8px;text-align:center;" :class="btReport.report.horizons[h].excess >= 0 ? 'up' : 'down'"><b>{{ btFmtPct(btReport.report.horizons[h].excess) }}</b></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="card" style="margin:0;padding:14px 16px;">
+                <div class="card-title" style="font-size:14px;margin-bottom:8px;">二、按评分分桶（检验区分度）</div>
+                <div class="hint" style="font-size:12px;margin-bottom:8px;">每格为「平均收益（命中率）」；若高分档收益/命中率单调高于低分档，说明评分有区分度。</div>
+                <table style="font-size:12px;width:100%;">
+                    <thead><tr>
+                        <th style="text-align:left;padding:4px 8px;">评分档</th>
+                        <th v-for="h in btHorizons()" :key="h" style="padding:4px 8px;text-align:center;">{{ h }} 天</th>
+                    </tr></thead>
+                    <tbody>
+                        <tr v-for="label in btBuckets()" :key="label">
+                            <td style="padding:4px 8px;text-align:left;"><b>{{ label }}</b></td>
+                            <td v-for="h in btHorizons()" :key="h" style="padding:4px 8px;text-align:center;font-size:11px;">
+                                <template v-if="btReport.report.buckets[h] && btReport.report.buckets[h][label]">
+                                    <span :class="btReport.report.buckets[h][label].mean_ret >= 0 ? 'up' : 'down'">{{ btFmtPct(btReport.report.buckets[h][label].mean_ret) }}</span><br>
+                                    <span style="color:#888;font-size:10px;">n={{ btReport.report.buckets[h][label].n.toLocaleString() }} · {{ (btReport.report.buckets[h][label].hit_rate * 100).toFixed(0) }}%</span>
+                                </template>
+                                <span v-else style="color:#ccc;">-</span>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+                <div style="margin-top:12px;padding:10px;background:#f6f8fa;border-radius:6px;font-size:12px;color:#555;line-height:1.7;">
+                    <b>结论要点：</b><br>
+                    · 「超额」稳定为正 → 玉姐精选相对随机选时有 alpha；<br>
+                    · 高分档平均收益/命中率单调高于低分档 → 评分有区分度；<br>
+                    · 实战建议只采纳 <b>5+ 分</b>（尤其 <b>7+ 分</b>）信号，低分档收益接近基准甚至跑输。
+                </div>
+            </div>
         </template>
     </div>
 

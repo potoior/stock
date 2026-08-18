@@ -774,10 +774,13 @@ def yujie_status():
 
 
 @app.get("/api/yujie/picks")
-def yujie_picks():
+def yujie_picks(min_score: float = 0):
     import yujie_scan
 
-    return {"date": datetime.now().strftime("%Y-%m-%d"), "picks": yujie_scan.load_picks()}
+    picks = yujie_scan.load_picks()
+    if min_score > 0:
+        picks = [p for p in picks if float(p.get("score", 0)) >= min_score]
+    return {"date": datetime.now().strftime("%Y-%m-%d"), "picks": picks}
 
 
 @app.post("/api/yujie/run")
@@ -832,6 +835,22 @@ def yujie_score(q: str = ""):
                 "hits": hits, "detail": detail, "rank": rank}
     except Exception as e:
         return {"ok": False, "msg": f"计算失败: {e}"}
+
+
+@app.get("/api/yujie/backtest")
+def yujie_backtest():
+    """返回玉姐精选回测报告（backtest_yujie.py 生成的 json）。"""
+    import json
+    from pathlib import Path
+
+    report_path = Path(__file__).parent / "yujie_backtest_report.json"
+    if not report_path.exists():
+        return {"exists": False, "msg": "尚未生成回测报告，请先运行 backtest_yujie.py"}
+    try:
+        data = json.loads(report_path.read_text(encoding="utf-8"))
+        return {"exists": True, "report": data}
+    except Exception as e:
+        return {"exists": False, "msg": f"读取报告失败: {e}"}
 
 
 def _start_yujie_scheduler():

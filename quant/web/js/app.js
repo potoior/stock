@@ -38,6 +38,9 @@ createApp({
             yjScoreItem: null, yjScoreScoring: false,
             yjSelected: null, yjKlineChart: null, yjKlineLoading: false,
             yjView: 'list', yjPage: 1, yjPageSize: 50, yjJumpPage: '',
+            yjMinScore: 5,  // 最低展示分数（回测验证 5+ 分档有 alpha，7+ 极稀缺）
+            // backtest report
+            btReport: null, btLoading: false,
         };
     },
     computed: {
@@ -92,12 +95,16 @@ createApp({
             add('深回撤(距120日高)', 'drawdown', !!d.drawdown, boolFmt);
             return r;
         },
+        yjFilteredPicks() {
+            const m = this.yjMinScore || 0;
+            return m > 0 ? this.yjPicks.filter(p => (p.score || 0) >= m) : this.yjPicks;
+        },
         yjPagedPicks() {
             const start = (this.yjPage - 1) * this.yjPageSize;
-            return this.yjPicks.slice(start, start + this.yjPageSize);
+            return this.yjFilteredPicks.slice(start, start + this.yjPageSize);
         },
         yjTotalPages() {
-            return Math.ceil(this.yjPicks.length / this.yjPageSize) || 1;
+            return Math.ceil(this.yjFilteredPicks.length / this.yjPageSize) || 1;
         },
         yjPageRange() {
             const total = this.yjTotalPages, cur = this.yjPage;
@@ -115,13 +122,15 @@ createApp({
             if (location.hash !== hashTab) {
                 history.pushState(null, '', hashTab);
             }
-        }
+        },
+        // 切换分数档时回到第 1 页
+        yjMinScore() { this.yjPage = 1; },
     },
     methods: {
         toastMsg(msg) { this.toast = msg; setTimeout(() => this.toast = '', 2500); },
         // 浏览器前进后退或外部改 hash 时,同步 tab + 触发对应 load
         onHashChange() {
-            const VALID = ['watchlist', 'market', 'analyze', 'strategies', 'agent', 'dailyscan', 'yujie'];
+            const VALID = ['watchlist', 'market', 'analyze', 'strategies', 'agent', 'dailyscan', 'yujie', 'btreport'];
             const hashTab = location.hash.slice(1);
             if (!VALID.includes(hashTab) || this.tab === hashTab) return;
             this.tab = hashTab;
@@ -131,6 +140,7 @@ createApp({
             else if (hashTab === 'agent') this.loadAgentStatus();
             else if (hashTab === 'dailyscan') this.loadDailyScan();
             else if (hashTab === 'yujie') { this.yjView = 'list'; this.yjPage = 1; this.loadYujie(); }
+            else if (hashTab === 'btreport') this.loadBtReport();
         },
         async searchStock(q) {
             if (!q || q.length < 2) { this.searchResults = []; this.showSearch = false; return; }
@@ -705,6 +715,28 @@ createApp({
                 this.yjPage = 1;
             } catch (e) {}
         },
+        async loadBtReport() {
+            if (this.btReport) return;  // 已加载则不重复请求
+            this.btLoading = true;
+            try {
+                const r = await (await fetch('/api/yujie/backtest')).json();
+                this.btReport = r;
+            } catch (e) {
+                this.btReport = { exists: false, msg: '加载失败' };
+            } finally {
+                this.btLoading = false;
+            }
+        },
+        btFmtPct(x) {
+            if (x == null || isNaN(x)) return '-';
+            const v = (x * 100).toFixed(2);
+            return (x >= 0 ? '+' : '') + v + '%';
+        },
+        btHorizons() {
+            if (!this.btReport || !this.btReport.report) return [];
+            return Object.keys(this.btReport.report.horizons).sort((a, b) => Number(a) - Number(b));
+        },
+        btBuckets() { return ['1-2', '3-4', '5-6', '7+']; },
         yjSelectStock(p) {
             this.yjSelected = p;
             this.loadYjKline(p.code);
@@ -946,9 +978,10 @@ createApp({
     },
     mounted() {
         // 启动时根据 hash 恢复 tab
-        const VALID = ['watchlist', 'market', 'analyze', 'strategies', 'agent', 'dailyscan', 'yujie'];
+        const VALID = ['watchlist', 'market', 'analyze', 'strategies', 'agent', 'dailyscan', 'yujie', 'btreport'];
         const hashTab = location.hash.slice(1);
         if (VALID.includes(hashTab)) this.tab = hashTab;
+        if (hashTab === 'btreport') this.loadBtReport();
         // 监听浏览器前进后退/外部 hash 变化
         window.addEventListener('hashchange', this.onHashChange);
 
