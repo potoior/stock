@@ -463,6 +463,7 @@
     <div v-show="tab === 'strategies'" class="container">
         <div class="toolbar">
             <button class="button" @click="openRuleEditor()">➕ 添加策略（自然语言规则）</button>
+            <button class="button ghost" @click="openImportLib()">📚 从策略大全引入</button>
             <span class="hint">修改后自动保存，下次分析立即生效 | 自定义策略由 AI 根据规则+指标判定</span>
         </div>
 
@@ -1035,6 +1036,65 @@
             <div class="toolbar" style="justify-content:flex-end;margin-top:20px;">
                 <button class="button ghost" @click="showEditor=false">取消</button>
                 <button class="button" @click="saveStrategy">保存策略</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 从策略大全引入弹窗 -->
+    <div class="modal" v-if="showImportLib">
+        <div class="modal-box" style="max-width:780px;">
+            <div class="modal-title">📚 从策略大全引入策略</div>
+            <div class="hint" style="margin-bottom:12px;">已实现的内置策略可直接「启用」；未实现的策略可「创建AI策略」，基于书中描述生成自然语言规则模板交由 AI 判定。</div>
+
+            <div v-if="!strategyLib" style="text-align:center;padding:20px;color:#888;">加载中…</div>
+            <template v-else>
+                <!-- 来源切换 -->
+                <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px;">
+                    <button v-for="(s, idx) in strategyLib.sources" :key="s.id"
+                            :class="['button', slImportActive === idx ? '' : 'ghost']"
+                            style="font-size:12px;padding:5px 10px;"
+                            @click="slImportActive = idx">
+                        {{ slSourceType(s.type) }} {{ s.name }}
+                    </button>
+                </div>
+
+                <div style="max-height:480px;overflow-y:auto;border:1px solid #eee;border-radius:6px;padding:8px 12px;">
+                    <template v-for="(s, idx) in strategyLib.sources" :key="s.id">
+                    <div v-show="slImportActive === idx">
+                        <div v-for="(cat, ci) in s.categories" :key="ci" style="margin-bottom:14px;">
+                            <div style="font-weight:600;font-size:13px;color:#333;border-left:3px solid #4caf50;padding-left:8px;margin-bottom:6px;">
+                                {{ cat.name }}
+                            </div>
+                            <div v-for="(st, sti) in cat.strategies" :key="sti" style="border-bottom:1px solid #f5f5f5;padding:8px 0;">
+                                <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">
+                                    <div style="flex:1;">
+                                        <div style="font-size:13px;font-weight:600;">
+                                            {{ st.name }}
+                                            <span v-if="st.implemented" class="badge badge-buy" style="font-size:9px;padding:1px 5px;">已实现</span>
+                                            <span v-else class="badge badge-neutral" style="font-size:9px;padding:1px 5px;">未实现</span>
+                                        </div>
+                                        <div style="font-size:11px;color:#777;margin-top:2px;line-height:1.5;">{{ st.desc }}</div>
+                                    </div>
+                                    <div style="flex-shrink:0;">
+                                        <!-- 已实现且当前已启用 -->
+                                        <span v-if="st.implemented && isBuiltinEnabled(st.engine_id)" class="badge badge-buy" style="font-size:11px;">✓ 已启用</span>
+                                        <!-- 已实现但未启用 -->
+                                        <button v-else-if="st.implemented" class="button sm" style="font-size:11px;padding:3px 10px;"
+                                                @click="importEnableBuiltin(st)">启用</button>
+                                        <!-- 未实现 → 创建AI策略 -->
+                                        <button v-else class="button sm ghost" style="font-size:11px;padding:3px 10px;"
+                                                @click="importAsCustom(s, st)">创建AI策略</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    </template>
+                </div>
+            </template>
+
+            <div class="toolbar" style="justify-content:flex-end;margin-top:16px;">
+                <button class="button ghost" @click="showImportLib=false">关闭</button>
             </div>
         </div>
     </div>

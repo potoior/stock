@@ -45,6 +45,8 @@ createApp({
             btReport: null, btLoading: false,
             // strategy library
             strategyLib: null, slLoading: false, slActive: 0,
+            // strategy library import modal
+            showImportLib: false, slImportActive: 0,
         };
     },
     computed: {
@@ -892,6 +894,38 @@ createApp({
         slStatsImpl(st) { return st.implemented || 0; },
         slStatsNotImpl(st) { return st.not_implemented || (this.slStatsTotal(st) - this.slStatsImpl(st)); },
         slHasScore(arr) { return (arr || []).some(s => s.score != null); },
+        async openImportLib() {
+            this.showImportLib = true;
+            if (!this.strategyLib) await this.loadStrategyLib();
+            // 确保策略列表是最新的(用于判断启用状态)
+            if (!this.strategies.length) await this.loadStrategies();
+        },
+        isBuiltinEnabled(engineId) {
+            if (!engineId) return false;
+            const s = this.strategies.find(x => x.id === engineId && x.builtin);
+            return s ? !!s.enabled : false;
+        },
+        async importEnableBuiltin(st) {
+            const sid = st.engine_id;
+            const s = this.strategies.find(x => x.id === sid && x.builtin);
+            if (!s) { this.toastMsg('未找到内置策略 ' + sid); return; }
+            if (!s.enabled) {
+                s.enabled = true;
+                await this.saveStrategyRow(s);
+            }
+            this.toastMsg('已启用 ' + st.name);
+        },
+        importAsCustom(source, st) {
+            // 基于策略大全描述生成自然语言规则模板，打开规则编辑器
+            const srcName = source.name.replace(/[《》]/g, '');
+            const buy = `按照《${srcName}》「${st.name}」策略：${st.desc}。当满足该策略的买入条件时买入。`;
+            const sell = `按照「${st.name}」策略的退出规则：出现反向信号、或趋势走弱、或止损条件触发时卖出。`;
+            this.editorId = '';
+            this.editor = { name: st.name + '(AI)', buy_rule: buy, sell_rule: sell };
+            this.showImportLib = false;
+            this.showEditor = true;
+            this.toastMsg('已填充模板，请根据需要编辑后保存');
+        },
         yjSelectStock(p) {
             this.yjSelected = p;
             this.loadYjKline(p.code);
