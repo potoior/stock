@@ -887,6 +887,38 @@ def strategy_library():
         return {"error": f"读取策略库失败: {e}"}
 
 
+@app.get("/api/builtin/backtest")
+def builtin_backtest():
+    """返回内置策略批量回测报告（backtest_builtin.py 生成的 json）。"""
+    import json
+    from pathlib import Path
+
+    report_path = Path(__file__).parent / "builtin_backtest_report.json"
+    if not report_path.exists():
+        return {"exists": False, "msg": "尚未生成回测报告，请先运行 backtest_builtin.py backtest"}
+    try:
+        data = json.loads(report_path.read_text(encoding="utf-8"))
+        return {"exists": True, "report": data}
+    except Exception as e:
+        return {"exists": False, "msg": f"读取报告失败: {e}"}
+
+
+@app.get("/api/builtin/grid")
+def builtin_grid():
+    """返回内置策略参数网格扫描报告（backtest_builtin.py grid 生成的 json）。"""
+    import json
+    from pathlib import Path
+
+    report_path = Path(__file__).parent / "builtin_grid_report.json"
+    if not report_path.exists():
+        return {"exists": False, "msg": "尚未生成网格报告，请先运行 backtest_builtin.py grid"}
+    try:
+        data = json.loads(report_path.read_text(encoding="utf-8"))
+        return {"exists": True, "report": data}
+    except Exception as e:
+        return {"exists": False, "msg": f"读取报告失败: {e}"}
+
+
 def _start_yujie_scheduler():
     """玉姐精选已合并入 daily_scan 调度器(9:00 一起跑),这里不再独立调度。
     保留函数只是为了向后兼容外部调用。

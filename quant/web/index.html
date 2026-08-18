@@ -840,6 +840,19 @@
 
     <!-- ===== 回测报告 tab ===== -->
     <div v-show="tab === 'btreport'" class="container">
+        <!-- 报告类型切换 -->
+        <div class="card" style="margin:0 0 10px;padding:10px 12px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
+            <div style="font-size:14px;font-weight:600;margin-right:8px;">📈 回测报告</div>
+            <button :class="['button', btView === 'yujie' ? '' : 'ghost']" style="font-size:12px;padding:5px 12px;"
+                    @click="btView='yujie'; loadBtReport()">💠 玉姐精选</button>
+            <button :class="['button', btView === 'builtin' ? '' : 'ghost']" style="font-size:12px;padding:5px 12px;"
+                    @click="btView='builtin'; loadBuiltinBt()">🧩 内置策略</button>
+            <button :class="['button', btView === 'grid' ? '' : 'ghost']" style="font-size:12px;padding:5px 12px;"
+                    @click="btView='grid'; loadBuiltinGrid()">⚙️ 参数寻优</button>
+        </div>
+
+        <!-- ===== 玉姐精选回测 ===== -->
+        <template v-if="btView === 'yujie'">
         <div v-if="btLoading" class="card" style="padding:20px;text-align:center;color:#888;">加载回测报告中…</div>
         <div v-else-if="!btReport || !btReport.exists" class="card" style="padding:20px;text-align:center;color:#888;">
             {{ btReport && btReport.msg ? btReport.msg : '尚未生成回测报告' }}<br>
@@ -847,7 +860,7 @@
         </div>
         <template v-else>
             <div class="card" style="margin:0 0 10px;padding:12px 16px;display:flex;flex-wrap:wrap;gap:16px;align-items:center;">
-                <div style="font-size:15px;font-weight:600;">📈 玉姐精选评分回测报告</div>
+                <div style="font-size:15px;font-weight:600;">💠 玉姐精选评分回测报告</div>
                 <span class="badge badge-buy" style="font-size:12px;">信号 {{ btReport.report.signal_count.toLocaleString() }} 条</span>
                 <span class="hint" style="font-size:12px;">持有期 5/10/20/60 天 · 信号日收盘买入持有 N 天 · 按评分分桶检验区分度</span>
             </div>
@@ -906,6 +919,110 @@
                     · 实战建议只采纳 <b>5+ 分</b>（尤其 <b>7+ 分</b>）信号，低分档收益接近基准甚至跑输。
                 </div>
             </div>
+        </template>
+        </template>
+
+        <!-- ===== 内置策略回测 ===== -->
+        <template v-if="btView === 'builtin'">
+        <div v-if="btBuiltinLoading" class="card" style="padding:20px;text-align:center;color:#888;">加载内置策略回测报告中…</div>
+        <div v-else-if="!btBuiltin || !btBuiltin.exists" class="card" style="padding:20px;text-align:center;color:#888;">
+            {{ btBuiltin && btBuiltin.msg ? btBuiltin.msg : '尚未生成回测报告' }}<br>
+            <span class="hint" style="font-size:12px;">在服务器执行 <code>python backtest_builtin.py backtest</code> 后刷新本页</span>
+        </div>
+        <template v-else>
+            <div class="card" style="margin:0 0 10px;padding:12px 16px;display:flex;flex-wrap:wrap;gap:16px;align-items:center;">
+                <div style="font-size:15px;font-weight:600;">🧩 内置策略批量回测报告</div>
+                <span class="hint" style="font-size:12px;">19 个内置策略 · 4376 只股票 · 持有期 5/10/20/60 天 · 按 20 天超额降序</span>
+            </div>
+
+            <div class="card" style="margin:0 0 10px;padding:14px 16px;">
+                <div class="card-title" style="font-size:14px;margin-bottom:8px;">各策略超额收益对比（按 20 天超额降序）</div>
+                <div class="hint" style="font-size:11px;margin-bottom:8px;">绿色=正alpha,红色=负alpha(应关掉)。麻雀战术是止盈策略无买入信号,信号数0属正常。</div>
+                <table style="font-size:12px;width:100%;">
+                    <thead><tr>
+                        <th style="text-align:left;padding:4px 8px;">策略</th>
+                        <th style="padding:4px 8px;">信号数</th>
+                        <th style="padding:4px 8px;">5天超额</th>
+                        <th style="padding:4px 8px;">10天超额</th>
+                        <th style="padding:4px 8px;">20天超额</th>
+                        <th style="padding:4px 8px;">60天超额</th>
+                        <th style="padding:4px 8px;">20天命中</th>
+                        <th style="padding:4px 8px;">20天平均</th>
+                    </tr></thead>
+                    <tbody>
+                        <tr v-for="s in btBuiltinSorted()" :key="s.id" style="border-top:1px solid #f0f0f0;">
+                            <td style="padding:5px 8px;text-align:left;"><b>{{ s.name }}</b></td>
+                            <td style="padding:5px 8px;text-align:center;">{{ s.signal_count.toLocaleString() }}</td>
+                            <td v-for="h in [5,10,20,60]" :key="h" style="padding:5px 8px;text-align:center;"
+                                :class="btExcessClass(s, h)">{{ btExcessVal(s, h) }}</td>
+                            <td style="padding:5px 8px;text-align:center;color:#888;">{{ s.horizons['20'] ? (s.horizons['20'].hit_rate*100).toFixed(1)+'%' : '-' }}</td>
+                            <td style="padding:5px 8px;text-align:center;" :class="s.horizons['20'] && s.horizons['20'].mean_ret >= 0 ? 'up' : 'down'">{{ s.horizons['20'] ? btFmtPct(s.horizons['20'].mean_ret) : '-' }}</td>
+                        </tr>
+                    </tbody>
+                </table>
+                <div style="margin-top:12px;padding:10px;background:#f6f8fa;border-radius:6px;font-size:12px;color:#555;line-height:1.7;">
+                    <b>关键结论：</b><br>
+                    · <b>最强 alpha</b>: BOLL 布林线(20天 +1.04%, 60天 +1.33%)、DMI+PSY 超跌(20天 +1.09%)、SAR 止损、MACD 金叉;<br>
+                    · <b>负 alpha 应关</b>: 均线组合(60天 -1.87%)、三分法(60天 -1.19%)、量价背离(60天 -0.58%)、反弹量化(60天 -0.18%);<br>
+                    · 60 天超额普遍高于 20 天 → 中期持有更优;信号数过少的策略(如共振)统计意义弱。
+                </div>
+            </div>
+        </template>
+        </template>
+
+        <!-- ===== 参数寻优 ===== -->
+        <template v-if="btView === 'grid'">
+        <div v-if="btGridLoading" class="card" style="padding:20px;text-align:center;color:#888;">加载参数寻优报告中…</div>
+        <div v-else-if="!btGrid || !btGrid.exists" class="card" style="padding:20px;text-align:center;color:#888;">
+            {{ btGrid && btGrid.msg ? btGrid.msg : '尚未生成网格报告' }}<br>
+            <span class="hint" style="font-size:12px;">在服务器执行 <code>python backtest_builtin.py grid</code> 后刷新本页</span>
+        </div>
+        <template v-else>
+            <div class="card" style="margin:0 0 10px;padding:12px 16px;display:flex;flex-wrap:wrap;gap:16px;align-items:center;">
+                <div style="font-size:15px;font-weight:600;">⚙️ 内置策略参数网格寻优</div>
+                <span class="badge badge-buy" style="font-size:12px;">基准 {{ btFmtPct(btGrid.report.baseline) }}</span>
+                <span class="hint" style="font-size:12px;">抽样 {{ btGrid.report.sample }} 只 · 持有 {{ btGrid.report.horizon }} 天 · MACD/KDJ/BOLL/DMI 四策略</span>
+            </div>
+
+            <div v-for="(srep, sid) in btGrid.report.strategies" :key="sid" class="card" style="margin:0 0 10px;padding:14px 16px;">
+                <div class="card-title" style="font-size:14px;margin-bottom:8px;">{{ sid.toUpperCase() }} · Top 5 配置</div>
+                <table style="font-size:12px;width:100%;">
+                    <thead><tr>
+                        <th style="text-align:left;padding:4px 8px;">参数</th>
+                        <th style="padding:4px 8px;">信号数</th>
+                        <th style="padding:4px 8px;">命中率</th>
+                        <th style="padding:4px 8px;">平均</th>
+                        <th style="padding:4px 8px;">超额</th>
+                    </tr></thead>
+                    <tbody>
+                        <tr v-for="(c, ci) in srep.configs.slice(0, 5)" :key="ci" style="border-top:1px solid #f0f0f0;">
+                            <td style="padding:5px 8px;text-align:left;font-family:monospace;font-size:11px;">{{ JSON.stringify(c.params) }}</td>
+                            <td style="padding:5px 8px;text-align:center;">{{ c.n.toLocaleString() }}</td>
+                            <td style="padding:5px 8px;text-align:center;color:#888;">{{ (c.hit_rate*100).toFixed(1) }}%</td>
+                            <td style="padding:5px 8px;text-align:center;" :class="c.mean_ret >= 0 ? 'up' : 'down'">{{ btFmtPct(c.mean_ret) }}</td>
+                            <td style="padding:5px 8px;text-align:center;" :class="c.excess >= 0 ? 'up' : 'down'"><b>{{ btFmtPct(c.excess) }}</b></td>
+                        </tr>
+                    </tbody>
+                </table>
+                <div style="margin-top:10px;padding:8px;background:#f6f8fa;border-radius:6px;font-size:11px;color:#555;line-height:1.7;">
+                    <b>单参数敏感度:</b><br>
+                    <span v-for="(sens, k) in srep.sensitivity" :key="k" style="display:inline-block;margin-right:16px;">
+                        <b>{{ k }}</b>:
+                        <span v-for="(e, v) in btSortedSens(sens)" :key="v" style="margin-right:6px;"
+                              :class="e >= 0 ? 'up' : 'down'">{{ v }}={{ btFmtPct(e) }}</span>
+                    </span>
+                </div>
+            </div>
+            <div class="card" style="margin:0;padding:14px 16px;">
+                <div style="font-size:12px;color:#555;line-height:1.7;">
+                    <b>寻优结论：</b><br>
+                    · <b>BOLL</b>: period=30, std=2.5 最优(超额 +3.66%,远超默认 +1.04%)。std=2.5 >> std=2.0,std 越大通道越宽,触下轨更极端反弹更强;<br>
+                    · <b>KDJ</b>: n=14, k1=5, d1=5 最优(平滑参数大=信号少但更准);<br>
+                    · <b>DMI</b>: n=10 最优(n=20 反而负);<br>
+                    · <b>MACD</b>: signal=12 > 9(默认),fast/slow 不敏感。
+                </div>
+            </div>
+        </template>
         </template>
     </div>
 

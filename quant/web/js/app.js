@@ -43,6 +43,9 @@ createApp({
             yjMinScore: 5,  // 最低展示分数（回测验证 5+ 分档有 alpha，7+ 极稀缺）
             // backtest report
             btReport: null, btLoading: false,
+            btView: 'yujie',  // yujie | builtin | grid
+            btBuiltin: null, btBuiltinLoading: false,
+            btGrid: null, btGridLoading: false,
             // strategy library
             strategyLib: null, slLoading: false, slActive: 0,
             // strategy library import modal
@@ -864,6 +867,50 @@ createApp({
             } finally {
                 this.btLoading = false;
             }
+        },
+        async loadBuiltinBt() {
+            if (this.btBuiltin) return;
+            this.btBuiltinLoading = true;
+            try {
+                this.btBuiltin = await (await fetch('/api/builtin/backtest')).json();
+            } catch (e) {
+                this.btBuiltin = { exists: false, msg: '加载失败' };
+            } finally {
+                this.btBuiltinLoading = false;
+            }
+        },
+        async loadBuiltinGrid() {
+            if (this.btGrid) return;
+            this.btGridLoading = true;
+            try {
+                this.btGrid = await (await fetch('/api/builtin/grid')).json();
+            } catch (e) {
+                this.btGrid = { exists: false, msg: '加载失败' };
+            } finally {
+                this.btGridLoading = false;
+            }
+        },
+        btBuiltinSorted() {
+            if (!this.btBuiltin || !this.btBuiltin.exists) return [];
+            const arr = Object.values(this.btBuiltin.report.strategies);
+            return arr.sort((a, b) => {
+                const ea = (a.horizons['20'] || {}).excess || -999;
+                const eb = (b.horizons['20'] || {}).excess || -999;
+                return eb - ea;
+            });
+        },
+        btExcessVal(s, h) {
+            const r = s.horizons[String(h)];
+            return r ? this.btFmtPct(r.excess) : '-';
+        },
+        btExcessClass(s, h) {
+            const r = s.horizons[String(h)];
+            if (!r) return '';
+            return r.excess >= 0 ? 'up' : 'down';
+        },
+        btSortedSens(sens) {
+            // sens: {value: excess} → 按超额降序
+            return Object.entries(sens).sort((a, b) => b[1] - a[1]);
         },
         btFmtPct(x) {
             if (x == null || isNaN(x)) return '-';
