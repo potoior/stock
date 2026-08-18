@@ -1,17 +1,18 @@
-"""每日 9:00 全市场扫描 + 新闻综合日报
+"""每日 9:00 全市场扫描 + 玉姐精选 + 新闻综合日报
 
 流程（每个交易日 09:00）：
   1. 爬取全 A 股（≈5500 只）实时行情，统计涨跌分布 / 涨停跌停 / 板块热度
-  2. 抓取当日财经新闻（新浪 + 东财双源，复用 news_digest）
-  3. 对成交额 / 涨幅 top 候选跑策略信号（strategy_engine.analyze）
-  4. SensNews 综合分析「市场全景 + 候选信号 + 新闻」生成日报
-  5. 写 reports/daily_YYYYMMDD.md
+  2. 调用 yujie_scan.run_once() 跑玉姐精选全市场打分（数据共用 stock_cache.db）
+  3. 取玉姐 Top N 作为候选，附加 strategy_engine.analyze 完整策略信号
+  4. 抓取当日财经新闻（新浪 + 东财双源，复用 news_digest）
+  5. SensNews 综合分析「市场全景 + 玉姐候选 + 新闻」生成日报
+  6. 写 reports/daily_YYYYMMDD.md
 
 用法：
   python daily_scan.py                       # 立即跑一次
   python daily_scan.py --schedule "09:00"    # 纯 Python 定时，每天 09:00 自动跑
   python daily_scan.py --limit 1000          # 仅抓前1000只（调试加速）
-  python daily_scan.py --top 5               # 对 top 5 候选跑策略信号
+  python daily_scan.py --top 10              # 对玉姐 Top 10 跑策略信号
 """
 
 import argparse
@@ -95,25 +96,30 @@ def market_stats(rows):
     }
 
 
-def top_candidates(rows, n=10):
-    """按成交额排序取 top 候选。"""
-    cands = []
-    for r in rows:
-        amt = float(r.get("amount") or 0)
-        if amt < 1e8:  # 成交额至少 1 亿
-            continue
-        cands.append(
+def top_candidates_from_yujie(top_n=10):
+    """从玉姐精选榜单取 Top N 作为 AI 日报候选。
+    复用 yujie_scan 已扫描结果，避免重复抓数据。
+    """
+    import yujie_scan
+
+    picks = yujie_scan.load_picks()
+    out = []
+    for p in picks[:top_n]:
+        d = p.get("detail") or {}
+        out.append(
             {
-                "code": r.get("code6", ""),
-                "name": r.get("name", ""),
-                "price": r.get("trade"),
-                "pct": round(float(r.get("changepercent") or 0), 2),
-                "amount_yi": round(amt / 1e8, 2),
-                "turnover": round(float(r.get("turnoverratio") or 0), 2),
+                "code": p["code"],
+                "name": p["name"],
+                "price": d.get("price"),
+                "pct": 0.0,  # 玉姐扫描不存实时涨跌幅，日报中保留字段
+                "amount_yi": 0.0,  # 同上
+                "turnover": 0.0,
+                "score": p["score"],
+                "hits": p["hits"],
+                "rank": p["rank"],
             }
         )
-    cands.sort(key=lambda x: -x["amount_yi"])
-    return cands[:n]
+    return out
 
 
 def analyze_candidates(cands, top_n=5):
@@ -142,14 +148,15 @@ def analyze_candidates(cands, top_n=5):
 
 
 def build_prompt(stats, cands, news, date_str):
-    """综合 prompt：市场全景 + 候选信号 + 新闻。"""
+    """综合 prompt：市场全景 + 玉姐候选 + 新闻。"""
     lines_c = []
     for c in cands:
         sig = f"{c['verdict']}（{c['summary']}）"
         buys = "；".join(c["buy"][:2]) if c["buy"] else "无"
+        hits = "、".join(c.get("hits", [])[:3]) if c.get("hits") else "-"
         lines_c.append(
-            f"- {c['code']} {c['name']} 现价{c['price']} 涨{c['pct']:+.2f}% "
-            f"成交{c['amount_yi']}亿 换手{c['turnover']}% → {sig}；买方信号：{buys}"
+            f"- 第{c['rank']}名 {c['code']} {c['name']} 玉姐评分 {c['score']} 分 "
+            f"命中规则：{hits} → 策略信号 {sig}；买方理由：{buys}"
         )
     lines_n = []
     for i, n in enumerate(news[:25], 1):
@@ -161,7 +168,7 @@ def build_prompt(stats, cands, news, date_str):
 - 涨停 {stats["limit_up"]} 只，跌停 {stats["limit_down"]} 只
 - 全市场成交额约 {stats["total_amount_yi"]:.0f} 亿
 
-## 二、成交额 top 候选与策略信号
+## 二、玉姐精选 Top 候选（按评分排序，含策略信号）
 {chr(10).join(lines_c) if lines_c else "（无候选）"}
 
 ## 三、当日新闻快讯（{len(news)} 条）
@@ -169,8 +176,8 @@ def build_prompt(stats, cands, news, date_str):
 
 请按以下结构输出：
 1. **市场情绪总览**：结合涨跌停分布与新闻，判断今日偏多/偏空/中性，2-3 句
-2. **热点板块/主线**：从候选股与新闻中提炼事件驱动板块
-3. **重点候选解读**：挑 2-3 只 top 候选，结合其策略信号与新闻说明可操作性
+2. **热点板块/主线**：从玉姐候选股与新闻中提炼事件驱动板块
+3. **重点候选解读**：挑 2-3 只 Top 候选，结合其玉姐评分、命中规则、策略信号与新闻说明可操作性
 4. **风险提示**：利空与不确定因素
 5. **今日操作参考**：方向性判断（非投资建议）
 
@@ -190,8 +197,13 @@ def run_once(limit, top, news_limit):
         f"涨停{stats['limit_up']}/跌停{stats['limit_down']} 成交{stats['total_amount_yi']:.0f}亿"
     )
 
-    cands = top_candidates(rows, n=max(top, 10))
-    print(f"成交额 top 候选 {len(cands)} 只，对前 {top} 只跑策略信号...")
+    # 跑玉姐精选全市场扫描（数据共用 stock_cache.db，避免重复抓取）
+    print("启动玉姐精选全市场扫描...")
+    import yujie_scan
+
+    yujie_scan.run_once(limit=0)
+    cands = top_candidates_from_yujie(top_n=max(top, 10))
+    print(f"玉姐精选 Top {len(cands)} 候选，对前 {top} 只跑完整策略信号...")
     analyzed = analyze_candidates(cands, top_n=top)
 
     print("抓取当日新闻...")
@@ -225,20 +237,21 @@ def save_report(stats, cands, news, body, now):
         f"- 总数 **{stats['total']}** 只：上涨 {stats['up']} / 下跌 {stats['down']} / 平 {stats['flat']}",
         f"- 涨停 **{stats['limit_up']}** 只，跌停 **{stats['limit_down']}** 只",
         f"- 全市场成交额约 **{stats['total_amount_yi']:.0f} 亿**\n",
-        "\n## 二、成交额 top 候选与策略信号\n",
-        "| 代码 | 名称 | 现价 | 涨跌% | 成交(亿) | 换手% | 信号 |",
-        "|------|------|------|-------|----------|-------|------|",
+        "\n## 二、玉姐精选 Top 候选与策略信号\n",
+        "| 排名 | 代码 | 名称 | 玉姐评分 | 命中规则 | 策略信号 |",
+        "|------|------|------|----------|----------|----------|",
     ]
     for c in cands:
+        hits = "、".join(c.get("hits", [])[:3]) if c.get("hits") else "-"
         lines.append(
-            f"| {c['code']} | {c['name']} | {c['price']} | {c['pct']:+.2f} | "
-            f"{c['amount_yi']} | {c['turnover']} | {c['verdict']}（{c['summary']}） |"
+            f"| {c['rank']} | {c['code']} | {c['name']} | {c['score']} | {hits} | "
+            f"{c['verdict']}（{c['summary']}） |"
         )
     if cands:
         lines.append("\n**买方信号明细（top 候选）**")
         for c in cands[:5]:
             if c["buy"]:
-                lines.append(f"- {c['name']}：{'；'.join(c['buy'])}")
+                lines.append(f"- {c['name']}（玉姐 {c['score']}分）：{'；'.join(c['buy'])}")
     lines.append(f"\n## 三、当日新闻快讯（{len(news)} 条）\n")
     for i, n in enumerate(news[:30], 1):
         lines.append(f"{i}. **{n['title']}** `[{n['time']} {n['source']}]`")

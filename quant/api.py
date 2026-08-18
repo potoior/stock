@@ -654,9 +654,14 @@ def _start_periodic_scheduler(state, env_prefix, default_time, run_fn, delay_sec
 
 
 def _start_daily_scan_scheduler():
+    """每个交易日 09:00 跑 daily_scan(已合并 yujie 全市场扫描,同时更新两个状态)。"""
+
     def _run():
         import daily_scan
         daily_scan.run_once(limit=0, top=5, news_limit=20)
+        # daily_scan 内部已调 yujie_scan.run_once,同步状态
+        _yujie_state["last_status"] = "ok"
+        _yujie_state["last_run"] = _daily_scan_state.get("last_run")
 
     _start_periodic_scheduler(_daily_scan_state, "DAILY_SCAN", "09:00", _run, delay_seconds=0)
 
@@ -716,13 +721,17 @@ def daily_scan_run():
     def _run():
         _daily_scan_state["last_status"] = "running"
         _daily_scan_state["last_run"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        _yujie_state["last_status"] = "running"
+        _yujie_state["last_run"] = _daily_scan_state["last_run"]
         try:
             import daily_scan
 
             daily_scan.run_once(limit=0, top=5, news_limit=20)
             _daily_scan_state["last_status"] = "ok"
+            _yujie_state["last_status"] = "ok"
         except Exception as e:
             _daily_scan_state["last_status"] = f"error: {e}"
+            _yujie_state["last_status"] = f"error: {e}"
 
     threading.Thread(target=_run, name="daily_scan_manual", daemon=True).start()
     return {"started": True, "message": "已在后台启动，查看 /api/daily-scan/status 获取进度"}
@@ -826,15 +835,10 @@ def yujie_score(q: str = ""):
 
 
 def _start_yujie_scheduler():
-    """每个交易日 09:00 自动跑玉姐精选扫描。"""
-    import os
-
-    def _run():
-        import yujie_scan
-        yujie_scan.run_once(limit=0)
-
-    default_time = os.environ.get("DAILY_SCAN_TIME", "09:00")
-    _start_periodic_scheduler(_yujie_state, "YUJIE_SCAN", default_time, _run, delay_seconds=10)
+    """玉姐精选已合并入 daily_scan 调度器(9:00 一起跑),这里不再独立调度。
+    保留函数只是为了向后兼容外部调用。
+    """
+    return
 
 
 if __name__ == "__main__":

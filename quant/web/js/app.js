@@ -284,7 +284,11 @@ createApp({
         renderAnalyzeChart() {
             const el = document.getElementById('analyzeChart');
             if (!el || !this.analysis) return;
-            if (!this.analyzeChart) this.analyzeChart = echarts.init(el);
+            if (!this.analyzeChart) {
+                this.analyzeChart = echarts.init(el);
+                if (!window.__echartsInstances) window.__echartsInstances = {};
+                window.__echartsInstances['analyzeChart'] = this.analyzeChart;
+            }
             const kl = this.analysis.kline;
             const dates = kl.map(d => d.date);
             const ohlc = kl.map(d => [d.open, d.close, d.low, d.high]);
@@ -445,7 +449,12 @@ createApp({
         _renderChart(domId, chartProp, option) {
             const el = document.getElementById(domId);
             if (!el) return;
-            if (!this[chartProp]) this[chartProp] = echarts.init(el);
+            if (!this[chartProp]) {
+                this[chartProp] = echarts.init(el);
+                // resize 时记录到全局队列，由 window.resize 监听统一调度
+                if (!window.__echartsInstances) window.__echartsInstances = {};
+                window.__echartsInstances[domId] = this[chartProp];
+            }
             this[chartProp].setOption(option, true);
         },
 
@@ -579,7 +588,11 @@ createApp({
             const aiData = this.agent.ai_history || [];
             const ruleData = this.agent.rule_history || [];
             if (!aiData.length && !ruleData.length) return;
-            if (!this.agentChart) this.agentChart = echarts.init(el);
+            if (!this.agentChart) {
+                this.agentChart = echarts.init(el);
+                if (!window.__echartsInstances) window.__echartsInstances = {};
+                window.__echartsInstances['agentChart'] = this.agentChart;
+            }
             const times = aiData.map(d => d.t);
             this.agentChart.setOption({
                 tooltip: { trigger: 'axis' },
@@ -703,7 +716,11 @@ createApp({
         renderYjKline(kl) {
             const el = document.getElementById('yjKlineChart');
             if (!el || !kl.length) return;
-            if (!this.yjKlineChart) this.yjKlineChart = echarts.init(el);
+            if (!this.yjKlineChart) {
+                this.yjKlineChart = echarts.init(el);
+                if (!window.__echartsInstances) window.__echartsInstances = {};
+                window.__echartsInstances['yjKlineChart'] = this.yjKlineChart;
+            }
             const dates = kl.map(d => d.date);
             const ohlc = kl.map(d => [d.open, d.close, d.low, d.high]);
             const volumes = kl.map(d => ({
@@ -930,6 +947,12 @@ createApp({
                 if (this.yjStatus.last_status !== 'running') this.loadYujiePicks();
             }
         }, 30000);
+        // 全局 echarts resize:窗口缩放时所有图表自适应重绘
+        window.__echartsResizeHandler = () => {
+            const insts = window.__echartsInstances || {};
+            Object.values(insts).forEach(c => { try { c.resize(); } catch (e) {} });
+        };
+        window.addEventListener('resize', window.__echartsResizeHandler);
     },
     beforeUnmount() {
         if (this.timer) clearInterval(this.timer);
@@ -937,5 +960,11 @@ createApp({
         if (this.yjTimer) clearInterval(this.yjTimer);
         if (this.dsPollTimer) clearInterval(this.dsPollTimer);
         if (this.yjPollTimer) clearInterval(this.yjPollTimer);
+        if (window.__echartsResizeHandler) {
+            window.removeEventListener('resize', window.__echartsResizeHandler);
+        }
+        // 销毁所有 echarts 实例
+        const insts = window.__echartsInstances || {};
+        Object.values(insts).forEach(c => { try { c.dispose(); } catch (e) {} });
     }
 }).mount('#app');
