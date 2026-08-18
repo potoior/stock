@@ -409,7 +409,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "get_strategy_library",
-            "description": "查策略大全4来源(漫画书/操练大全/玉姐精选/AI)中所有策略,标记已实现/未实现。用户问'策略大全/还有什么策略/操练大全/漫画书策略'时调用。",
+            "description": "查策略大全4来源(漫画书/操练大全/玉姐精选/AI)中的策略,支持多维度过滤。用户问'策略大全/操练大全/漫画书策略/某书第X章/某策略在哪些书里/某书里哪些没实现'时调用。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -417,9 +417,33 @@ TOOLS = [
                         "type": "string",
                         "enum": ["book_cartoon", "book_caolian", "yujie_custom", "ai_custom", ""],
                         "description": "来源过滤,空字符串=全部。book_cartoon=半小时漫画股票实战法、book_caolian=中国股市操练大全、yujie_custom=玉姐精选、ai_custom=AI自定义"
+                    },
+                    "category": {
+                        "type": "string",
+                        "description": "章节/分类名模糊匹配(子串包含),如'第15章'或'抄底'。空字符串=不过滤"
+                    },
+                    "implemented_only": {
+                        "type": "boolean",
+                        "description": "true=只看已实现,false=只看未实现,不传=全部"
+                    },
+                    "include_meta": {
+                        "type": "boolean",
+                        "description": "true=附带书的元数据(作者/简介/章节数/文件列表)"
+                    },
+                    "cross_ref": {
+                        "type": "string",
+                        "description": "跨来源对比:传策略id(如macd),返回该策略在哪些来源/章节出现。优先级高于其他过滤参数"
                     }
                 }
             }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_yujie_detail",
+            "description": "查询玉姐精选的详细信息:10条评分规则、每条score权重、回测表现。用户问'玉姐评分规则/玉姐怎么打分/玉姐回测表现'时调用。",
+            "parameters": {"type": "object", "properties": {}}
         }
     },
     {
@@ -569,30 +593,198 @@ def handler_list_strategies() -> str:
         return f"❌ 列出策略出错: {e}"
 
 
-def handler_get_strategy_library(source: str = "") -> str:
-    """查策略大全。"""
+def _cross_ref_search(strategy_id: str, lib: dict) -> str:
+    """跨来源反向索引: 查 strategy_id 在哪些来源/章节出现(匹配 id 或 engine_id)。"""
+    hits = []
+    target = strategy_id.lower()
+    for src in lib.get("sources", []):
+        for cat in src.get("categories", []):
+            for st in cat.get("strategies", []):
+                sid = (st.get("id") or "").lower()
+                eid = (st.get("engine_id") or "").lower()
+                # 精确匹配 id 或 engine_id,或者 id 以 strategy_id 为前缀(如 macd_8 匹配 macd)
+                if target == sid or target == eid or sid.startswith(target + "_") or eid == target:
+                    hits.append({
+                        "source_id": src.get("id", ""),
+                        "source_name": src.get("name", ""),
+                        "category": cat.get("name", ""),
+                        "strategy_id": st.get("id", ""),
+                        "strategy_name": st.get("name", ""),
+                        "implemented": st.get("implemented", False),
+                        "engine_id": st.get("engine_id", ""),
+                        "desc": st.get("desc", ""),
+                    })
+    if not hits:
+        return f"❌ 跨来源搜索未找到策略 {strategy_id}"
+    lines = [f"🔍 **跨来源搜索: {strategy_id}**\n共在 {len(hits)} 处出现:"]
+    by_source: dict[str, list] = {}
+    for h in hits:
+        by_source.setdefault(h["source_name"], []).append(h)
+    for src_name, items in by_source.items():
+        lines.append(f"\n📚 **{src_name}**")
+        for h in items:
+            mark = "✅" if h["implemented"] else "⬜"
+            engine_str = f" → engine: {h['engine_id']}" if h["engine_id"] and h["engine_id"] != h["strategy_id"] else ""
+            lines.append(f"  - {mark} [{h['category']}] **{h['strategy_id']}**{engine_str}: {h['desc']}")
+    return "\n".join(lines)
+
+
+def handler_get_strategy_library(
+    source: str = "",
+    category: str = "",
+    implemented_only: bool | None = None,
+    include_meta: bool = False,
+    cross_ref: str = "",
+) -> str:
+    """查策略大全,支持多维度过滤 + 跨来源反向索引。
+
+    Args:
+        source: 来源 id 过滤,空=全部
+        category: 章节/分类名模糊匹配(子串包含),空=不过滤
+        implemented_only: True=只看已实现, False=只看未实现, None=全部
+        include_meta: True=附带书的元数据(作者/简介/章节列表)
+        cross_ref: 策略 id,跨来源反向搜索(优先级最高)
+    """
     try:
         lib_path = ENGINE_HOME / "strategy_library.json"
         if not lib_path.exists():
             return "❌ 策略大全数据不存在(strategy_library.json)"
         lib = json.loads(lib_path.read_text(encoding="utf-8"))
+
+        # 优先处理跨来源搜索
+        if cross_ref:
+            return _cross_ref_search(cross_ref, lib)
+
         lines = []
+        total_shown = 0
         for src in lib.get("sources", []):
             sid = src.get("id", "")
             if source and sid != source:
                 continue
-            lines.append(f"\n## 📚 {src['name']}")
+
+            # include_meta: 输出书的元数据
+            if include_meta:
+                lines.append(f"\n## 📚 {src['name']}")
+                lines.append(f"- 作者: {src.get('author', '-')}")
+                lines.append(f"- 类型: {src.get('type', '-')}")
+                lines.append(f"- 状态: {src.get('status', '-')}")
+                summary = src.get("summary", "")
+                if summary:
+                    lines.append(f"- 简介: {summary}")
+                cats = src.get("categories", [])
+                lines.append(f"- 章节数: {len(cats)}")
+                cat_names = "、".join(c.get("name", "") for c in cats)
+                lines.append(f"- 章节: {cat_names}")
+                files = src.get("files", [])
+                if files:
+                    lines.append(f"- 关联文件: {', '.join(files[:3])}{'...' if len(files)>3 else ''}")
+                stats = src.get("stats", {})
+                if stats:
+                    lines.append(f"- 统计: 实现 {stats.get('implemented','-')}/{stats.get('total_chapters','-')}")
+                lines.append("")
+
+            # 收集本来源下匹配的策略
+            src_lines = []
+            src_count = 0
             for cat in src.get("categories", []):
-                lines.append(f"\n### {cat['name']}")
+                cat_name = cat.get("name", "")
+                if category and category not in cat_name:
+                    continue
+                cat_strategies = []
                 for st in cat.get("strategies", []):
                     impl = st.get("implemented", False)
+                    if implemented_only is True and not impl:
+                        continue
+                    if implemented_only is False and impl:
+                        continue
                     mark = "✅" if impl else "⬜"
                     engine_id = st.get("engine_id", "")
                     engine_str = f" → {engine_id}" if engine_id else ""
-                    lines.append(f"- {mark} **{st['id']}**{engine_str}: {st.get('desc', '')}")
-        return "\n".join(lines) if lines else f"❌ 未找到来源: {source}"
+                    cat_strategies.append(f"  - {mark} **{st['id']}**{engine_str}: {st.get('desc', '')}")
+                if cat_strategies:
+                    cat_label = cat_name
+                    if not include_meta:
+                        cat_label += f" ({cat.get('book_category', '')})" if cat.get("book_category") else ""
+                    src_lines.append(f"\n### {cat_label}")
+                    src_lines.extend(cat_strategies)
+                    src_count += len(cat_strategies)
+
+            if src_count == 0 and (category or implemented_only is not None):
+                # 本来源过滤后无匹配,不输出
+                continue
+
+            if not include_meta:
+                lines.append(f"\n## 📚 {src['name']}")
+            lines.extend(src_lines)
+            total_shown += src_count
+
+        if total_shown == 0:
+            filters = []
+            if source:
+                filters.append(f"source={source}")
+            if category:
+                filters.append(f"category~={category}")
+            if implemented_only is True:
+                filters.append("implemented=true")
+            if implemented_only is False:
+                filters.append("implemented=false")
+            return f"❌ 无匹配策略(过滤条件: {', '.join(filters) or '无'})"
+
+        # 末尾统计
+        lines.append(f"\n---\n共显示 {total_shown} 个策略")
+        return "\n".join(lines)
     except Exception as e:
         return f"❌ 查策略大全出错: {e}"
+
+
+def handler_get_yujie_detail() -> str:
+    """查询玉姐精选详细:评分规则 + score 权重 + 回测表现。"""
+    try:
+        lib_path = ENGINE_HOME / "strategy_library.json"
+        if not lib_path.exists():
+            return "❌ 策略大全数据不存在"
+        lib = json.loads(lib_path.read_text(encoding="utf-8"))
+        yujie = next((s for s in lib.get("sources", []) if s.get("id") == "yujie_custom"), None)
+        if not yujie:
+            return "❌ 未找到玉姐精选来源"
+
+        lines = [f"## 🎯 {yujie['name']}"]
+        summary = yujie.get("summary", "")
+        if summary:
+            lines.append(f"\n{summary}")
+
+        # 评分规则
+        lines.append("\n### 评分规则")
+        lines.append("| 规则ID | 名称 | 分数 | 说明 |")
+        lines.append("|---|---|---|---|")
+        for cat in yujie.get("categories", []):
+            for st in cat.get("strategies", []):
+                score = st.get("score", 0)
+                lines.append(f"| {st['id']} | {st['name']} | +{score} | {st.get('desc', '')} |")
+
+        # 回测
+        bt = yujie.get("backtest", {})
+        if bt:
+            lines.append("\n### 回测表现")
+            lines.append(f"- 信号样本数: {bt.get('signal_count', '-')}")
+            lines.append(f"- 验证结论: {bt.get('validated', '-')}")
+
+        # 当前参数(从 config.json)
+        try:
+            import strategy_engine as se
+            cfg = se._load_config()
+            ycfg = cfg.get("yujie_agent", {})
+            if ycfg:
+                lines.append("\n### 当前调度参数(yujie_agent)")
+                lines.append(f"- 最低评分门槛: {ycfg.get('min_score', '-')}")
+                lines.append(f"- 最大持有天数: {ycfg.get('max_hold_days', '-')}")
+        except Exception:
+            pass
+
+        lines.append("\n💡 玉姐精选是复合评分体系,通过 `分析` 命令触发时会综合其他策略信号。")
+        return "\n".join(lines)
+    except Exception as e:
+        return f"❌ 查玉姐详情出错: {e}"
 
 
 def handler_analyze_with_strategy(code: str, strategy_id: str) -> str:
@@ -787,7 +979,14 @@ TOOL_HANDLERS = {
     "get_portfolio": lambda args: handler_portfolio(),
     # 策略管理 skill
     "list_strategies": lambda args: handler_list_strategies(),
-    "get_strategy_library": lambda args: handler_get_strategy_library(args.get("source", "")),
+    "get_strategy_library": lambda args: handler_get_strategy_library(
+        source=args.get("source", ""),
+        category=args.get("category", ""),
+        implemented_only=args.get("implemented_only"),
+        include_meta=bool(args.get("include_meta", False)),
+        cross_ref=args.get("cross_ref", ""),
+    ),
+    "get_yujie_detail": lambda args: handler_get_yujie_detail(),
     "analyze_with_strategy": lambda args: handler_analyze_with_strategy(
         args.get("code", ""), args.get("strategy_id", "")
     ),
@@ -822,7 +1021,13 @@ SYSTEM_PROMPT = """你是 A 股量化分析助手(集成于飞书群聊),拥有�
 
 【策略管理类】
 - list_strategies(): 列出所有策略(23内置+自定义),含开关/参数/回测超额
-- get_strategy_library(source?): 查策略大全4来源(漫画书/操练大全/玉姐/AI)
+- get_strategy_library(source?, category?, implemented_only?, include_meta?, cross_ref?): 多维度查策略大全
+  · source: 来源过滤(book_cartoon=漫画书、book_caolian=操练大全、yujie_custom=玉姐、ai_custom=AI)
+  · category: 章节/分类名模糊匹配(如"第15章"/"抄底")
+  · implemented_only: true=只看已实现, false=只看未实现, 不传=全部
+  · include_meta: true=附带书的作者/简介/章节列表
+  · cross_ref: 跨来源对比,传策略id(如macd)查它在哪些书里出现(优先级最高)
+- get_yujie_detail(): 查玉姐精选10条评分规则+权重+回测表现
 - analyze_with_strategy(code, strategy_id): 用指定策略单独分析个股
 - toggle_strategy(strategy_id, enabled): 开关策略(操作类,需用户明确意图)
 - set_strategy_params(strategy_id, params): 调策略参数(操作类,需用户明确意图)
@@ -848,13 +1053,26 @@ SYSTEM_PROMPT = """你是 A 股量化分析助手(集成于飞书群聊),拥有�
 - 耗时较长,用户问时主动提示"需要1-2分钟"
 - 默认 sample=0(全市场),若用户说"快速测一下"可改 sample=200
 
+策略大全查询模式识别:
+- "漫画书/操练大全/玉姐/AI" → source 过滤
+- "第X章/抄底/逃顶/选股" → category 模糊匹配
+- "已实现/未实现/还有什么没做" → implemented_only 过滤
+- "这本书讲了什么/简介/作者" → include_meta=true
+- "MACD在哪些书里/X策略在哪些来源出现" → cross_ref
+- "玉姐怎么打分/玉姐评分规则" → get_yujie_detail()
+
 示例:
 - "分析茅台" → analyze_stock(code=600519) → 整理结果回复
 - "今天怎样" → get_market_status() → 总结市场情绪
 - "玉姐推荐什么" → get_yujie_picks() → 列出 Top5 并点评
 - "持仓怎样" → get_portfolio() → 列出持仓并点评
 - "有哪些策略" → list_strategies() → 整理表格回复
-- "策略大全里还有什么" → get_strategy_library() → 列出未实现策略
+- "策略大全里还有什么" → get_strategy_library(implemented_only=false) → 列出未实现策略
+- "漫画书那本讲了什么" → get_strategy_library(source=book_cartoon, include_meta=true)
+- "操练大全第15章抄底策略有哪些" → get_strategy_library(source=book_caolian, category="第15章")
+- "漫画书里哪些没实现" → get_strategy_library(source=book_cartoon, implemented_only=false)
+- "MACD在哪些书里出现" → get_strategy_library(cross_ref="macd")
+- "玉姐怎么打分" → get_yujie_detail()
 - "看下茅台的MACD信号" → analyze_with_strategy(code=600519, strategy_id=macd)
 - "关闭均线组合策略" → toggle_strategy(strategy_id=ma_combo, enabled=false)
 - "把BOLL周期改成30" → set_strategy_params(strategy_id=boll, params={period:30})
