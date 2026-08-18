@@ -387,6 +387,64 @@ BUILTIN_METADATA = [
 - 双指标共振：极致超跌后的反弹概率极大，买入
 极少出现的极限信号，出现时是较好的抢反弹时机。""",
     },
+    {
+        "id": "rsi",
+        "name": "RSI相对强弱",
+        "params": {
+            "p1": {"default": 6, "label": "短线周期", "hint": "RSI短期天数,默认6"},
+            "p2": {"default": 12, "label": "长线周期", "hint": "RSI长期天数,默认12"},
+            "oversold": {"default": 30, "label": "超卖阈值", "hint": "RSI低于此值超卖,买入"},
+            "overbought": {"default": 70, "label": "超买阈值", "hint": "RSI高于此值超买,卖出"},
+        },
+        "detail": """【RSI相对强弱】(操练大全8.5)
+原理：N日内上涨幅度占比衡量超买超卖。
+- RSI<oversold(30)超卖 → 买
+- RSI>overbought(70)超买 → 卖
+- RSI短线上穿长线金叉(低位) → 买;下穿死叉(高位) → 卖
+RSI6敏感、RSI12稳定,金叉死叉结合超买超卖阈值综合判断。""",
+    },
+    {
+        "id": "bottom",
+        "name": "抄底策略",
+        "params": {
+            "lookback": {"default": 20, "label": "回看周期", "hint": "近期跌幅/均量统计天数"},
+            "vol_shrink": {"default": 0.5, "label": "缩量阈值", "hint": "当日量/均量<=此值视为缩量"},
+            "drop_pct": {"default": -5, "label": "跌幅阈值%", "hint": "回看周期内累计跌幅<=此值视为大跌"},
+        },
+        "detail": """【抄底策略】(操练大全15章)
+原理：缩量+大跌后加速下跌+MOS底背离复合形态识别底部。
+- 条件1: 近lookback日已大跌(drop_pct)且当日缩量至vol_shrink倍(恐慌底)
+- 条件2: MACD底背离(MOS低点,CL1<CL2 且 DIFL1>=DIFL2)
+满足任一即发出抄底信号。两个条件同时满足为最强复合抄底信号。""",
+    },
+    {
+        "id": "top",
+        "name": "逃顶策略",
+        "params": {
+            "lookback": {"default": 20, "label": "回看周期", "hint": "近期涨幅/均量统计天数"},
+            "vol_expand": {"default": 2.0, "label": "放量阈值", "hint": "当日量/均量>=此值视为天量"},
+            "rise_pct": {"default": 5, "label": "涨幅阈值%", "hint": "回看周期内累计涨幅>=此值视为大涨"},
+        },
+        "detail": """【逃顶策略】(操练大全16章)
+原理：天量+大涨后加速上涨+量价背离复合形态识别顶部。
+- 条件1: 近lookback日已大涨(rise_pct)且当日放量至vol_expand倍(天量见顶)
+- 条件2: 创近lookback日新高但量能萎缩(无量上涨警惕)
+满足任一即发出逃顶信号。""",
+    },
+    {
+        "id": "zt",
+        "name": "涨停板策略",
+        "params": {
+            "zt_pct": {"default": 9.6, "label": "涨停阈值%", "hint": "涨幅>=此值视为近涨停(主板9.6/创业板19.6)"},
+            "min_vol_ratio": {"default": 1.5, "label": "最少量比", "hint": "封板量比>=此值才追,排除一字板"},
+        },
+        "detail": """【涨停板策略】(操练大全20章)
+原理：涨停封板信号识别+量能验证。
+- 涨幅>=9.8% 且 量比>=min_vol_ratio → 强势追击买
+- 涨幅>=zt_pct(9.6%) 且 量比>=min_vol_ratio → 封板强势买
+- 涨停但量比不足 → 可能一字板,观望
+- 创业板/科创板涨停20%需调整zt_pct为19.6""",
+    },
 ]
 
 

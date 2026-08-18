@@ -97,10 +97,10 @@
           "name": "第8章 技术指标法则",
           "book_category": "与漫画书重叠",
           "strategies": [
-            {"id": "rsi", "name": "RSI指标策略", "implemented": false, "desc": "engine已有compute_rsi计算函数(strategy_engine.py:311),无strategy_rsi评估函数"},
-            {"id": "macd_8", "name": "MACD(8.3)", "implemented": true, "engine_id": "macd", "desc": "与漫画书MACD同源,已实现"},
-            {"id": "kdj_8", "name": "KDJ(8.4)", "implemented": true, "engine_id": "kdj", "desc": "与漫画书KDJ同源,已实现"},
-            {"id": "boll_8", "name": "BOLL(8.6)", "implemented": true, "engine_id": "boll", "desc": "已实现"},
+            {"id": "rsi", "name": "RSI指标策略", "implemented": true, "engine_id": "rsi", "desc": "RSI6/12金叉死叉+超买(70)超卖(30)阈值,已实现并启用"},
+            {"id": "macd_8", "name": "MACD(8.3)", "implemented": true, "engine_id": "macd", "desc": "与漫画书MACD同源,已实现,signal=12(寻优)"},
+            {"id": "kdj_8", "name": "KDJ(8.4)", "implemented": true, "engine_id": "kdj", "desc": "与漫画书KDJ同源,已实现,n=14/k1=5/d1=5(寻优)"},
+            {"id": "boll_8", "name": "BOLL(8.6)", "implemented": true, "engine_id": "boll", "desc": "已实现,period=30/std=2.5(寻优,超额+3.66%)"},
             {"id": "bias_8", "name": "BIAS(8.7)", "implemented": true, "engine_id": "bias", "desc": "已实现"}
           ]
         },
@@ -128,9 +128,10 @@
           "name": "第15章 抄底策略",
           "book_category": "形态化",
           "strategies": [
-            {"id": "bottom_kline", "name": "K线+成交量识底抄底", "implemented": false, "desc": "底部K线形态+缩量,部分融入bounce"},
+            {"id": "bottom", "name": "抄底策略(综合)", "implemented": true, "engine_id": "bottom", "desc": "缩量+大跌后加速下跌+MOS底背离复合形态,已实现并启用"},
+            {"id": "bottom_kline", "name": "K线+成交量识底抄底", "implemented": false, "desc": "底部K线形态+缩量,部分融入bottom策略"},
             {"id": "bottom_ma", "name": "K线+均线识底抄底", "implemented": false, "desc": "均线多头确认底"},
-            {"id": "bottom_accel", "name": "大跌后加速下跌识底", "implemented": false, "desc": "恐慌底形态"},
+            {"id": "bottom_accel", "name": "大跌后加速下跌识底", "implemented": false, "desc": "恐慌底形态,已融入bottom策略的drop_pct条件"},
             {"id": "bottom_time", "name": "利用时间识底", "implemented": false, "desc": "时间周期对称"}
           ]
         },
@@ -138,8 +139,9 @@
           "name": "第16章 逃顶策略",
           "book_category": "形态化",
           "strategies": [
-            {"id": "top_volume", "name": "利用成交量识顶逃顶", "implemented": false, "desc": "天量见顶"},
-            {"id": "top_accel", "name": "大涨后加速上涨识顶", "implemented": false, "desc": "赶顶形态"},
+            {"id": "top", "name": "逃顶策略(综合)", "implemented": true, "engine_id": "top", "desc": "天量+大涨后加速上涨+量价背离复合形态,已实现并启用"},
+            {"id": "top_volume", "name": "利用成交量识顶逃顶", "implemented": false, "desc": "天量见顶,已融入top策略的vol_expand条件"},
+            {"id": "top_accel", "name": "大涨后加速上涨识顶", "implemented": false, "desc": "赶顶形态,已融入top策略的rise_pct条件"},
             {"id": "top_weekly", "name": "周巨阳线识顶", "implemented": false, "desc": "周线见顶信号"},
             {"id": "top_monthly", "name": "月巨阳线识顶", "implemented": false, "desc": "月线见顶信号"}
           ]
@@ -159,13 +161,14 @@
           "name": "第20章 涨停板策略",
           "book_category": "需涨跌幅判断",
           "strategies": [
-            {"id": "zt_type", "name": "涨停板类型分类", "implemented": false, "desc": "一字板/拉高板/封板强度"},
-            {"id": "zt_unsealed", "name": "涨停封不牢现象", "implemented": false, "desc": "开板回封识别"},
-            {"id": "zt_pull", "name": "拉高型涨停交易时机", "implemented": false, "desc": "可基于日涨跌幅≥9.8%判断"}
+            {"id": "zt", "name": "涨停板策略(综合)", "implemented": true, "engine_id": "zt", "desc": "涨幅>=9.6%+量比>=1.5封板信号,已实现并启用"},
+            {"id": "zt_type", "name": "涨停板类型分类", "implemented": false, "desc": "一字板/拉高板/封板强度,部分融入zt策略"},
+            {"id": "zt_unsealed", "name": "涨停封不牢现象", "implemented": false, "desc": "开板回封识别,zt策略的量比判断已涵盖"},
+            {"id": "zt_pull", "name": "拉高型涨停交易时机", "implemented": false, "desc": "已融入zt策略的涨幅+量比条件"}
           ]
         }
       ],
-      "stats": {"total_chapters": 7, "implemented": 4, "not_implemented": 25}
+      "stats": {"total_chapters": 7, "implemented": 8, "not_implemented": 21}
     },
     {
       "id": "yujie_custom",

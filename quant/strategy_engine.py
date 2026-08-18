@@ -480,6 +480,10 @@ DEFAULT_STRATEGY_PARAMS = {
     "bounce": {"rebound_pct": 0.5, "vol_increase": 20},
     "volume_div": {"lookback": 10, "shrink": 0.7, "expand": 1.3},
     "dmi_psy": {"pdi_threshold": 5, "psy_threshold": 25},
+    "rsi": {"p1": 6, "p2": 12, "oversold": 30, "overbought": 70},
+    "bottom": {"lookback": 20, "vol_shrink": 0.5, "drop_pct": -5},
+    "top": {"lookback": 20, "vol_expand": 2.0, "rise_pct": 5},
+    "zt": {"zt_pct": 9.6, "min_vol_ratio": 1.5},
 }
 
 
@@ -987,6 +991,140 @@ def strategy_dmi_psy(ctx, params):
     return "hold", f"PDI({pdi_v:.1f})/PSY({psy_v:.0f})未达超跌极值"
 
 
+# ---------------- 书2新增策略(操练大全独有) ----------------
+
+
+def strategy_rsi(ctx, params):
+    """RSI 相对强弱指标策略(操练大全8.5)。
+
+    规则:
+      - RSI<oversold(默认30)超卖 → 买
+      - RSI>overbought(默认70)超买 → 卖
+      - RSI 短线(p1=6)上穿长线(p2=12) 金叉 → 买
+      - RSI 短线下穿长线 死叉 → 卖
+    """
+    p1 = int(params.get("p1", 6))
+    p2 = int(params.get("p2", 12))
+    oversold = float(params.get("oversold", 30))
+    overbought = float(params.get("overbought", 70))
+    rsi1, rsi2 = compute_rsi(ctx["df"], p1=p1, p2=p2)
+    i = ctx["i"]
+    v1, v2 = rsi1.iloc[i], rsi2.iloc[i]
+    if pd.isna(v1):
+        return "hold", "RSI数据不足"
+    # 金叉/死叉(RSI6 上穿/下穿 RSI12)
+    golden = v1 > v2 and rsi1.iloc[i - 1] <= rsi2.iloc[i - 1]
+    death = v1 < v2 and rsi1.iloc[i - 1] >= rsi2.iloc[i - 1]
+    if v1 <= oversold:
+        return "buy", f"RSI{p1}={v1:.1f}≤{oversold}超卖,有望反弹"
+    if golden and v1 < 50:
+        return "buy", f"RSI{p1}({v1:.1f})上穿RSI{p2}({v2:.1f})金叉,低位转强"
+    if v1 >= overbought:
+        return "sell", f"RSI{p1}={v1:.1f}≥{overbought}超买,获利盘多"
+    if death and v1 > 50:
+        return "sell", f"RSI{p1}({v1:.1f})下穿RSI{p2}({v2:.1f})死叉,高位转弱"
+    if v1 > v2:
+        return "buy", f"RSI{p1}({v1:.1f})>RSI{p2}({v2:.1f}),多头运行"
+    return "sell", f"RSI{p1}({v1:.1f})<RSI{p2}({v2:.1f}),空头运行"
+
+
+def strategy_bottom(ctx, params):
+    """抄底策略(操练大全15章):缩量+大跌后加速下跌+MOS底背离复合形态。
+
+    买入条件(满足任一):
+      - 近 lookback 日已大跌(drop_pct)且当日缩量至均量 vol_shrink 倍以下(恐慌底)
+      - MACD 底背离(MOS 低点,DI < DL前段)
+    """
+    lookback = int(params.get("lookback", 20))
+    vol_shrink = float(params.get("vol_shrink", 0.5))
+    drop_pct = float(params.get("drop_pct", -5))
+    i = ctx["i"]
+    close = ctx["close"]
+    df = ctx["df"]
+    if i < lookback:
+        return "hold", "数据不足"
+    # 条件1:近期已大跌+当日缩量
+    ret = (close.iloc[i] - close.iloc[i - lookback]) / close.iloc[i - lookback] * 100
+    avg_vol = df["volume"].iloc[i - lookback:i].mean()
+    vol_ratio = df["volume"].iloc[i] / avg_vol if avg_vol > 0 else 1
+    cond_drop = ret <= drop_pct and vol_ratio <= vol_shrink
+    # 条件2:MOS底背离
+    diff, dea, _ = compute_macd(df)
+    mos = compute_mos_lows(df, diff, dea)
+    cond_mos = mos.get("bottom", False)
+    mos_msg = ""
+    if cond_mos:
+        mos_msg = f"MOS底背离(CL1={mos['cl1']:.2f}<CL2={mos['cl2']:.2f},DIFL1={mos['difl1']:.2f}≥DIFL2={mos['difl2']:.2f})"
+    if cond_drop and cond_mos:
+        return "buy", f"大跌后缩量+MOS底背离,复合抄底信号({ret:.1f}%/量比{vol_ratio:.2f})"
+    if cond_drop:
+        return "buy", f"{lookback}日跌{ret:.1f}%且缩量(量比{vol_ratio:.2f}≤{vol_shrink}),恐慌底"
+    if cond_mos:
+        return "buy", mos_msg
+    return "hold", f"无抄底信号(近{lookback}日{ret:+.1f}%,量比{vol_ratio:.2f})"
+
+
+def strategy_top(ctx, params):
+    """逃顶策略(操练大全16章):天量+大涨后加速上涨复合形态。
+
+    卖出条件(满足任一):
+      - 近 lookback 日已大涨(rise_pct)且当日放量至均量 vol_expand 倍以上(天量见顶)
+      - 价格创近 lookback 日新高但量能萎缩(量价背离,无量上涨)
+    """
+    lookback = int(params.get("lookback", 20))
+    vol_expand = float(params.get("vol_expand", 2.0))
+    rise_pct = float(params.get("rise_pct", 5))
+    i = ctx["i"]
+    close = ctx["close"]
+    df = ctx["df"]
+    if i < lookback:
+        return "hold", "数据不足"
+    ret = (close.iloc[i] - close.iloc[i - lookback]) / close.iloc[i - lookback] * 100
+    avg_vol = df["volume"].iloc[i - lookback:i].mean()
+    vol_ratio = df["volume"].iloc[i] / avg_vol if avg_vol > 0 else 1
+    rh = close.iloc[i - lookback:i].max()
+    new_high = close.iloc[i] >= rh
+    # 条件1:大涨+天量
+    cond_hot = ret >= rise_pct and vol_ratio >= vol_expand
+    # 条件2:创近期新高但量能萎缩(量价背离)
+    cond_div = new_high and vol_ratio < 0.7
+    if cond_hot:
+        return "sell", f"{lookback}日涨{ret:.1f}%且天量(量比{vol_ratio:.2f}≥{vol_expand}),见顶信号"
+    if cond_div:
+        return "sell", f"创{lookback}日新高但量萎缩(量比{vol_ratio:.2f}),无量上涨警惕"
+    return "hold", f"无见顶信号(近{lookback}日{ret:+.1f}%,量比{vol_ratio:.2f})"
+
+
+def strategy_zt(ctx, params):
+    """涨停板策略(操练大全20章):涨停封板信号识别。
+
+    买入条件:
+      - 当日涨幅 ≥ zt_pct(默认9.6%,兼容主板10%/创业板20%由参数调整)
+      - 当日量比 ≥ min_vol_ratio(放量封板,排除一字板无量特殊情况)
+    """
+    zt_pct = float(params.get("zt_pct", 9.6))
+    min_vol_ratio = float(params.get("min_vol_ratio", 1.5))
+    i = ctx["i"]
+    df = ctx["df"]
+    close = df["close"]
+    if i < 1:
+        return "hold", "数据不足"
+    pct = (close.iloc[i] - close.iloc[i - 1]) / close.iloc[i - 1] * 100
+    avg_vol = df["volume"].iloc[max(0, i - 20):i].mean()
+    vol_ratio = df["volume"].iloc[i] / avg_vol if avg_vol > 0 else 0
+    if pct >= 9.8:  # 创业板/科创板 20%涨停
+        if vol_ratio >= min_vol_ratio:
+            return "buy", f"涨停封板(+{pct:.1f}%,量比{vol_ratio:.1f}),强势追击"
+        return "hold", f"涨停(+{pct:.1f}%)但量比{vol_ratio:.1f}不足,可能一字板"
+    if pct >= zt_pct:
+        if vol_ratio >= min_vol_ratio:
+            return "buy", f"近涨停(+{pct:.1f}%≥{zt_pct}%,量比{vol_ratio:.1f}≥{min_vol_ratio}),封板强势"
+        return "hold", f"近涨停(+{pct:.1f}%)但量比{vol_ratio:.1f}不足,封板不牢"
+    if pct >= 5 and vol_ratio >= min_vol_ratio * 1.5:
+        return "hold", f"大涨+{pct:.1f}%放量(量比{vol_ratio:.1f}),观望是否封板"
+    return "hold", f"无涨停信号(+{pct:.1f}%,量比{vol_ratio:.1f})"
+
+
 # ---------------- 自定义可视化规则策略 ----------------
 
 CONDITION_METRIC_META = {
@@ -1326,6 +1464,7 @@ def analyze(code: str, use_ai: bool = True) -> dict:
     sar, _trend = compute_sar(df)
     bbiboll_u, bbiboll_m, bbiboll_l = compute_bbiboll(df)
     tower = compute_tower(df)
+    rsi6, rsi12 = compute_rsi(df)
     df["ma5"] = close.rolling(5).mean()
     df["ma10"] = close.rolling(10).mean()
     df["ma20"] = close.rolling(20).mean()
@@ -1359,6 +1498,8 @@ def analyze(code: str, use_ai: bool = True) -> dict:
         "adx": round(adx.iloc[i], 1),
         "sar": round(sar[i], 2) if sar[i] > 0 else 0,
         "tower": int(tower.iloc[i]) if pd.notna(tower.iloc[i]) else 0,
+        "rsi6": round(rsi6.iloc[i], 1) if pd.notna(rsi6.iloc[i]) else 50,
+        "rsi12": round(rsi12.iloc[i], 1) if pd.notna(rsi12.iloc[i]) else 50,
     }
 
     ctx = {
@@ -1389,6 +1530,8 @@ def analyze(code: str, use_ai: bool = True) -> dict:
         "bbiboll_m": bbiboll_m,
         "bbiboll_l": bbiboll_l,
         "tower": tower,
+        "rsi6": rsi6,
+        "rsi12": rsi12,
         "ma5": df["ma5"],
         "ma10": df["ma10"],
         "ma20": df["ma20"],
@@ -1417,6 +1560,10 @@ def analyze(code: str, use_ai: bool = True) -> dict:
         ("volume_div", "量价背离", strategy_volume_divergence),
         ("resonance", "三指标共振", strategy_resonance),
         ("dmi_psy", "DMI+PSY超跌", strategy_dmi_psy),
+        ("rsi", "RSI相对强弱", strategy_rsi),
+        ("bottom", "抄底策略", strategy_bottom),
+        ("top", "逃顶策略", strategy_top),
+        ("zt", "涨停板策略", strategy_zt),
     ]
 
     strategies_cfg = get_strategies()
