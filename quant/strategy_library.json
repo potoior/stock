@@ -1,0 +1,230 @@
+{
+  "version": "1.0",
+  "updated": "2026-08-18",
+  "description": "本系统所有量化策略的来源分类。共4个来源:两本纸质书 + 一套自创复合评分 + AI/自定义规则通道。",
+  "sources": [
+    {
+      "id": "book_cartoon",
+      "name": "《半小时漫画股票实战法》",
+      "author": "财经杂质 / 天地出版社",
+      "type": "book",
+      "status": "已量化实现",
+      "summary": "全书628页OCR→结构化知识库(strategy_knowledge.json)。策略端19个内置评估函数几乎全部来源于此书,按书中分类组织。",
+      "files": {
+        "knowledge_base": "book/半小时漫画股票实战法/strategy_knowledge.json",
+        "knowledge_md": "book/半小时漫画股票实战法/半小时漫画股票实战法_知识库.md",
+        "params_guide": "book/半小时漫画股票实战法/策略参数指南.md",
+        "ocr_pages": "output/page_0001.md ~ page_0628.md (628页)"
+      },
+      "categories": [
+        {
+          "name": "技术指标",
+          "book_category": "indicators (11个)",
+          "strategies": [
+            {"id": "macd", "name": "MACD金叉死叉", "implemented": true, "engine_id": "macd", "desc": "零上/零下金叉买、死叉卖,DIFF/DEA穿越"},
+            {"id": "kdj", "name": "KDJ超买超卖", "implemented": true, "engine_id": "kdj", "desc": "K<20超卖买、K>80超买卖,K/D金叉"},
+            {"id": "boll", "name": "BOLL布林线", "implemented": true, "engine_id": "boll", "desc": "触上/下轨回归,中轨支撑"},
+            {"id": "psy", "name": "PSY心理线", "implemented": true, "engine_id": "psy", "desc": "超买>75/超卖<25"},
+            {"id": "dmi", "name": "DMI趋势", "implemented": true, "engine_id": "dmi", "desc": "+DI/-DI金叉死叉,ADX趋势强度"},
+            {"id": "bias", "name": "BIAS乖离率", "implemented": true, "engine_id": "bias", "desc": "短期乖离超买超卖"},
+            {"id": "sar", "name": "SAR止损", "implemented": true, "engine_id": "sar", "desc": "抛物线转向止损"},
+            {"id": "tower", "name": "宝塔线TOWER", "implemented": true, "engine_id": "tower", "desc": "宝塔线翻红/翻绿"},
+            {"id": "roa_pe_筹码", "name": "ROE/市盈率/筹码分布", "implemented": false, "desc": "基本面/筹码指标,数据未接入,未实现"}
+          ]
+        },
+        {
+          "name": "均线系统",
+          "book_category": "ma_systems (6个)",
+          "strategies": [
+            {"id": "ma_stop", "name": "均线止损法", "implemented": true, "engine_id": "ma_stop", "desc": "跌破5日均线止盈/止损"},
+            {"id": "two_line", "name": "二线法", "implemented": true, "engine_id": "two_line", "desc": "5/10双均线金叉死叉"},
+            {"id": "ma_combo", "name": "均线组合(长短均线法/357)", "implemented": true, "engine_id": "ma_combo", "desc": "5/10/60三均线多头排列"},
+            {"id": "three_third", "name": "三分法", "implemented": true, "engine_id": "three_third", "desc": "7/13/20三周期均线"},
+            {"id": "life_line", "name": "60日生命线", "implemented": true, "engine_id": "life_line", "desc": "股价站上/跌破60日生命线"}
+          ]
+        },
+        {
+          "name": "量能策略",
+          "book_category": "volume_strategies (5个)",
+          "strategies": [
+            {"id": "bounce", "name": "反弹量化(抓反弹)", "implemented": true, "engine_id": "bounce", "desc": "超跌反弹+回撤+放量"},
+            {"id": "volume_divergence", "name": "量价背离", "implemented": true, "engine_id": "volume_div", "desc": "缩量整理后放量突破"},
+            {"id": "高量柱", "name": "高量柱战法", "implemented": false, "desc": "放量突破关键位,未独立实现(部分融入custom_ai_demo)"},
+            {"id": "看妖股", "name": "看妖股战法", "implemented": false, "desc": "未实现"}
+          ]
+        },
+        {
+          "name": "实战战法",
+          "book_category": "battle_strategies (9个)",
+          "strategies": [
+            {"id": "sparrow", "name": "麻雀战术", "implemented": true, "engine_id": "sparrow", "desc": "5日arrow目标位,短期高频止盈"},
+            {"id": "龙回头", "name": "龙回头战法", "implemented": false, "desc": "龙头股回调二次启动,未实现"},
+            {"id": "打板", "name": "打板策略", "implemented": false, "desc": "涨停板追击,需Level-2数据"},
+            {"id": "T+0", "name": "T+0滚动操作", "implemented": false, "desc": "日内滚动,未实现"},
+            {"id": "抄底法", "name": "抄底法", "implemented": false, "desc": "未独立实现(部分融入bounce/dmi_psy)"},
+            {"id": "压力支撑", "name": "压力支撑法", "implemented": false, "desc": "未实现"},
+            {"id": "区间交易", "name": "区间交易法/地摊法", "implemented": false, "desc": "未实现"},
+            {"id": "复盘法", "name": "复盘法", "implemented": false, "desc": "偏流程,未量化"}
+          ]
+        },
+        {
+          "name": "组合策略(自创)",
+          "book_category": "— (书中未单列,基于书中指标组合)",
+          "strategies": [
+            {"id": "resonance", "name": "三指标共振", "implemented": true, "engine_id": "resonance", "desc": "MACD+KDJ+BOLL同向共振"},
+            {"id": "dmi_psy", "name": "DMI+PSY超跌", "implemented": true, "engine_id": "dmi_psy", "desc": "双指标超跌组合"},
+            {"id": "bbiboll", "name": "BBIBOLL多空布林", "implemented": true, "engine_id": "bbiboll", "desc": "多空布林通道(计算函数已有,策略端可启用)"}
+          ]
+        }
+      ],
+      "stats": {"total_in_book": 41, "implemented": 19, "not_implemented": 22}
+    },
+    {
+      "id": "book_caolian",
+      "name": "《中国股市操练大全》",
+      "author": "(股市操练大全系列)",
+      "type": "book",
+      "status": "已提取速查文档,未量化实现",
+      "summary": "全书11963行MD已提取交易策略章节(2812行)+精炼版(1095行)+速查目录。技术指标部分与漫画书重叠,独有章节(RSI/抄底/逃顶/跟庄/涨停板)尚未量化。",
+      "files": {
+        "full_md": "book/中国股市操练大全.md (11963行)",
+        "strategies_md": "book/中国股市操练大全_交易策略.md (2812行)",
+        "refined_md": "book/中国股市操练大全_交易策略_精炼版.md (1095行)",
+        "extract_script": "book/extract_strategies.py"
+      },
+      "categories": [
+        {
+          "name": "第8章 技术指标法则",
+          "book_category": "与漫画书重叠",
+          "strategies": [
+            {"id": "rsi", "name": "RSI指标策略", "implemented": false, "desc": "engine已有compute_rsi计算函数(strategy_engine.py:311),无strategy_rsi评估函数"},
+            {"id": "macd_8", "name": "MACD(8.3)", "implemented": true, "engine_id": "macd", "desc": "与漫画书MACD同源,已实现"},
+            {"id": "kdj_8", "name": "KDJ(8.4)", "implemented": true, "engine_id": "kdj", "desc": "与漫画书KDJ同源,已实现"},
+            {"id": "boll_8", "name": "BOLL(8.6)", "implemented": true, "engine_id": "boll", "desc": "已实现"},
+            {"id": "bias_8", "name": "BIAS(8.7)", "implemented": true, "engine_id": "bias", "desc": "已实现"}
+          ]
+        },
+        {
+          "name": "第12章 投资法则与策略",
+          "book_category": "偏纪律,难硬量化",
+          "strategies": [
+            {"id": "plan_trade", "name": "计划你的交易", "implemented": false, "desc": "进场/出局/随机应对计划,偏纪律"},
+            {"id": "trend_follow", "name": "顺势而为", "implemented": false, "desc": "高抛低吸/持股待涨,可抽象为趋势过滤"},
+            {"id": "pyramid", "name": "金字塔形买卖法", "implemented": false, "desc": "加仓/减仓金字塔,未实现"},
+            {"id": "stop_profit", "name": "有暴利便收手", "implemented": false, "desc": "偏纪律"}
+          ]
+        },
+        {
+          "name": "第14章 选股策略",
+          "book_category": "需基本面/政策数据",
+          "strategies": [
+            {"id": "policy_select", "name": "国家经济政策选股", "implemented": false, "desc": "需政策/新闻数据"},
+            {"id": "pe_select", "name": "市盈率选股", "implemented": false, "desc": "需PE数据"},
+            {"id": "hotspot_select", "name": "市场热点选股", "implemented": false, "desc": "需热点/板块数据"},
+            {"id": "shareholder_select", "name": "股东人数变动选股", "implemented": false, "desc": "需财务数据"}
+          ]
+        },
+        {
+          "name": "第15章 抄底策略",
+          "book_category": "形态化",
+          "strategies": [
+            {"id": "bottom_kline", "name": "K线+成交量识底抄底", "implemented": false, "desc": "底部K线形态+缩量,部分融入bounce"},
+            {"id": "bottom_ma", "name": "K线+均线识底抄底", "implemented": false, "desc": "均线多头确认底"},
+            {"id": "bottom_accel", "name": "大跌后加速下跌识底", "implemented": false, "desc": "恐慌底形态"},
+            {"id": "bottom_time", "name": "利用时间识底", "implemented": false, "desc": "时间周期对称"}
+          ]
+        },
+        {
+          "name": "第16章 逃顶策略",
+          "book_category": "形态化",
+          "strategies": [
+            {"id": "top_volume", "name": "利用成交量识顶逃顶", "implemented": false, "desc": "天量见顶"},
+            {"id": "top_accel", "name": "大涨后加速上涨识顶", "implemented": false, "desc": "赶顶形态"},
+            {"id": "top_weekly", "name": "周巨阳线识顶", "implemented": false, "desc": "周线见顶信号"},
+            {"id": "top_monthly", "name": "月巨阳线识顶", "implemented": false, "desc": "月线见顶信号"}
+          ]
+        },
+        {
+          "name": "第17章 跟庄炒股",
+          "book_category": "形态化,量化难度高",
+          "strategies": [
+            {"id": "zhuang_test", "name": "庄家试盘识别", "implemented": false, "desc": "试盘形态"},
+            {"id": "zhuang_build", "name": "庄家建仓识别", "implemented": false, "desc": "建仓形态"},
+            {"id": "zhuang_pull", "name": "庄家拉高识别", "implemented": false, "desc": "拉升形态"},
+            {"id": "zhuang_ship", "name": "庄家出货识别", "implemented": false, "desc": "出货形态"},
+            {"id": "zhuang_wash", "name": "庄家洗盘识别", "implemented": false, "desc": "洗盘形态"}
+          ]
+        },
+        {
+          "name": "第20章 涨停板策略",
+          "book_category": "需涨跌幅判断",
+          "strategies": [
+            {"id": "zt_type", "name": "涨停板类型分类", "implemented": false, "desc": "一字板/拉高板/封板强度"},
+            {"id": "zt_unsealed", "name": "涨停封不牢现象", "implemented": false, "desc": "开板回封识别"},
+            {"id": "zt_pull", "name": "拉高型涨停交易时机", "implemented": false, "desc": "可基于日涨跌幅≥9.8%判断"}
+          ]
+        }
+      ],
+      "stats": {"total_chapters": 7, "implemented": 4, "not_implemented": 25}
+    },
+    {
+      "id": "yujie_custom",
+      "name": "玉姐精选(自创复合评分)",
+      "author": "自研",
+      "type": "custom_composite",
+      "status": "已实现并回测验证",
+      "summary": "自研10条规则全市场评分系统,融合两本书的指标思想但无对应书中单一章节。已4年280万信号回测验证:5+分档有alpha,7+分60天+11.79%。前端「玉姐精选」榜+玉姐模拟盘引擎+回测/网格寻优均基于此。",
+      "files": {
+        "engine": "quant/yujie_scan.py",
+        "backtest": "quant/backtest_yujie.py",
+        "agent": "quant/agent_engine.py (第三引擎_yujie_cycle)",
+        "report": "quant/yujie_backtest_report.md / .json",
+        "grid_report": "quant/yujie_grid_report.md / .json"
+      },
+      "categories": [
+        {
+          "name": "评分规则(10条)",
+          "book_category": "复合规则,综合两本书指标思想",
+          "strategies": [
+            {"id": "yujie_macd_golden", "name": "MACD金叉", "implemented": true, "score": 2, "desc": "DIFF上穿DEA,+2分"},
+            {"id": "yujie_macd_near", "name": "MACD即将金叉", "implemented": true, "score": 1, "desc": "DIFF-DEA差值<阈值,+1分"},
+            {"id": "yujie_macd_green", "name": "MACD绿柱缩短", "implemented": true, "score": 1, "desc": "绿柱连续缩短,+1分"},
+            {"id": "yujie_mos_bottom", "name": "MOS低点(底背离)", "implemented": true, "score": 1, "desc": "MOS底背离,+1分"},
+            {"id": "yujie_mos_green", "name": "MOS绿柱缩短", "implemented": true, "score": 1, "desc": "+1分"},
+            {"id": "yujie_breakout", "name": "突破+金叉", "implemented": true, "score": 2, "desc": "突破近20日高点+金叉,+2分"},
+            {"id": "yujie_rsi_golden", "name": "RSI金叉", "implemented": true, "score": 1, "desc": "RSI6上穿RSI12,+1分"},
+            {"id": "yujie_bull_ma", "name": "多线多头", "implemented": true, "score": 1, "desc": "MA5>10>20>60多头排列,+1分"},
+            {"id": "yujie_low_pos", "name": "120日低位区", "implemented": true, "score": 1, "desc": "现价≤(高+低)*0.4,+1分"},
+            {"id": "yujie_drawdown", "name": "深回撤(距120日高)", "implemented": true, "score": 1, "desc": "距120日高点回撤≥阈值(默认0.2,网格寻优0.3更优),+1分"}
+          ]
+        }
+      ],
+      "stats": {"total_rules": 10, "implemented": 10, "not_implemented": 0},
+      "backtest": {"signal_count": "280万+", "validated": "5+分档60天超额+0.16%~+0.30%,7+分60天+11.79%"}
+    },
+    {
+      "id": "ai_custom",
+      "name": "AI / 自定义规则策略",
+      "author": "自研",
+      "type": "ai_custom",
+      "status": "已实现",
+      "summary": "策略端自定义通道:用户用自然语言描述买卖规则,走LLM网关(DSV4-Flash-0731-1M)判定。引擎提供eval_condition可视化条件评估 + AI判定双通道。AI模拟盘引擎基于此。",
+      "files": {
+        "engine": "quant/strategy_engine.py (eval_condition / ai_evaluate_custom)",
+        "agent": "quant/agent_engine.py (第一引擎AI)",
+        "ai_gateway": "http://10.10.250.219/v1/chat/completions (DSV4-Flash-0731-1M)"
+      },
+      "categories": [
+        {
+          "name": "自定义策略",
+          "book_category": "— (用户自创,非书中)",
+          "strategies": [
+            {"id": "custom_ai_demo", "name": "放量突破(AI判定示例)", "implemented": true, "engine_id": "custom_ai_demo", "desc": "走AI判定通道的示例自定义策略"},
+            {"id": "custom_user", "name": "用户自创策略", "implemented": true, "desc": "前端「策略管理」tab可新建/编辑,自然语言描述买卖规则"}
+          ]
+        }
+      ],
+      "stats": {"total": 2, "implemented": 2}
+    }
+  ]
+}

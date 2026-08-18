@@ -874,6 +874,19 @@ def yujie_backtest():
         return {"exists": False, "msg": f"读取报告失败: {e}"}
 
 
+@app.get("/api/strategy-library")
+def strategy_library():
+    """返回策略大全：所有量化策略按4个来源分类的结构化数据。"""
+    import json
+    from pathlib import Path
+
+    lib_path = Path(__file__).parent / "strategy_library.json"
+    try:
+        return json.loads(lib_path.read_text(encoding="utf-8"))
+    except Exception as e:
+        return {"error": f"读取策略库失败: {e}"}
+
+
 def _start_yujie_scheduler():
     """玉姐精选已合并入 daily_scan 调度器(9:00 一起跑),这里不再独立调度。
     保留函数只是为了向后兼容外部调用。

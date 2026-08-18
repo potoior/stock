@@ -43,6 +43,8 @@ createApp({
             yjMinScore: 5,  // 最低展示分数（回测验证 5+ 分档有 alpha，7+ 极稀缺）
             // backtest report
             btReport: null, btLoading: false,
+            // strategy library
+            strategyLib: null, slLoading: false, slActive: 0,
         };
     },
     computed: {
@@ -132,7 +134,7 @@ createApp({
         toastMsg(msg) { this.toast = msg; setTimeout(() => this.toast = '', 2500); },
         // 浏览器前进后退或外部改 hash 时,同步 tab + 触发对应 load
         onHashChange() {
-            const VALID = ['watchlist', 'market', 'analyze', 'strategies', 'agent', 'dailyscan', 'yujie', 'btreport'];
+            const VALID = ['watchlist', 'market', 'analyze', 'strategies', 'agent', 'dailyscan', 'yujie', 'btreport', 'stratlib'];
             const hashTab = location.hash.slice(1);
             if (!VALID.includes(hashTab) || this.tab === hashTab) return;
             this.tab = hashTab;
@@ -143,6 +145,7 @@ createApp({
             else if (hashTab === 'dailyscan') this.loadDailyScan();
             else if (hashTab === 'yujie') { this.yjView = 'list'; this.yjPage = 1; this.loadYujie(); }
             else if (hashTab === 'btreport') this.loadBtReport();
+            else if (hashTab === 'stratlib') this.loadStrategyLib();
         },
         async searchStock(q) {
             if (!q || q.length < 2) { this.searchResults = []; this.showSearch = false; return; }
@@ -870,6 +873,25 @@ createApp({
             return Object.keys(this.btReport.report.horizons).sort((a, b) => Number(a) - Number(b));
         },
         btBuckets() { return ['1-2', '3-4', '5-6', '7+']; },
+        async loadStrategyLib() {
+            if (this.strategyLib) return;  // 已加载则不重复请求
+            this.slLoading = true;
+            try {
+                const r = await (await fetch('/api/strategy-library')).json();
+                this.strategyLib = r;
+            } catch (e) {
+                this.strategyLib = null;
+            } finally {
+                this.slLoading = false;
+            }
+        },
+        slSourceType(t) {
+            return { book: '📖', custom_composite: '💠', ai_custom: '🤖' }[t] || '📦';
+        },
+        slStatsTotal(st) { return st.total_in_book || st.total_rules || st.total || 0; },
+        slStatsImpl(st) { return st.implemented || 0; },
+        slStatsNotImpl(st) { return st.not_implemented || (this.slStatsTotal(st) - this.slStatsImpl(st)); },
+        slHasScore(arr) { return (arr || []).some(s => s.score != null); },
         yjSelectStock(p) {
             this.yjSelected = p;
             this.loadYjKline(p.code);
@@ -1111,10 +1133,11 @@ createApp({
     },
     mounted() {
         // 启动时根据 hash 恢复 tab
-        const VALID = ['watchlist', 'market', 'analyze', 'strategies', 'agent', 'dailyscan', 'yujie', 'btreport'];
+        const VALID = ['watchlist', 'market', 'analyze', 'strategies', 'agent', 'dailyscan', 'yujie', 'btreport', 'stratlib'];
         const hashTab = location.hash.slice(1);
         if (VALID.includes(hashTab)) this.tab = hashTab;
         if (hashTab === 'btreport') this.loadBtReport();
+        else if (hashTab === 'stratlib') this.loadStrategyLib();
         // 监听浏览器前进后退/外部 hash 变化
         window.addEventListener('hashchange', this.onHashChange);
 
