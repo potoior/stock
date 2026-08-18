@@ -225,6 +225,17 @@ def run_once(limit, top, news_limit):
 
     save_report(stats, analyzed, news, body, now)
     print(f"\n日报已生成: {REPORTS / ('daily_' + now.strftime('%Y%m%d') + '.md')}")
+
+    # 飞书推送日报卡片(失败仅打日志,不影响主流程)
+    try:
+        from feishu import send_daily_to_feishu
+
+        ok = send_daily_to_feishu(stats, analyzed, body, now=now)
+        if ok:
+            print("飞书推送成功")
+    except Exception as e:
+        print(f"飞书推送失败: {e}")
+
     print("\n" + body[:1500])
 
 

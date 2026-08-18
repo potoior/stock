@@ -27,5 +27,12 @@
     {"id": "custom_ai_demo", "name": "放量突破(示例,AI判定)", "type": "custom", "enabled": true,
      "buy_rule": "MACD出现金叉且当日成交量大于5日均量1.5倍，并且收盘价站在MA5上方时买入",
      "sell_rule": "收盘价跌破MA10，或者KDJ出现死叉时卖出"}
-  ]
+  ],
+  "feishu": {
+    "enabled": false,
+    "app_id": "",
+    "app_secret": "",
+    "chat_id": "",
+    "_help": "在 https://open.feishu.cn 创建自建应用→勾选机器人→权限加 im:message:send_as_bot→发布→目标群添加此机器人;chat_id 从群设置复制"
+  }
 }
