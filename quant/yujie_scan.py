@@ -21,6 +21,7 @@
 """
 
 import json
+import logging
 import sqlite3
 import threading
 import time
@@ -28,16 +29,16 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 
-import numpy as np
-
 from daily_scan import fetch_market_all, norm_code
 from strategy_engine import (
     CONFIG_PATH,
-    get_daily_data,
     compute_macd,
     compute_mos_lows,
     compute_rsi,
+    get_daily_data,
 )
+
+log = logging.getLogger("quant.yujie")
 
 HOME = Path(__file__).parent
 CACHE_DB = HOME / "stock_cache.db"
@@ -140,7 +141,7 @@ def _hit_label(rule_id):
     }.get(rule_id, rule_id)
 
 
-def score_stock(code, params):
+def score_stock(code: str, params: dict) -> tuple[float, list, dict | None]:
     """对单只股票打分，返回 (score, hits, detail) 或 (0, [], None) 数据不足。"""
     df = get_daily_data(code)
     if len(df) < params["scope"]["min_history_days"]:
@@ -166,15 +167,21 @@ def score_stock(code, params):
     hits = []
     detail = {}
 
-    # 指标数值明细（供前端"强势明细表"展示）
-    ma5_v = float(close.rolling(5).mean().iloc[i])
-    ma10_v = float(close.rolling(10).mean().iloc[i])
-    ma20_v = float(close.rolling(20).mean().iloc[i])
-    ma60_v = float(close.rolling(60).mean().iloc[i]) if len(df) >= 60 else None
+    # 预算所有需要的 MA 窗口（避免重复 rolling，热路径 5000 次扫描）
+    m1, m2, m3, m4 = (int(params["bull_ma"][k]) for k in ("m1", "m2", "m3", "m4"))
+    ma_windows = {5, 10, 20, 60, m1, m2, m3, m4}
+    ma_cache = {w: float(close.rolling(w).mean().iloc[i]) for w in ma_windows if len(df) >= w}
+    ma5_v = ma_cache.get(5)
+    ma10_v = ma_cache.get(10)
+    ma20_v = ma_cache.get(20)
+    ma60_v = ma_cache.get(60)
+
     detail.update({
         "price": round(price, 2),
-        "ma5": round(ma5_v, 2), "ma10": round(ma10_v, 2),
-        "ma20": round(ma20_v, 2), "ma60": round(ma60_v, 2),
+        "ma5": round(ma5_v, 2) if ma5_v is not None else None,
+        "ma10": round(ma10_v, 2) if ma10_v is not None else None,
+        "ma20": round(ma20_v, 2) if ma20_v is not None else None,
+        "ma60": round(ma60_v, 2) if ma60_v is not None else None,
         "macd_dif": round(d, 3), "macd_dea": round(e, 3),
         "macd_bar": round(bar_v, 3),
         "rsi6": round(r1, 1), "rsi12": round(r2, 1),
@@ -231,12 +238,11 @@ def score_stock(code, params):
         detail["rsi_golden"] = True
 
     # 8. 多线多头
-    m1, m2, m3, m4 = (int(params["bull_ma"][k]) for k in ("m1", "m2", "m3", "m4"))
-    ma_s = float(close.rolling(m1).mean().iloc[i])
-    ma_m = float(close.rolling(m2).mean().iloc[i])
-    ma_l = float(close.rolling(m3).mean().iloc[i])
-    ma_l4 = float(close.rolling(m4).mean().iloc[i])
-    if price > ma_s > ma_m > ma_l > ma_l4:
+    ma_s = ma_cache.get(m1)
+    ma_m = ma_cache.get(m2)
+    ma_l = ma_cache.get(m3)
+    ma_l4 = ma_cache.get(m4)
+    if all(v is not None for v in (ma_s, ma_m, ma_l, ma_l4)) and price > ma_s > ma_m > ma_l > ma_l4:
         score += float(params["bull_ma"]["score"])
         hits.append(_hit_label("bull_ma"))
         detail["bull_ma"] = True
@@ -314,10 +320,22 @@ def load_picks(date_str=None):
     return out
 
 
+def get_rank(code, date_str=None):
+    """直接 SQL 查单股当日排名，避免 load_picks() 全表加载。"""
+    if not date_str:
+        date_str = datetime.now().strftime("%Y%m%d")
+    conn = _db()
+    row = conn.execute(
+        "SELECT rank FROM yujie_picks WHERE date=? AND code=?", (date_str, code)
+    ).fetchone()
+    conn.close()
+    return row[0] if row else None
+
+
 # ---------------- 全市场扫描 ----------------
 
 
-def run_once(limit=0):
+def run_once(limit: int = 0) -> int:
     params = get_params()
     date_str = datetime.now().strftime("%Y%m%d")
     print(f"== 玉姐精选扫描 {date_str} ==")
@@ -363,6 +381,7 @@ def run_once(limit=0):
             try:
                 sc, hits, detail = score_stock(code, params)
             except Exception:
+                log.exception("score_stock 异常 %s %s", code, name)
                 sc, hits, detail = 0, [], None
             return code, name, price, pct, sc, hits, detail or {}
 

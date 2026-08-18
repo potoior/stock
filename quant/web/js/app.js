@@ -63,30 +63,33 @@ createApp({
             const r = [];
             const add = (label, k, hit, fmt) => {
                 let v = d[k];
-                if (fmt && typeof v === 'number') v = fmt(v);
-                if (v == null) v = '-';
+                if (fmt && (typeof v === 'number' || typeof v === 'boolean')) v = fmt(v);
+                if (v == null || v === undefined) v = '-';
                 r.push({ k, label, value: v, hit: !!hit });
             };
+            const boolFmt = v => v ? '✓' : '-';
             add('现价', 'price', d.price > 0, v => v.toFixed(2));
             add('MA5', 'ma5', d.ma5 > 0 && d.price > d.ma5, v => v.toFixed(2));
             add('MA10', 'ma10', d.ma10 > 0 && d.price > d.ma10, v => v.toFixed(2));
             add('MA20', 'ma20', d.ma20 > 0 && d.price > d.ma20, v => v.toFixed(2));
             add('MA60', 'ma60', d.ma60 > 0 && d.price > d.ma60, v => v.toFixed(2));
-            const bull = d.price > d.ma5 && d.ma5 > d.ma10 && d.ma10 > d.ma20 && d.ma20 > d.ma60;
-            add('多线多头', 'bull_ma', !!d.bull_ma, v => v.toFixed(1));
+            add('多线多头', 'bull_ma', !!d.bull_ma, boolFmt);
             add('MACD DIFF(12-26)', 'macd_dif', !!d.macd_golden || !!d.macd_near, v => v.toFixed(3));
             add('MACD DEA(9)', 'macd_dea', !!d.macd_golden || !!d.macd_near, v => v.toFixed(3));
             add('MACD 柱', 'macd_bar', !!d.macd_green, v => v.toFixed(3));
-            add('MACD 金叉', 'macd_golden', !!d.macd_golden, v => v.toFixed(1));
-            add('MACD 即将金叉', 'macd_near', !!d.macd_near, v => v.toFixed(1));
+            add('MACD 金叉', 'macd_golden', !!d.macd_golden, boolFmt);
+            add('MACD 即将金叉', 'macd_near', !!d.macd_near, boolFmt);
+            add('MACD 绿柱缩短', 'macd_green', !!d.macd_green, boolFmt);
             add('RSI6', 'rsi6', !!d.rsi_golden, v => v.toFixed(1));
             add('RSI12', 'rsi12', !!d.rsi_golden, v => v.toFixed(1));
-            add('RSI 金叉', 'rsi_golden', !!d.rsi_golden, v => v.toFixed(1));
-            add('MOS 低点(底背离)', 'mos_bottom', !!d.mos_bottom, v => v.toFixed(1));
+            add('RSI 金叉', 'rsi_golden', !!d.rsi_golden, boolFmt);
+            add('MOS 低点(底背离)', 'mos_bottom', !!d.mos_bottom, boolFmt);
             add('MOS CL1', 'cl1', !!d.mos_bottom, v => v.toFixed(2));
             add('MOS CL2', 'cl2', !!d.mos_bottom, v => v.toFixed(2));
-            add('MOS 低位区', 'low_pos', !!d.low_pos, v => v.toFixed(1));
-            add('深回撤(距120日高)', 'drawdown', !!d.drawdown, v => v.toFixed(1));
+            add('MOS 绿柱缩短', 'mos_green', !!d.mos_green, boolFmt);
+            add('突破+金叉', 'breakout', !!d.breakout, boolFmt);
+            add('120日低位区', 'low_pos', !!d.low_pos, boolFmt);
+            add('深回撤(距120日高)', 'drawdown', !!d.drawdown, boolFmt);
             return r;
         },
         yjPagedPicks() {
@@ -837,15 +840,29 @@ createApp({
         mdToHtml(md) {
             if (!md) return '';
             const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+            // 行内：**粗体**、`代码`、[文本](url)、链接裸 URL
+            const inline = s => esc(s)
+                .replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>')
+                .replace(/`([^`]+?)`/g,'<code style="background:#2a2a2e;padding:1px 4px;border-radius:3px;font-family:monospace;">$1</code>')
+                .replace(/\[([^\]]+?)\]\(([^)\s]+)\)/g,'<a href="$2" target="_blank" style="color:#7ec;">$1</a>')
+                .replace(/(^|[\s(])((https?:\/\/)[^\s<)]+[^\s<).!?,;:'\])])/g,
+                    '$1<a href="$2" target="_blank" style="color:#7ec;">$2</a>');
             const lines = md.split('\n');
-            let html = '', inList = false, inTable = false, tableRows = [];
+            let html = '', inList = false, inTable = false, tableRows = [], inQuote = false, inCode = false, codeBuf = [];
+            const flushList = () => { if (inList) { html += '</ul>'; inList = false; } };
+            const flushQuote = () => { if (inQuote) { html += '</blockquote>'; inQuote = false; } };
+            const flushCode = () => {
+                if (inCode) {
+                    html += '<pre style="background:#1e1e22;padding:10px;border-radius:4px;overflow:auto;margin:8px 0;"><code style="font-family:monospace;font-size:12px;">' + esc(codeBuf.join('\n')) + '</code></pre>';
+                    inCode = false; codeBuf = [];
+                }
+            };
             const flushTable = () => {
                 if (!tableRows.length) return;
                 const rows = tableRows.map(r => r.split('|').map(c => c.trim()).filter(Boolean));
                 if (rows.length >= 2) {
                     html += '<table style="width:100%;border-collapse:collapse;font-size:13px;margin:8px 0;">';
                     html += '<thead><tr>' + rows[0].map(c => `<th style="border:1px solid #444;padding:4px 8px;background:#2a2a2e;">${esc(c)}</th>`).join('') + '</tr></thead>';
-                    // rows[1] 是分隔行 |---|---|
                     for (let i = 2; i < rows.length; i++) {
                         html += '<tr>' + rows[i].map(c => `<td style="border:1px solid #444;padding:4px 8px;">${esc(c)}</td>`).join('') + '</tr>';
                     }
@@ -854,17 +871,36 @@ createApp({
                 tableRows = [];
             };
             for (let line of lines) {
-                if (line.trim().startsWith('|')) { if (inList) { html += '</ul>'; inList = false; } inTable = true; tableRows.push(line.trim()); continue; }
-                else { if (inTable) { flushTable(); inTable = false; } }
-                if (/^###\s/.test(line)) { if (inList) { html += '</ul>'; inList = false; } html += `<h3 style="margin:14px 0 6px;color:#7ec;">${esc(line.replace(/^###\s/,''))}</h3>`; }
-                else if (/^##\s/.test(line)) { if (inList) { html += '</ul>'; inList = false; } html += `<h2 style="margin:16px 0 8px;color:#9e7ec;border-bottom:1px solid #444;padding-bottom:4px;">${esc(line.replace(/^##\s/,''))}</h2>`; }
-                else if (/^#\s/.test(line)) { if (inList) { html += '</ul>'; inList = false; } html += `<h1 style="margin:18px 0 10px;color:#fff;">${esc(line.replace(/^#\s/,''))}</h1>`; }
-                else if (/^\s*[-*]\s/.test(line)) { if (!inList) { html += '<ul style="margin:6px 0 6px 20px;">'; inList = true; } html += `<li>${esc(line.replace(/^\s*[-*]\s/,'')).replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>')}</li>`; }
-                else if (line.trim() === '---') { if (inList) { html += '</ul>'; inList = false; } html += '<hr style="border:none;border-top:1px solid #444;margin:12px 0;">'; }
-                else if (line.trim() === '') { if (inList) { html += '</ul>'; inList = false; } }
-                else { if (inList) { html += '</ul>'; inList = false; } html += `<p style="margin:6px 0;line-height:1.7;">${esc(line).replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>')}</p>`; }
+                // 代码块围栏
+                if (line.trim().startsWith('```')) {
+                    if (inCode) { flushCode(); }
+                    else { flushList(); flushQuote(); flushTable(); inTable = false; inCode = true; codeBuf = []; }
+                    continue;
+                }
+                if (inCode) { codeBuf.push(line); continue; }
+                // 表格
+                if (line.trim().startsWith('|')) {
+                    if (inList) { html += '</ul>'; inList = false; }
+                    if (inQuote) { flushQuote(); }
+                    inTable = true; tableRows.push(line.trim()); continue;
+                } else if (inTable) { flushTable(); inTable = false; }
+                // 引用块
+                if (/^>\s?/.test(line)) {
+                    if (inList) { html += '</ul>'; inList = false; }
+                    if (!inQuote) { html += '<blockquote style="border-left:3px solid #7ec;padding:4px 12px;color:#9ab;margin:6px 0;background:#1e1e22;">'; inQuote = true; }
+                    html += `<p style="margin:2px 0;line-height:1.6;">${inline(line.replace(/^>\s?/,''))}</p>`;
+                    continue;
+                } else if (inQuote) { flushQuote(); }
+                // 标题
+                if (/^###\s/.test(line)) { flushList(); html += `<h3 style="margin:14px 0 6px;color:#7ec;">${inline(line.replace(/^###\s/,''))}</h3>`; }
+                else if (/^##\s/.test(line)) { flushList(); html += `<h2 style="margin:16px 0 8px;color:#9e7ec;border-bottom:1px solid #444;padding-bottom:4px;">${inline(line.replace(/^##\s/,''))}</h2>`; }
+                else if (/^#\s/.test(line)) { flushList(); html += `<h1 style="margin:18px 0 10px;color:#fff;">${inline(line.replace(/^#\s/,''))}</h1>`; }
+                else if (/^\s*[-*]\s/.test(line)) { if (!inList) { html += '<ul style="margin:6px 0 6px 20px;">'; inList = true; } html += `<li>${inline(line.replace(/^\s*[-*]\s/,''))}</li>`; }
+                else if (line.trim() === '---') { flushList(); html += '<hr style="border:none;border-top:1px solid #444;margin:12px 0;">'; }
+                else if (line.trim() === '') { flushList(); }
+                else { flushList(); html += `<p style="margin:6px 0;line-height:1.7;">${inline(line)}</p>`; }
             }
-            if (inList) html += '</ul>';
+            flushList(); flushQuote(); flushCode();
             if (inTable) flushTable();
             return html;
         },

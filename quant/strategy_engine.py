@@ -1,5 +1,7 @@
 import json
+import logging
 import sqlite3
+import threading
 import urllib.request
 from datetime import datetime
 from pathlib import Path
@@ -9,9 +11,44 @@ import pandas as pd
 
 from data_fetcher import fetch_realtime  # re-export: 保持 se.fetch_realtime 向后兼容
 
+log = logging.getLogger("quant")
+
 ENGINE_HOME = Path(__file__).parent
 CACHE_DB = ENGINE_HOME / "stock_cache.db"
 CONFIG_PATH = ENGINE_HOME / "config.json"
+
+# 模块级一次性建表 + WAL,避免每次 connect 都 CREATE TABLE,且 16 线程并发不阻塞
+_daily_table_inited = False
+_daily_table_lock = threading.Lock()
+
+# config.json 进程级缓存（mtime 比较）
+_config_cache = {"mtime": 0, "data": None}
+_config_lock = threading.Lock()
+
+
+def _ensure_daily_table():
+    global _daily_table_inited
+    if _daily_table_inited:
+        return
+    with _daily_table_lock:
+        if _daily_table_inited:
+            return
+        conn = sqlite3.connect(str(CACHE_DB), timeout=10)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS daily (
+                code TEXT, date TEXT,
+                open REAL, close REAL, high REAL, low REAL,
+                volume REAL, PRIMARY KEY (code, date)
+            )""")
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA synchronous=NORMAL")
+            conn.execute("PRAGMA busy_timeout=10000")
+        except Exception:
+            pass
+        conn.commit()
+        conn.close()
+        _daily_table_inited = True
 
 
 # ---------------- 数据获取（腾讯前复权） ----------------
@@ -56,15 +93,9 @@ def fetch_qfq_tencent(code, datalen=320):
     return pd.DataFrame(rows)
 
 
-def get_daily_data(code, days=320):
-    conn = sqlite3.connect(str(CACHE_DB))
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS daily (
-            code TEXT, date TEXT,
-            open REAL, close REAL, high REAL, low REAL,
-            volume REAL, PRIMARY KEY (code, date)
-        )""")
-    conn.commit()
+def get_daily_data(code: str, days: int = 320) -> pd.DataFrame:
+    _ensure_daily_table()
+    conn = sqlite3.connect(str(CACHE_DB), timeout=10)
     df = pd.read_sql("SELECT * FROM daily WHERE code=? ORDER BY date", conn, params=(code,))
     fresh = False
     if len(df) > 0:
@@ -75,9 +106,12 @@ def get_daily_data(code, days=320):
     if not fresh:
         newdf = fetch_qfq_tencent(code, datalen=days)
         if len(newdf) > 0:
-            conn.execute("DELETE FROM daily WHERE code=?", (code,))
-            newdf.to_sql("daily", conn, if_exists="append", index=False)
-            df = newdf
+            conn.executemany(
+                "INSERT OR REPLACE INTO daily(code,date,open,close,high,low,volume) VALUES(?,?,?,?,?,?,?)",
+                newdf[["code", "date", "open", "close", "high", "low", "volume"]].values.tolist(),
+            )
+            conn.commit()
+            df = pd.read_sql("SELECT * FROM daily WHERE code=? ORDER BY date", conn, params=(code,))
     conn.close()
     if df.empty:
         return df
@@ -89,11 +123,12 @@ def get_daily_data(code, days=320):
 # ---------------- 指标计算（通达信口径） ----------------
 
 
-def compute_basic_signals(code, current_price=None):
+def compute_basic_signals(code: str, current_price: float | None = None) -> dict:
     """统一的简化信号计算：返回 MA/MACD/KDJ 基础指标字典。
 
     被 api.py / dashboard.py / realtime.py / agent.py 共用，避免四份重复实现。
     若 current_price 给定，则用其替换最后一根 K 线的收盘价/最高/最低，模拟实时价。
+    MACD/KDJ 复用 compute_macd/compute_kdj，确保口径与策略端完全一致。
     """
     try:
         df = get_daily_data(code)
@@ -113,26 +148,20 @@ def compute_basic_signals(code, current_price=None):
         ma5 = close.rolling(5).mean().iloc[-1]
         ma10 = close.rolling(10).mean().iloc[-1]
         ma20 = close.rolling(20).mean().iloc[-1]
-        ema12 = close.ewm(span=12, adjust=False).mean()
-        ema26 = close.ewm(span=26, adjust=False).mean()
-        dif = ema12 - ema26
-        dea = dif.ewm(span=9, adjust=False).mean()
-        macd_val = 2 * (dif.iloc[-1] - dea.iloc[-1])
-        low9 = low.rolling(9).min()
-        high9 = high.rolling(9).max()
-        rsv = (close - low9) / (high9 - low9) * 100
-        k = rsv.ewm(com=2, adjust=False).mean()
-        d = k.ewm(com=2, adjust=False).mean()
-        k_val = k.iloc[-1]
-        d_val = d.iloc[-1]
-        j_val = 3 * k_val - 2 * d_val
+        # 复用统一指标实现，避免重复且口径漂移
+        tmp = pd.DataFrame({"close": close, "high": high, "low": low})
+        diff, dea, bar = compute_macd(tmp)
+        k, d, j, _ = compute_kdj(tmp)
+        k_val = float(k.iloc[-1])
+        d_val = float(d.iloc[-1])
+        j_val = float(j.iloc[-1])
         return {
             "price": last_price,
             "ma5": round(ma5, 2),
             "ma10": round(ma10, 2),
             "ma20": round(ma20, 2),
-            "macd": round(macd_val, 3),
-            "macd_bull": bool(dif.iloc[-1] > dea.iloc[-1]),
+            "macd": round(float(bar.iloc[-1]), 3),
+            "macd_bull": bool(diff.iloc[-1] > dea.iloc[-1]),
             "k": round(k_val, 1),
             "d": round(d_val, 1),
             "j": round(j_val, 1),
@@ -384,23 +413,39 @@ DEFAULT_STRATEGY_PARAMS = {
 
 
 def _load_config():
-    if CONFIG_PATH.exists():
-        try:
-            return json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-        except Exception:
-            pass
-    example = ENGINE_HOME / "config.example.json"
-    if example.exists():
-        try:
-            _save_config(json.loads(example.read_text(encoding="utf-8")))
-            return json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-        except Exception:
-            pass
+    with _config_lock:
+        if CONFIG_PATH.exists():
+            try:
+                mtime = CONFIG_PATH.stat().st_mtime
+                if mtime == _config_cache["mtime"] and _config_cache["data"] is not None:
+                    return _config_cache["data"]
+                data = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+                _config_cache["mtime"] = mtime
+                _config_cache["data"] = data
+                return data
+            except Exception:
+                pass
+        example = ENGINE_HOME / "config.example.json"
+        if example.exists():
+            try:
+                _save_config(json.loads(example.read_text(encoding="utf-8")))
+                # 重新读一次填充缓存
+                data = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+                _config_cache["mtime"] = CONFIG_PATH.stat().st_mtime
+                _config_cache["data"] = data
+                return data
+            except Exception:
+                pass
     return {}
 
 
 def _save_config(cfg):
     CONFIG_PATH.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+    try:
+        _config_cache["mtime"] = CONFIG_PATH.stat().st_mtime
+        _config_cache["data"] = cfg
+    except Exception:
+        pass
 
 
 # ---------------- AI 判定缓存（当日） ----------------
@@ -1190,7 +1235,7 @@ def judge_custom_with_ai(code, ctx, custom_strats, use_ai=True):
 # ---------------- 主分析入口 ----------------
 
 
-def analyze(code, use_ai=True):
+def analyze(code: str, use_ai: bool = True) -> dict:
     rt = fetch_realtime([code])
     realtime = rt[0] if rt else None
     df = get_daily_data(code)
@@ -1318,6 +1363,7 @@ def analyze(code, use_ai=True):
         try:
             sg, rsn = fn(ctx, params)
         except Exception:
+            log.exception("策略 %s(%s) 计算异常", sid, code)
             sg, rsn = "hold", "计算异常"
         signals.append({"key": sid, "name": name, "signal": sg, "reason": rsn, "builtin": True})
 
@@ -1332,8 +1378,6 @@ def analyze(code, use_ai=True):
     total_n = len(signals)
 
     # 动态阈值：方向票需达到启用策略的40%，且持有≥3票偏向（避免1票定方向）
-    buy_n / total_n if total_n else 0
-    sell_n / total_n if total_n else 0
     min_votes = max(3, int(total_n * 0.4))
     if buy_n >= min_votes and buy_n > sell_n:
         verdict, icon = "买入", "⬆"

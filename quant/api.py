@@ -614,43 +614,51 @@ def index():
 _daily_scan_state = {"next_run": None, "last_run": None, "last_status": "idle"}
 
 
-def _start_daily_scan_scheduler():
-    """在 API 服务进程内挂一个后台线程，每个交易日定时跑 daily_scan。"""
+def _start_periodic_scheduler(state, env_prefix, default_time, run_fn, delay_seconds=0):
+    """通用定时器：每个交易日指定时间执行 run_fn()。
+
+    env_prefix: 读取 {env_prefix}_ENABLED / {env_prefix}_TIME 两个环境变量
+    delay_seconds: 在指定时间上额外延迟的秒数(避免两个调度器同时启动撞车)
+    """
     import os
     import threading
     import time as _time
     from datetime import datetime, timedelta
 
-    enabled = os.environ.get("DAILY_SCAN_ENABLED", "1") == "1"
+    enabled = os.environ.get(f"{env_prefix}_ENABLED", "1") == "1"
     if not enabled:
-        _daily_scan_state["last_status"] = "disabled"
+        state["last_status"] = "disabled"
         return
-    scan_time = os.environ.get("DAILY_SCAN_TIME", "09:00")
+    scan_time = os.environ.get(f"{env_prefix}_TIME", default_time)
     hh, mm = scan_time.split(":")
 
     def loop():
         while True:
             now = datetime.now()
-            target = now.replace(hour=int(hh), minute=int(mm), second=0, microsecond=0)
+            target = now.replace(hour=int(hh), minute=int(mm), second=delay_seconds, microsecond=0)
             if now >= target:
                 target = target + timedelta(days=1)
-            _daily_scan_state["next_run"] = target.strftime("%Y-%m-%d %H:%M:%S")
-            sleep_secs = (target - now).total_seconds()
-            _time.sleep(sleep_secs)
+            state["next_run"] = target.strftime("%Y-%m-%d %H:%M:%S")
+            _time.sleep((target - now).total_seconds())
             if datetime.now().weekday() >= 5:
                 continue
-            _daily_scan_state["last_status"] = "running"
-            _daily_scan_state["last_run"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            state["last_status"] = "running"
+            state["last_run"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             try:
-                import daily_scan
-
-                daily_scan.run_once(limit=0, top=5, news_limit=20)
-                _daily_scan_state["last_status"] = "ok"
+                run_fn()
+                state["last_status"] = "ok"
             except Exception as e:
-                _daily_scan_state["last_status"] = f"error: {e}"
+                state["last_status"] = f"error: {e}"
 
-    t = threading.Thread(target=loop, name="daily_scan_scheduler", daemon=True)
-    t.start()
+    threading.Thread(target=loop, name=f"{env_prefix.lower()}_scheduler", daemon=True).start()
+
+
+def _start_daily_scan_scheduler():
+    def _run():
+        import daily_scan
+        daily_scan.run_once(limit=0, top=5, news_limit=20)
+
+    _start_periodic_scheduler(_daily_scan_state, "DAILY_SCAN", "09:00", _run, delay_seconds=0)
 
 
 @app.get("/api/daily-scan/status")
@@ -810,10 +818,7 @@ def yujie_score(q: str = ""):
     rank = None
     try:
         sc, hits, detail = yujie_scan.score_stock(code, params)
-        for p in yujie_scan.load_picks():
-            if p["code"] == code:
-                rank = p["rank"]
-                break
+        rank = yujie_scan.get_rank(code)
         return {"ok": True, "code": code, "name": name2, "score": sc,
                 "hits": hits, "detail": detail, "rank": rank}
     except Exception as e:
@@ -823,45 +828,25 @@ def yujie_score(q: str = ""):
 def _start_yujie_scheduler():
     """每个交易日 09:00 自动跑玉姐精选扫描。"""
     import os
-    import threading
-    import time as _time
-    from datetime import datetime as dt, timedelta
 
-    enabled = os.environ.get("YUJIE_SCAN_ENABLED", "1") == "1"
-    if not enabled:
-        _yujie_state["last_status"] = "disabled"
-        return
-    scan_time = os.environ.get("YUJIE_SCAN_TIME", os.environ.get("DAILY_SCAN_TIME", "09:00"))
-    hh, mm = scan_time.split(":")
+    def _run():
+        import yujie_scan
+        yujie_scan.run_once(limit=0)
 
-    def loop():
-        while True:
-            now = dt.now()
-            target = now.replace(hour=int(hh), minute=int(mm), second=10, microsecond=0)
-            if now >= target:
-                target = target + timedelta(days=1)
-            _yujie_state["next_run"] = target.strftime("%Y-%m-%d %H:%M:%S")
-            _time.sleep((target - now).total_seconds())
-            if dt.now().weekday() >= 5:
-                continue
-            _yujie_state["last_status"] = "running"
-            _yujie_state["last_run"] = dt.now().strftime("%Y-%m-%d %H:%M:%S")
-            try:
-                import yujie_scan
-
-                yujie_scan.run_once(limit=0)
-                _yujie_state["last_status"] = "ok"
-            except Exception as e:
-                _yujie_state["last_status"] = f"error: {e}"
-
-    threading.Thread(target=loop, name="yujie_scan_scheduler", daemon=True).start()
+    default_time = os.environ.get("DAILY_SCAN_TIME", "09:00")
+    _start_periodic_scheduler(_yujie_state, "YUJIE_SCAN", default_time, _run, delay_seconds=10)
 
 
 if __name__ == "__main__":
+    import logging
     import os
 
     import uvicorn
 
+    logging.basicConfig(
+        level=os.environ.get("LOG_LEVEL", "INFO"),
+        format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+    )
     _start_daily_scan_scheduler()
     _start_yujie_scheduler()
     port = int(os.environ.get("PORT", "8000"))
