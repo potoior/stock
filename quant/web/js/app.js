@@ -389,30 +389,66 @@ createApp({
             const dates = s.dates;
 
             // MACD: DIFF, DEA lines + BAR histogram
+            const macdCross = this._detectCross(s.macd_diff, s.macd_dea);  // 1=金叉 -1=死叉
+            const macdMarks = this._crossMarkPoints(dates, macdCross);
             this._renderChart('macdChart', 'macdChart', {
-                tooltip: { trigger: 'axis' },
+                tooltip: {
+                    trigger: 'axis', axisPointer: { type: 'cross' },
+                    formatter: function (params) {
+                        const i = params[0].dataIndex;
+                        const diff = s.macd_diff[i], dea = s.macd_dea[i], bar = s.macd_bar[i];
+                        const cross = macdCross[i];
+                        const crossTxt = cross === 1 ? '<span style="color:#d32f2f;">▲ 金叉</span>'
+                            : cross === -1 ? '<span style="color:#2e7d32;">▼ 死叉</span>' : '';
+                        return `${dates[i]}<br>
+                            <span style="color:#1565c0;">DIFF</span>: ${diff == null ? '-' : diff.toFixed(3)}<br>
+                            <span style="color:#e65100;">DEA</span>: ${dea == null ? '-' : dea.toFixed(3)}<br>
+                            <span style="color:#888;">BAR</span>: ${bar == null ? '-' : bar.toFixed(3)}<br>
+                            ${crossTxt}`;
+                    }
+                },
                 legend: { data: ['DIFF', 'DEA', 'BAR'], top: 0, textStyle: { fontSize: 10 } },
                 grid: { left: 50, right: 15, top: 30, bottom: 25 },
                 xAxis: { type: 'category', data: dates, axisLabel: { fontSize: 9 } },
                 yAxis: { type: 'value', scale: true, splitLine: { lineStyle: { color: '#f0f0f0' } } },
                 dataZoom: [{ type: 'inside', start: 50 }],
                 series: [
-                    { name: 'DIFF', type: 'line', data: s.macd_diff, symbol: 'none', lineStyle: { width: 1.5, color: '#1565c0' } },
+                    { name: 'DIFF', type: 'line', data: s.macd_diff, symbol: 'none', lineStyle: { width: 1.5, color: '#1565c0' },
+                      markPoint: { data: macdMarks, symbolSize: 18, label: { fontSize: 9, color: '#fff' } } },
                     { name: 'DEA', type: 'line', data: s.macd_dea, symbol: 'none', lineStyle: { width: 1.5, color: '#e65100' } },
                     { name: 'BAR', type: 'bar', data: (s.macd_bar || []).map(v => v == null ? null : { value: v, itemStyle: { color: v >= 0 ? '#d32f2f' : '#2e7d32' } }) },
                 ]
             });
 
             // KDJ: K, D, J lines
+            const kdjCross = this._detectCross(s.k, s.d);  // K 上穿 D = 金叉
+            const kdjMarks = this._crossMarkPoints(dates, kdjCross);
             this._renderChart('kdjChart', 'kdjChart', {
-                tooltip: { trigger: 'axis' },
+                tooltip: {
+                    trigger: 'axis', axisPointer: { type: 'cross' },
+                    formatter: function (params) {
+                        const i = params[0].dataIndex;
+                        const k = s.k[i], d = s.d[i], j = s.j[i];
+                        const cross = kdjCross[i];
+                        const crossTxt = cross === 1 ? '<span style="color:#d32f2f;">▲ 金叉</span>'
+                            : cross === -1 ? '<span style="color:#2e7d32;">▼ 死叉</span>' : '';
+                        const zone = k == null ? '' : (k < 20 ? '<span style="color:#2e7d32;">超卖区</span>'
+                            : k > 80 ? '<span style="color:#d32f2f;">超买区</span>' : '中性区');
+                        return `${dates[i]}<br>
+                            <span style="color:#1565c0;">K</span>: ${k == null ? '-' : k.toFixed(2)}<br>
+                            <span style="color:#e65100;">D</span>: ${d == null ? '-' : d.toFixed(2)}<br>
+                            <span style="color:#6a1b9a;">J</span>: ${j == null ? '-' : j.toFixed(2)}<br>
+                            ${zone} ${crossTxt}`;
+                    }
+                },
                 legend: { data: ['K', 'D', 'J'], top: 0, textStyle: { fontSize: 10 } },
                 grid: { left: 50, right: 15, top: 30, bottom: 25 },
                 xAxis: { type: 'category', data: dates, axisLabel: { fontSize: 9 } },
                 yAxis: { type: 'value', scale: true, splitLine: { lineStyle: { color: '#f0f0f0' } } },
                 dataZoom: [{ type: 'inside', start: 50 }],
                 series: [
-                    { name: 'K', type: 'line', data: s.k, symbol: 'none', lineStyle: { width: 1.5, color: '#1565c0' } },
+                    { name: 'K', type: 'line', data: s.k, symbol: 'none', lineStyle: { width: 1.5, color: '#1565c0' },
+                      markPoint: { data: kdjMarks, symbolSize: 18, label: { fontSize: 9, color: '#fff' } } },
                     { name: 'D', type: 'line', data: s.d, symbol: 'none', lineStyle: { width: 1.5, color: '#e65100' } },
                     { name: 'J', type: 'line', data: s.j, symbol: 'none', lineStyle: { width: 1.5, color: '#6a1b9a' } },
                 ]
@@ -421,7 +457,23 @@ createApp({
             // BOLL: upper, mid, lower + close
             const closes = (this.analysis.kline || []).map(d => d.close);
             this._renderChart('bollChart', 'bollChart', {
-                tooltip: { trigger: 'axis' },
+                tooltip: {
+                    trigger: 'axis', axisPointer: { type: 'cross' },
+                    formatter: function (params) {
+                        const i = params[0].dataIndex;
+                        const c = closes[i], u = s.boll_u[i], m = s.boll_m[i], l = s.boll_l[i];
+                        let tag = '';
+                        if (c != null && u != null && c >= u) tag = '<span style="color:#d32f2f;">触及上轨</span>';
+                        else if (c != null && l != null && c <= l) tag = '<span style="color:#2e7d32;">触及下轨</span>';
+                        const f = v => v == null ? '-' : v.toFixed(2);
+                        return `${dates[i]}<br>
+                            收盘: ${f(c)}<br>
+                            <span style="color:#d32f2f;">上轨</span>: ${f(u)}<br>
+                            <span style="color:#888;">中轨</span>: ${f(m)}<br>
+                            <span style="color:#2e7d32;">下轨</span>: ${f(l)}<br>
+                            ${tag}`;
+                    }
+                },
                 legend: { data: ['收盘', 'UP', 'MID', 'LOW'], top: 0, textStyle: { fontSize: 10 } },
                 grid: { left: 50, right: 15, top: 30, bottom: 25 },
                 xAxis: { type: 'category', data: dates, axisLabel: { fontSize: 9 } },
@@ -436,15 +488,34 @@ createApp({
             });
 
             // DMI: +DI, -DI, ADX
+            const dmiCross = this._detectCross(s.pdi, s.mdi);  // +DI 上穿 -DI
+            const dmiMarks = this._crossMarkPoints(dates, dmiCross);
             this._renderChart('dmiChart', 'dmiChart', {
-                tooltip: { trigger: 'axis' },
+                tooltip: {
+                    trigger: 'axis', axisPointer: { type: 'cross' },
+                    formatter: function (params) {
+                        const i = params[0].dataIndex;
+                        const pdi = s.pdi[i], mdi = s.mdi[i], adx = s.adx[i];
+                        const cross = dmiCross[i];
+                        const crossTxt = cross === 1 ? '<span style="color:#d32f2f;">▲ +DI上穿-DI(多头)</span>'
+                            : cross === -1 ? '<span style="color:#2e7d32;">▼ +DI下穿-DI(空头)</span>' : '';
+                        const adxTxt = adx != null && adx > 25 ? '<span style="color:#6a1b9a;">趋势强</span>' : '趋势弱';
+                        const f = v => v == null ? '-' : v.toFixed(2);
+                        return `${dates[i]}<br>
+                            <span style="color:#d32f2f;">+DI</span>: ${f(pdi)}<br>
+                            <span style="color:#2e7d32;">-DI</span>: ${f(mdi)}<br>
+                            <span style="color:#6a1b9a;">ADX</span>: ${f(adx)} (${adxTxt})<br>
+                            ${crossTxt}`;
+                    }
+                },
                 legend: { data: ['+DI', '-DI', 'ADX'], top: 0, textStyle: { fontSize: 10 } },
                 grid: { left: 50, right: 15, top: 30, bottom: 25 },
                 xAxis: { type: 'category', data: dates, axisLabel: { fontSize: 9 } },
                 yAxis: { type: 'value', scale: true, splitLine: { lineStyle: { color: '#f0f0f0' } } },
                 dataZoom: [{ type: 'inside', start: 50 }],
                 series: [
-                    { name: '+DI', type: 'line', data: s.pdi, symbol: 'none', lineStyle: { width: 1.5, color: '#d32f2f' } },
+                    { name: '+DI', type: 'line', data: s.pdi, symbol: 'none', lineStyle: { width: 1.5, color: '#d32f2f' },
+                      markPoint: { data: dmiMarks, symbolSize: 18, label: { fontSize: 9, color: '#fff' } } },
                     { name: '-DI', type: 'line', data: s.mdi, symbol: 'none', lineStyle: { width: 1.5, color: '#2e7d32' } },
                     { name: 'ADX', type: 'line', data: s.adx, symbol: 'none', lineStyle: { width: 1.5, color: '#6a1b9a' } },
                 ]
@@ -452,7 +523,16 @@ createApp({
 
             // PSY
             this._renderChart('psyChart', 'psyChart', {
-                tooltip: { trigger: 'axis' },
+                tooltip: {
+                    trigger: 'axis', axisPointer: { type: 'cross' },
+                    formatter: function (params) {
+                        const i = params[0].dataIndex;
+                        const v = s.psy[i];
+                        const tag = v == null ? '' : (v >= 75 ? '<span style="color:#d32f2f;">超买</span>'
+                            : v <= 25 ? '<span style="color:#2e7d32;">超卖</span>' : '中性');
+                        return `${dates[i]}<br>PSY: ${v == null ? '-' : v.toFixed(1)} (${tag})`;
+                    }
+                },
                 legend: { data: ['PSY'], top: 0, textStyle: { fontSize: 10 } },
                 grid: { left: 50, right: 15, top: 30, bottom: 25 },
                 xAxis: { type: 'category', data: dates, axisLabel: { fontSize: 9 } },
@@ -461,12 +541,26 @@ createApp({
                 series: [
                     { name: 'PSY', type: 'line', data: s.psy, symbol: 'none', areaStyle: { opacity: 0.1 }, lineStyle: { width: 1.5, color: '#3949ab' } },
                     { type: 'line', data: dates.map(() => 50), symbol: 'none', lineStyle: { width: 1, color: '#ccc', type: 'dashed' } },
+                    { type: 'line', data: dates.map(() => 75), symbol: 'none', lineStyle: { width: 1, color: '#d32f2f', type: 'dotted' } },
+                    { type: 'line', data: dates.map(() => 25), symbol: 'none', lineStyle: { width: 1, color: '#2e7d32', type: 'dotted' } },
                 ]
             });
 
             // BIAS
             this._renderChart('biasChart', 'biasChart', {
-                tooltip: { trigger: 'axis' },
+                tooltip: {
+                    trigger: 'axis', axisPointer: { type: 'cross' },
+                    formatter: function (params) {
+                        const i = params[0].dataIndex;
+                        const b1 = s.bias1[i], b2 = s.bias2[i], b3 = s.bias3[i];
+                        const f = v => v == null ? '-' : (v >= 0 ? '+' : '') + v.toFixed(2) + '%';
+                        const tag = b1 == null ? '' : (Math.abs(b1) >= 5 ? '<span style="color:#d32f2f;">极端</span>' : '');
+                        return `${dates[i]}<br>
+                            BIAS1(6日): ${f(b1)} ${tag}<br>
+                            BIAS2(12日): ${f(b2)}<br>
+                            BIAS3(24日): ${f(b3)}`;
+                    }
+                },
                 legend: { data: ['BIAS1', 'BIAS2', 'BIAS3'], top: 0, textStyle: { fontSize: 10 } },
                 grid: { left: 50, right: 15, top: 30, bottom: 25 },
                 xAxis: { type: 'category', data: dates, axisLabel: { fontSize: 9 } },
@@ -476,10 +570,36 @@ createApp({
                     { name: 'BIAS1', type: 'line', data: s.bias1, symbol: 'none', lineStyle: { width: 1.5, color: '#1565c0' } },
                     { name: 'BIAS2', type: 'line', data: s.bias2, symbol: 'none', lineStyle: { width: 1.5, color: '#e65100' } },
                     { name: 'BIAS3', type: 'line', data: s.bias3, symbol: 'none', lineStyle: { width: 1.5, color: '#6a1b9a' } },
+                    { type: 'line', data: dates.map(() => 3), symbol: 'none', lineStyle: { width: 1, color: '#d32f2f', type: 'dotted' } },
+                    { type: 'line', data: dates.map(() => -3), symbol: 'none', lineStyle: { width: 1, color: '#2e7d32', type: 'dotted' } },
                 ]
             });
         },
 
+        _detectCross(fast, slow) {
+            // 检测 fast 上穿/下穿 slow，返回与长度相同的数组：1=金叉 -1=死叉 0=无
+            const n = (fast || []).length;
+            const out = new Array(n).fill(0);
+            for (let i = 1; i < n; i++) {
+                const f0 = fast[i - 1], f1 = fast[i], s0 = slow[i - 1], s1 = slow[i];
+                if (f0 == null || f1 == null || s0 == null || s1 == null) continue;
+                if (f0 <= s0 && f1 > s1) out[i] = 1;
+                else if (f0 >= s0 && f1 < s1) out[i] = -1;
+            }
+            return out;
+        },
+        _crossMarkPoints(dates, cross) {
+            // 把金叉/死叉点转成 echarts markPoint.data（显示在 series 末值附近）
+            const pts = [];
+            for (let i = 0; i < cross.length; i++) {
+                if (cross[i] === 1) {
+                    pts.push({ coord: [i, 0], value: '金', itemStyle: { color: '#d32f2f' }, symbol: 'triangle' });
+                } else if (cross[i] === -1) {
+                    pts.push({ coord: [i, 0], value: '死', itemStyle: { color: '#2e7d32' }, symbol: 'pin' });
+                }
+            }
+            return pts;
+        },
         _renderChart(domId, chartProp, option) {
             const el = document.getElementById(domId);
             if (!el) return;
