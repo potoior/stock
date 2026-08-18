@@ -108,8 +108,30 @@ createApp({
             return range;
         }
     },
+    watch: {
+        // tab 变化时同步 location.hash(用 pushState,不触发 hashchange)
+        tab(newTab) {
+            const hashTab = '#' + newTab;
+            if (location.hash !== hashTab) {
+                history.pushState(null, '', hashTab);
+            }
+        }
+    },
     methods: {
         toastMsg(msg) { this.toast = msg; setTimeout(() => this.toast = '', 2500); },
+        // 浏览器前进后退或外部改 hash 时,同步 tab + 触发对应 load
+        onHashChange() {
+            const VALID = ['watchlist', 'market', 'analyze', 'strategies', 'agent', 'dailyscan', 'yujie'];
+            const hashTab = location.hash.slice(1);
+            if (!VALID.includes(hashTab) || this.tab === hashTab) return;
+            this.tab = hashTab;
+            // 触发对应 tab 的初始化(模拟原 @click 内联调用)
+            if (hashTab === 'market') this.loadQuotes();
+            else if (hashTab === 'strategies') this.loadStrategies();
+            else if (hashTab === 'agent') this.loadAgentStatus();
+            else if (hashTab === 'dailyscan') this.loadDailyScan();
+            else if (hashTab === 'yujie') { this.yjView = 'list'; this.yjPage = 1; this.loadYujie(); }
+        },
         async searchStock(q) {
             if (!q || q.length < 2) { this.searchResults = []; this.showSearch = false; return; }
             try {
@@ -923,6 +945,13 @@ createApp({
         },
     },
     mounted() {
+        // 启动时根据 hash 恢复 tab
+        const VALID = ['watchlist', 'market', 'analyze', 'strategies', 'agent', 'dailyscan', 'yujie'];
+        const hashTab = location.hash.slice(1);
+        if (VALID.includes(hashTab)) this.tab = hashTab;
+        // 监听浏览器前进后退/外部 hash 变化
+        window.addEventListener('hashchange', this.onHashChange);
+
         this.loadWatchlist().then(() => this.loadQuotes());
         this.loadStrategies();
         this.loadAgentStatus();
@@ -960,6 +989,7 @@ createApp({
         if (this.yjTimer) clearInterval(this.yjTimer);
         if (this.dsPollTimer) clearInterval(this.dsPollTimer);
         if (this.yjPollTimer) clearInterval(this.yjPollTimer);
+        window.removeEventListener('hashchange', this.onHashChange);
         if (window.__echartsResizeHandler) {
             window.removeEventListener('resize', window.__echartsResizeHandler);
         }
