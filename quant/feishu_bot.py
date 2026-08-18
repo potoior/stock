@@ -467,6 +467,20 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "analyze_with_yujie",
+            "description": "用玉姐精选10条评分规则分析个股,给出综合评分+命中规则+未命中规则+解读。用户问'用玉姐分析X/玉姐评分看X/玉姐策略测X'时调用。与 analyze_with_strategy 不同:玉姐是复合评分体系(10条规则累加),不是单策略买卖信号。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "code": {"type": "string", "description": "6位A股代码"}
+                },
+                "required": ["code"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "toggle_strategy",
             "description": "开启或关闭某策略(修改 config.json,影响后续 analyze 的信号)。用户明确说'关闭X策略/打开X策略/启用X'时调用。操作类,LLM 需确认用户意图明确。",
             "parameters": {
@@ -909,6 +923,103 @@ def handler_analyze_with_strategy(code: str, strategy_id: str) -> str:
         return f"❌ 分析 {code} 出错: {e}"
 
 
+def handler_analyze_with_yujie(code: str) -> str:
+    """用玉姐精选10条评分规则分析个股,给出综合评分+命中规则+未命中规则+解读。
+
+    与 analyze_with_strategy 不同:玉姐是复合评分体系(10条规则累加分数),
+    不是单策略买卖信号,所以需要独立 handler。
+    """
+    try:
+        import yujie_scan
+
+        # 1. 从 strategy_library.json 拿 10 条规则的 (rule_id, name, score, desc)
+        lib_path = ENGINE_HOME / "strategy_library.json"
+        if not lib_path.exists():
+            return "❌ 策略大全数据不存在"
+        lib = json.loads(lib_path.read_text(encoding="utf-8"))
+        yujie_src = next((s for s in lib.get("sources", []) if s.get("id") == "yujie_custom"), None)
+        if not yujie_src:
+            return "❌ 未找到玉姐精选来源"
+        rules: list[dict] = []  # [{rule_id, name, score, desc}]
+        for cat in yujie_src.get("categories", []):
+            for st in cat.get("strategies", []):
+                sid = st.get("id", "")
+                rule_id = sid[6:] if sid.startswith("yujie_") else sid  # 去 yujie_ 前缀
+                rules.append({
+                    "rule_id": rule_id,
+                    "name": st.get("name", ""),
+                    "score": st.get("score", 0),
+                    "desc": st.get("desc", ""),
+                })
+        if not rules:
+            return "❌ 玉姐精选规则数据为空"
+
+        # 2. 调 score_stock 打分
+        params = yujie_scan.get_params()
+        score, hits, detail = yujie_scan.score_stock(code, params)
+        if detail is None:
+            min_days = params.get("scope", {}).get("min_history_days", 60)
+            return f"❌ {code} 数据不足(需 ≥{min_days} 个交易日),无法用玉姐规则分析"
+
+        # 3. 拿实时价格
+        import strategy_engine as se
+        rt = {}
+        try:
+            r = se.analyze(code, use_ai=False)
+            rt = r.get("realtime") or {}
+        except Exception:
+            pass
+        price = rt.get("price", detail.get("price", 0))
+        pct = rt.get("pct", 0)
+        name = rt.get("name", "")
+        emoji = "📈" if pct > 0 else "📉" if pct < 0 else "➡️"
+
+        # 4. 命中/未命中分组(用 detail 的 bool 字段判断,比 hits 的中文 label 更稳)
+        hit_rules = []
+        miss_rules = []
+        for r in rules:
+            rid = r["rule_id"]
+            if detail.get(rid):
+                hit_rules.append(r)
+            else:
+                miss_rules.append(r)
+        total_possible = sum(r["score"] for r in rules)
+
+        # 5. 组装输出
+        lines = [
+            f"📊 {code} {name} {emoji} {price:.2f} ({pct:+.2f}%)",
+            f"🎯 **玉姐评分: {score:g} 分** / 满分 {total_possible:g} 分",
+        ]
+
+        if hit_rules:
+            lines.append(f"\n✅ **命中规则**({len(hit_rules)}条,共{sum(r['score'] for r in hit_rules):g}分)")
+            for r in hit_rules:
+                lines.append(f"- {r['name']} (+{r['score']}): {r['desc']}")
+
+        if miss_rules:
+            lines.append(f"\n⚪ **未命中规则**({len(miss_rules)}条)")
+            for r in miss_rules:
+                lines.append(f"- {r['name']} (+{r['score']}): {r['desc']}")
+
+        # 6. 评分解读
+        if score >= 7:
+            comment = f"🚀 **强势**({score:g}分),玉姐精选 7+ 分档历史 60 天超额 +11.79%"
+        elif score >= 5:
+            comment = f"📊 **中等偏强**({score:g}分),玉姐精选通常 5+ 分入选"
+        elif score >= 3:
+            comment = f"⚠️ **偏弱**({score:g}分),低于玉姐精选 5 分入选门槛"
+        else:
+            comment = f"❌ **弱**({score:g}分),暂不符合玉姐精选标准"
+        lines.append(f"\n💡 {comment}")
+
+        lines.append(
+            "\n⚠️ 风险提示:玉姐评分为技术面多因子打分,不构成投资建议,请结合基本面与市场情绪综合判断。"
+        )
+        return "\n".join(lines)
+    except Exception as e:
+        return f"❌ 玉姐分析 {code} 出错: {e}"
+
+
 def handler_toggle_strategy(strategy_id: str, enabled: bool) -> str:
     """开关策略。"""
     try:
@@ -1086,6 +1197,7 @@ TOOL_HANDLERS = {
     "analyze_with_strategy": lambda args: handler_analyze_with_strategy(
         args.get("code", ""), args.get("strategy_id", "")
     ),
+    "analyze_with_yujie": lambda args: handler_analyze_with_yujie(args.get("code", "")),
     "toggle_strategy": lambda args: handler_toggle_strategy(
         args.get("strategy_id", ""), bool(args.get("enabled", True))
     ),
@@ -1128,6 +1240,9 @@ SYSTEM_PROMPT = """你是 A 股量化分析助手(集成于飞书群聊),拥有�
   · strategy_id 支持引擎id(macd/kdj/boll)、大全id(macd_8/bottom)、中文名(抄底/逃顶)模糊匹配
   · 若策略已实现: 跑引擎分析,返回完整来源+逻辑+信号
   · 若策略未实现: 告知尚未实现,建议相近的已实现策略
+- analyze_with_yujie(code): 用玉姐精选10条评分规则分析个股,给出综合评分+命中规则+解读
+  · 玉姐是复合评分(10条规则累加),不是单策略买卖信号,需用此独立工具
+  · 返回评分(满分12)、命中规则(带分值+说明)、未命中规则、评分解读
 - toggle_strategy(strategy_id, enabled): 开关策略(操作类,需用户明确意图)
 - set_strategy_params(strategy_id, params): 调策略参数(操作类,需用户明确意图)
 - enable_library_strategy(library_id): 从大全引入策略(操作类)
@@ -1175,6 +1290,8 @@ SYSTEM_PROMPT = """你是 A 股量化分析助手(集成于飞书群聊),拥有�
 - "看下茅台的MACD信号" → analyze_with_strategy(code=600519, strategy_id=macd) → 来源+逻辑+信号
 - "用抄底策略分析茅台" → analyze_with_strategy(code=600519, strategy_id=bottom) → 来源+逻辑+信号
 - "操练大全的MACD怎么样测茅台" → analyze_with_strategy(code=600519, strategy_id=macd_8) → 自动映射到 macd 引擎
+- "用玉姐策略分析茅台" → analyze_with_yujie(code=600519) → 评分+命中规则+解读
+- "玉姐评分看下五粮液" → analyze_with_yujie(code=000858) → 评分+命中规则+解读
 - "关闭均线组合策略" → toggle_strategy(strategy_id=ma_combo, enabled=false)
 - "把BOLL周期改成30" → set_strategy_params(strategy_id=boll, params={period:30})
 - "回测MACD策略" → backtest_strategy(strategy_id=macd) → 整理回测数据
