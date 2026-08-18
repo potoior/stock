@@ -809,6 +809,9 @@ TOOL_HANDLERS = {
 
 MAX_AGENT_STEPS = 6  # 最多 6 步推理(避免无限循环)
 
+# 耗时工具(超过 10 秒),需先发"思考中"提示用户
+SLOW_TOOLS = {"backtest_strategy", "grid_search_strategy"}
+
 SYSTEM_PROMPT = """你是 A 股量化分析助手(集成于飞书群聊),拥有以下工具:
 
 【数据查询类】
@@ -986,6 +989,14 @@ class FeishuBotClient:
         self.client = lark.Client.builder().app_id(self.app_id).app_secret(self.app_secret).build()
         log.info("飞书 Bot 客户端已初始化, app_id=%s...", self.app_id[:10])
 
+    def _needs_thinking_hint(self, text: str) -> bool:
+        """轻量判断:用户问题是否触发了耗时工具(回测/寻优)。
+
+        用关键词匹配,避免额外 LLM 调用。
+        """
+        slow_keywords = ("回测", "测试", "寻优", "调参", "网格", "最优参数", "backtest", "grid")
+        return any(kw in text.lower() for kw in slow_keywords)
+
     def _reply_text(self, chat_id: str, text: str):
         """发送文本消息到 chat_id。"""
         # 飞书文本消息长度上限约 4096,超长截断
@@ -1049,10 +1060,14 @@ class FeishuBotClient:
             log.info("收到消息 chat=%s sender=%s text=%r", chat_id, sender, text[:100])
 
             # Agent 处理(Function Calling ReAct),失败降级到关键词路由
+            # 智能判断: 只有调用耗时工具(backtest/grid_search)才发"思考中"提示,
+            # 快速回复(分析/查询)直接给答案,避免收到两条消息的体验问题
             try:
                 agent = FeishuAgent()
-                # 异步处理可能耗时,先回个"处理中"提示
-                self._reply_text(chat_id, "🤔 正在思考...")
+                # 先看 LLM 第一步是否要调慢工具:用轻量探测(同 LLM 但只取 tool_calls)
+                need_thinking_hint = self._needs_thinking_hint(text)
+                if need_thinking_hint:
+                    self._reply_text(chat_id, "🤔 正在思考,需要 1-2 分钟(回测/寻优)...")
                 reply, _, images = agent.chat(text)
             except Exception as e:
                 log.warning("Agent 异常 %s, 降级到关键词路由", e)
