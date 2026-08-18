@@ -1,11 +1,12 @@
+import atexit
 import json
 import logging
 import sqlite3
 import threading
-import urllib.request
 from datetime import datetime
 from pathlib import Path
 
+import httpx
 import numpy as np
 import pandas as pd
 
@@ -24,6 +25,20 @@ _daily_table_lock = threading.Lock()
 # config.json 进程级缓存（mtime 比较）
 _config_cache = {"mtime": 0, "data": None}
 _config_lock = threading.Lock()
+
+# 线程局部 sqlite 连接复用（避免 1700+ 次 connect/close 开销）
+_tl = threading.local()
+
+
+def _get_db_conn() -> sqlite3.Connection:
+    conn = getattr(_tl, "conn", None)
+    if conn is None:
+        conn = sqlite3.connect(str(CACHE_DB), timeout=10, check_same_thread=False)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
+        conn.execute("PRAGMA busy_timeout=10000")
+        _tl.conn = conn
+    return conn
 
 
 def _ensure_daily_table():
@@ -53,6 +68,24 @@ def _ensure_daily_table():
 
 # ---------------- 数据获取（腾讯前复权） ----------------
 
+# httpx 连接池复用 TCP（避免 urllib 每次都 DNS+TCP+TLS 握手）
+_http_client = httpx.Client(
+    timeout=15.0,
+    limits=httpx.Limits(max_connections=64, max_keepalive_connections=32),
+    trust_env=False,  # 绕过 socks 代理
+    headers={"Referer": "https://gu.qq.com/", "User-Agent": "Mozilla/5.0"},
+)
+
+
+def _close_http_client():
+    try:
+        _http_client.close()
+    except Exception:
+        pass
+
+
+atexit.register(_close_http_client)
+
 
 def _sina_symbol(code):
     code = code.upper().replace("SH", "").replace("SZ", "").replace(".", "")
@@ -68,10 +101,9 @@ def _sina_symbol(code):
 def fetch_qfq_tencent(code, datalen=320):
     symbol = _sina_symbol(code)
     url = f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={symbol},day,,,{datalen},qfq"
-    req = urllib.request.Request(url, headers={"Referer": "https://gu.qq.com/"})
     try:
-        resp = urllib.request.urlopen(req, timeout=15)
-        raw = json.loads(resp.read().decode("utf-8", errors="replace"))
+        resp = _http_client.get(url)
+        raw = resp.json()
     except Exception:
         return pd.DataFrame()
     node = raw.get("data", {}).get(symbol, {})
@@ -95,7 +127,7 @@ def fetch_qfq_tencent(code, datalen=320):
 
 def get_daily_data(code: str, days: int = 320) -> pd.DataFrame:
     _ensure_daily_table()
-    conn = sqlite3.connect(str(CACHE_DB), timeout=10)
+    conn = _get_db_conn()
     df = pd.read_sql("SELECT * FROM daily WHERE code=? ORDER BY date", conn, params=(code,))
     fresh = False
     if len(df) > 0:
@@ -111,8 +143,7 @@ def get_daily_data(code: str, days: int = 320) -> pd.DataFrame:
                 newdf[["code", "date", "open", "close", "high", "low", "volume"]].values.tolist(),
             )
             conn.commit()
-            df = pd.read_sql("SELECT * FROM daily WHERE code=? ORDER BY date", conn, params=(code,))
-    conn.close()
+            df = newdf  # 直接用刚拉到的数据,跳过第二次 read_sql
     if df.empty:
         return df
     df["date"] = pd.to_datetime(df["date"], format="%Y%m%d")

@@ -398,7 +398,7 @@ def run_once(limit: int = 0) -> int:
                     lf.write(msg + "\n")
                     lf.flush()
 
-        with ThreadPoolExecutor(max_workers=16) as ex:
+        with ThreadPoolExecutor(max_workers=32) as ex:
             futs = [ex.submit(_worker, item) for item in pool]
             for f in futs:
                 f.add_done_callback(_on_done)
