@@ -528,6 +528,27 @@ def agent_reset():
     return get_engine().reset()
 
 
+@app.put("/api/agent/yujie-config")
+async def agent_yujie_config_update(body: dict):
+    from agent_engine import get_engine
+
+    updates = {}
+    if "min_score" in body:
+        try:
+            updates["min_score"] = int(body["min_score"])
+        except Exception:
+            pass
+    if "max_hold_days" in body:
+        try:
+            updates["max_hold_days"] = int(body["max_hold_days"])
+        except Exception:
+            pass
+    if not updates:
+        return {"ok": False, "msg": "无有效字段"}
+    cfg = get_engine().update_yujie_config(updates)
+    return {"ok": True, "config": cfg}
+
+
 @app.get("/api/agent/trades")
 def agent_trades(type_: str = None, limit: int = 50):
     from agent_engine import get_engine

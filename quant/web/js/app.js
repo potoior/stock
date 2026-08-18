@@ -23,7 +23,9 @@ createApp({
                 running: false, lastRun: null,
                 ai: { cash: 10000, market_value: 0, total_value: 10000, total_return: 0, return_pct: 0, positions: [], trade_count: 0 },
                 rule: { cash: 10000, market_value: 0, total_value: 10000, total_return: 0, return_pct: 0, positions: [], trade_count: 0 },
-                ai_history: [], rule_history: [],
+                yujie: { cash: 10000, market_value: 0, total_value: 10000, total_return: 0, return_pct: 0, positions: [], trade_count: 0 },
+                yujie_config: { min_score: 5, max_hold_days: 20 },
+                ai_history: [], rule_history: [], yujie_history: [],
             },
             agentTrades: [], agentLogs: [], agentChart: null, agentTimer: null,
             // daily scan
@@ -614,18 +616,27 @@ createApp({
             this.loadAgentStatus();
             this.loadAgentTrades();
         },
+        async saveYujieConfig() {
+            const res = await (await fetch('/api/agent/yujie-config', {
+                method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ min_score: this.agent.yujie_config.min_score, max_hold_days: this.agent.yujie_config.max_hold_days }),
+            })).json();
+            if (res.ok) { this.toastMsg('玉姐引擎配置已保存'); this.agent.yujie_config = res.config; }
+            else this.toastMsg(res.msg || '保存失败');
+        },
         renderAgentChart() {
             const el = document.getElementById('agentChart');
             if (!el) return;
             const aiData = this.agent.ai_history || [];
             const ruleData = this.agent.rule_history || [];
-            if (!aiData.length && !ruleData.length) return;
+            const yujieData = this.agent.yujie_history || [];
+            if (!aiData.length && !ruleData.length && !yujieData.length) return;
             if (!this.agentChart) {
                 this.agentChart = echarts.init(el);
                 if (!window.__echartsInstances) window.__echartsInstances = {};
                 window.__echartsInstances['agentChart'] = this.agentChart;
             }
-            const times = aiData.map(d => d.t);
+            const times = (aiData.length ? aiData : ruleData.length ? ruleData : yujieData).map(d => d.t);
             this.agentChart.setOption({
                 tooltip: { trigger: 'axis' },
                 grid: { left: 60, right: 20, top: 20, bottom: 30 },
@@ -636,8 +647,10 @@ createApp({
                       lineStyle: { color: '#d32f2f', width: 2 }, itemStyle: { color: '#d32f2f' } },
                     { name: '规则 Agent', type: 'line', data: ruleData.map(d => d.v), smooth: true,
                       lineStyle: { color: '#1565c0', width: 2 }, itemStyle: { color: '#1565c0' } },
+                    { name: '玉姐 Agent', type: 'line', data: yujieData.map(d => d.v), smooth: true,
+                      lineStyle: { color: '#2e7d32', width: 2 }, itemStyle: { color: '#2e7d32' } },
                 ],
-                legend: { data: ['AI Agent', '规则 Agent'], bottom: 0 },
+                legend: { data: ['AI Agent', '规则 Agent', '玉姐 Agent'], bottom: 0 },
             }, true);
         },
         // ===== 每日扫描 =====

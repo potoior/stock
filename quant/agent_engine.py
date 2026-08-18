@@ -8,10 +8,44 @@ from pathlib import Path
 ENGINE_HOME = Path(__file__).parent
 AI_DB = ENGINE_HOME / "agent_data_ai.db"
 RULE_DB = ENGINE_HOME / "agent_data_rule.db"
+YUJIE_DB = ENGINE_HOME / "agent_data_yujie.db"
 LOG_DB = ENGINE_HOME / "agent_data.db"
+CONFIG_PATH = ENGINE_HOME / "config.json"
 
 import strategy_engine as se
 from executor import SimExecutor, is_market_open
+
+
+def _load_yujie_agent_config() -> dict:
+    """读 config.json -> yujie_agent，缺省回退默认。"""
+    default = {"min_score": 5, "max_hold_days": 20}
+    try:
+        if CONFIG_PATH.exists():
+            cfg = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+            saved = cfg.get("yujie_agent", {})
+            if isinstance(saved, dict):
+                for k in ("min_score", "max_hold_days"):
+                    if k in saved:
+                        default[k] = saved[k]
+    except Exception:
+        pass
+    return default
+
+
+def _save_yujie_agent_config(updates: dict) -> dict:
+    cfg = {}
+    try:
+        if CONFIG_PATH.exists():
+            cfg = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        cfg = {}
+    cur = cfg.get("yujie_agent", {})
+    if not isinstance(cur, dict):
+        cur = {}
+    cur.update(updates)
+    cfg["yujie_agent"] = cur
+    CONFIG_PATH.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+    return _load_yujie_agent_config()
 
 
 def _init_log_db():
@@ -117,9 +151,12 @@ class AgentEngine:
 
         self.ai_executor = SimExecutor(initial_cash=10000.0, db_path=AI_DB)
         self.rule_executor = SimExecutor(initial_cash=10000.0, db_path=RULE_DB)
+        self.yujie_executor = SimExecutor(initial_cash=10000.0, db_path=YUJIE_DB)
+        self.yujie_config = _load_yujie_agent_config()
 
         self.ai_history = _load_equity_curve("ai")
         self.rule_history = _load_equity_curve("rule")
+        self.yujie_history = _load_equity_curve("yujie")
         self._init_ai_decider()
 
     def _init_ai_decider(self):
@@ -149,8 +186,10 @@ class AgentEngine:
         self.running = False
         self.ai_executor = SimExecutor(initial_cash=10000.0, db_path=AI_DB)
         self.rule_executor = SimExecutor(initial_cash=10000.0, db_path=RULE_DB)
+        self.yujie_executor = SimExecutor(initial_cash=10000.0, db_path=YUJIE_DB)
         self.ai_history = []
         self.rule_history = []
+        self.yujie_history = []
         self.cycle_count = 0
         self.last_run = None
         self.last_cycle_summary = ""
@@ -160,8 +199,10 @@ class AgentEngine:
     def status(self):
         ai_prices = self._get_current_prices(self.ai_executor.portfolio.positions)
         rule_prices = self._get_current_prices(self.rule_executor.portfolio.positions)
+        yujie_prices = self._get_current_prices(self.yujie_executor.portfolio.positions)
         ai_sum = self.ai_executor.get_summary(ai_prices)
         rule_sum = self.rule_executor.get_summary(rule_prices)
+        yujie_sum = self.yujie_executor.get_summary(yujie_prices)
 
         def fmt_positions(executor, prices):
             rows = []
@@ -205,8 +246,19 @@ class AgentEngine:
                 "positions": fmt_positions(self.rule_executor, rule_prices),
                 "trade_count": rule_sum["trade_count"],
             },
+            "yujie": {
+                "cash": yujie_sum["cash"],
+                "market_value": yujie_sum["market_value"],
+                "total_value": yujie_sum["total_value"],
+                "total_return": yujie_sum["total_return"],
+                "return_pct": yujie_sum["return_pct"],
+                "positions": fmt_positions(self.yujie_executor, yujie_prices),
+                "trade_count": yujie_sum["trade_count"],
+            },
+            "yujie_config": self.yujie_config,
             "ai_history": self.ai_history[-200:],
             "rule_history": self.rule_history[-200:],
+            "yujie_history": self.yujie_history[-200:],
         }
 
     def trades(self, type_filter=None, limit=50):
@@ -215,6 +267,8 @@ class AgentEngine:
             executors.append(("ai", self.ai_executor))
         if type_filter in (None, "rule"):
             executors.append(("rule", self.rule_executor))
+        if type_filter in (None, "yujie"):
+            executors.append(("yujie", self.yujie_executor))
         all_trades = []
         for atype, ex in executors:
             for t in ex.portfolio.get_trades(limit=limit):
@@ -281,22 +335,29 @@ class AgentEngine:
 
         rule_actions = self._rule_cycle(quotes, prices, analysis_results)
         ai_actions = self._ai_cycle(quotes, prices, analysis_results)
+        yujie_actions = self._yujie_cycle()
 
         ai_prices = self._get_current_prices(self.ai_executor.portfolio.positions)
         rule_prices = self._get_current_prices(self.rule_executor.portfolio.positions)
+        yujie_prices = self._get_current_prices(self.yujie_executor.portfolio.positions)
         ai_tv = self.ai_executor.get_summary(ai_prices)["total_value"]
         rule_tv = self.rule_executor.get_summary(rule_prices)["total_value"]
+        yujie_tv = self.yujie_executor.get_summary(yujie_prices)["total_value"]
         ts = datetime.now().strftime("%H:%M")
         self.ai_history.append({"t": ts, "v": round(ai_tv, 2)})
         self.rule_history.append({"t": ts, "v": round(rule_tv, 2)})
+        self.yujie_history.append({"t": ts, "v": round(yujie_tv, 2)})
         _save_equity_point("ai", ts, round(ai_tv, 2))
         _save_equity_point("rule", ts, round(rule_tv, 2))
+        _save_equity_point("yujie", ts, round(yujie_tv, 2))
 
         summary_parts = []
         if rule_actions:
             summary_parts.append("规则: " + "; ".join(rule_actions))
         if ai_actions:
             summary_parts.append("AI: " + "; ".join(ai_actions))
+        if yujie_actions:
+            summary_parts.append("玉姐: " + "; ".join(yujie_actions))
         self.last_cycle_summary = " | ".join(summary_parts) if summary_parts else "本轮无交易"
 
     def _rule_cycle(self, quotes, prices, analysis_results):
@@ -513,6 +574,85 @@ class AgentEngine:
                 )
                 actions.append(f"卖出{code} {pos['qty']}股({reason})")
         return actions
+
+    def _yujie_cycle(self):
+        """玉姐引擎：按当日玉姐精选高分信号买入，止损/止盈/到期卖出。
+
+        - 买入：当日 picks 中 score >= min_score 且未持仓的，按评分降序买入，受风控约束
+        - 卖出：止损 -5% / 止盈 +20% / 持有超 max_hold_days 天
+        - 每个交易日只买入一轮（已持仓的不再加仓）
+        """
+        import yujie_scan
+
+        ex = self.yujie_executor
+        today = datetime.now().date().isoformat()
+        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        min_score = float(self.yujie_config.get("min_score", 5))
+        max_hold = int(self.yujie_config.get("max_hold_days", 20))
+        actions = []
+
+        # 候选代码 = 持仓 + 当日高分 picks（用于取实时价）
+        picks = yujie_scan.load_picks()
+        candidates = [p for p in picks if float(p.get("score", 0)) >= min_score]
+        cand_codes = list({p["code"] for p in candidates})
+        held_codes = list(ex.portfolio.positions.keys())
+        quote_codes = list({*cand_codes, *held_codes})
+        if not quote_codes:
+            return []
+        quotes = se.fetch_realtime(quote_codes)
+        qmap = {q["code"]: q for q in quotes}
+
+        # 1) 卖出检查（止损/止盈/到期），T+1
+        for code in list(ex.portfolio.positions.keys()):
+            p = ex.portfolio.positions[code]
+            if p.get("buy_date") == today:
+                continue  # T+1
+            q = qmap.get(code)
+            if not q:
+                continue
+            price = q["price"]
+            pnl_pct = (price - p["cost"]) / p["cost"] if p["cost"] else 0
+            reason = ""
+            if pnl_pct <= -0.05:
+                reason = f"止损({pnl_pct * 100:.1f}%)"
+            elif pnl_pct >= 0.20:
+                reason = f"止盈({pnl_pct * 100:.1f}%)"
+            else:
+                try:
+                    days = (datetime.now().date() - datetime.fromisoformat(p["buy_date"]).date()).days
+                except Exception:
+                    days = 0
+                if days >= max_hold:
+                    reason = f"持有{days}天到期"
+            if reason:
+                res = ex.execute(code, q["name"], price, "sell")
+                if res["status"] == "executed":
+                    _save_log({"agent_type": "yujie", "ts": ts, "code": code, "name": q["name"],
+                               "action": "sell", "price": price, "qty": p["qty"], "reason": reason})
+                    actions.append(f"卖出{code}({reason})")
+
+        # 2) 买入：按评分降序，风控约束
+        candidates.sort(key=lambda x: -float(x.get("score", 0)))
+        for p in candidates:
+            code = p["code"]
+            if code in ex.portfolio.positions:
+                continue
+            q = qmap.get(code)
+            if not q:
+                continue
+            price = q["price"]
+            res = ex.execute(code, p.get("name", code), price, "buy")
+            if res["status"] == "executed":
+                reason = f"玉姐{p.get('score')}分买入"
+                _save_log({"agent_type": "yujie", "ts": ts, "code": code, "name": p.get("name", code),
+                           "action": "buy", "price": price, "qty": ex.portfolio.positions[code]["qty"],
+                           "reason": reason})
+                actions.append(f"买入{code}({reason})")
+        return actions
+
+    def update_yujie_config(self, updates: dict) -> dict:
+        self.yujie_config = _save_yujie_agent_config(updates)
+        return self.yujie_config
 
     def _build_agent_prompt(self, market_data, executor, prices):
         total_value = executor.portfolio.total_value(prices)

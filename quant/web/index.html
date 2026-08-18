@@ -540,8 +540,21 @@
             <span class="hint">间隔60秒 | 初始资金各¥10,000</span>
         </div>
 
-        <!-- 双Agent对比 -->
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
+        <!-- 玉姐引擎配置 -->
+        <div class="card" style="margin:0 0 12px;padding:10px 14px;display:flex;flex-wrap:wrap;gap:12px;align-items:center;font-size:13px;">
+            <span style="font-weight:600;">💠 玉姐引擎配置</span>
+            <label style="display:inline-flex;align-items:center;gap:4px;">最低评分
+                <input class="input sm" type="number" min="1" max="11" v-model.number="agent.yujie_config.min_score" style="width:60px;text-align:center;">
+            </label>
+            <label style="display:inline-flex;align-items:center;gap:4px;">最大持有天数
+                <input class="input sm" type="number" min="1" max="60" v-model.number="agent.yujie_config.max_hold_days" style="width:60px;text-align:center;">
+            </label>
+            <button class="button sm" @click="saveYujieConfig">保存</button>
+            <span class="hint" style="font-size:12px;">每日扫描后按评分≥阈值买入，止损-5%/止盈+20%/到期退出</span>
+        </div>
+
+        <!-- 三Agent对比 -->
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:16px;">
             <div class="card" style="margin:0;">
                 <div class="card-title">🤖 AI Agent <span class="hint" style="margin-left:auto;">SenseNova 决策</span></div>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;text-align:center;">
@@ -574,11 +587,27 @@
                     </div>
                 </div>
             </div>
+            <div class="card" style="margin:0;border:1px solid #c8e6c9;">
+                <div class="card-title">💠 玉姐 Agent <span class="hint" style="margin-left:auto;">高分信号+风控</span></div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;text-align:center;">
+                    <div class="count-box"><div class="num" style="font-size:20px;">¥{{ agent.yujie.total_value.toFixed(2) }}</div><div class="hint">总资产</div></div>
+                    <div class="count-box"><div class="num" :class="agent.yujie.return_pct >= 0 ? 'up' : 'down'">{{ agent.yujie.return_pct >= 0 ? '+' : '' }}{{ agent.yujie.return_pct.toFixed(2) }}%</div><div class="hint">总收益</div></div>
+                    <div><span class="hint">现金</span><br>{{ agent.yujie.cash.toFixed(2) }}</div>
+                    <div><span class="hint">持仓</span><br>{{ agent.yujie.positions.length }} 只</div>
+                </div>
+                <div v-if="agent.yujie.positions.length" style="margin-top:10px;font-size:12px;">
+                    <div v-for="p in agent.yujie.positions" :key="p.code" style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #f0f0f0;">
+                        <span><b>{{ p.code }}</b></span>
+                        <span>{{ p.qty }}股</span>
+                        <span :class="p.pnl_pct >= 0 ? 'up' : 'down'">{{ p.pnl_pct >= 0 ? '+' : '' }}{{ p.pnl_pct.toFixed(2) }}%</span>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!-- 收益曲线 -->
         <div class="card">
-            <div class="card-title">📈 收益曲线对比 <span class="hint">AI(红)  vs  规则(蓝)</span></div>
+            <div class="card-title">📈 收益曲线对比 <span class="hint">AI(红) vs 规则(蓝) vs 玉姐(绿)</span></div>
             <div id="agentChart" class="chart"></div>
         </div>
 
@@ -594,7 +623,7 @@
             <div v-if="!agentLogs.length" class="empty">暂无日志</div>
             <div v-for="(log, idx) in agentLogs" :key="idx" class="signal-card" style="font-size:12px;">
                 <span style="color:#888;">{{ log.ts }}</span>
-                <span class="badge" :class="log.agent_type === 'ai' ? 'badge-neutral' : 'badge-neutral'">{{ log.agent_type === 'ai' ? '🤖' : '📐' }}</span>
+                <span class="badge badge-neutral">{{ log.agent_type === 'ai' ? '🤖' : (log.agent_type === 'yujie' ? '💠' : '📐') }}</span>
                 <b>{{ log.name }}</b>({{ log.code }})
                 <span :class="log.action === 'buy' ? 'up' : (log.action === 'sell' ? 'down' : '')">{{ log.action }}</span>
                 <span v-if="log.qty">×{{ log.qty }}股 @{{ log.price?.toFixed(2) }}</span>
@@ -612,7 +641,7 @@
                 <tbody>
                     <tr v-for="t in agentTrades" :key="t.id">
                         <td>{{ t.date }}</td>
-                        <td><span class="badge" :class="t.agent_type === 'ai' ? 'badge-neutral' : 'badge-neutral'">{{ t.agent_type === 'ai' ? '🤖AI' : '📐规则' }}</span></td>
+                        <td><span class="badge badge-neutral">{{ t.agent_type === 'ai' ? '🤖AI' : (t.agent_type === 'yujie' ? '💠玉姐' : '📐规则') }}</span></td>
                         <td>{{ t.code }}</td>
                         <td :class="t.action === '买入' ? 'up' : 'down'">{{ t.action }}</td>
                         <td>{{ t.price.toFixed(2) }}</td>
