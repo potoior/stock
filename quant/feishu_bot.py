@@ -787,27 +787,123 @@ def handler_get_yujie_detail() -> str:
         return f"❌ 查玉姐详情出错: {e}"
 
 
+def _lookup_library_strategy(strategy_id: str) -> list[dict]:
+    """在策略大全里查 strategy_id,返回所有命中的策略条目(可能多来源都有)。
+
+    匹配规则:精确匹配 id 或 engine_id,或 id 以 strategy_id 为前缀(如 macd_8 匹配 macd)。
+    每条返回 {source_id, source_name, category, id, name, engine_id, implemented, desc}
+    """
+    lib_path = ENGINE_HOME / "strategy_library.json"
+    if not lib_path.exists():
+        return []
+    lib = json.loads(lib_path.read_text(encoding="utf-8"))
+    target = strategy_id.lower()
+    hits = []
+    for src in lib.get("sources", []):
+        for cat in src.get("categories", []):
+            for st in cat.get("strategies", []):
+                sid = (st.get("id") or "").lower()
+                eid = (st.get("engine_id") or "").lower()
+                if target == sid or target == eid or sid.startswith(target + "_") or eid == target:
+                    hits.append({
+                        "source_id": src.get("id", ""),
+                        "source_name": src.get("name", ""),
+                        "category": cat.get("name", ""),
+                        "id": st.get("id", ""),
+                        "name": st.get("name", ""),
+                        "engine_id": st.get("engine_id", ""),
+                        "implemented": st.get("implemented", False),
+                        "desc": st.get("desc", ""),
+                    })
+    return hits
+
+
 def handler_analyze_with_strategy(code: str, strategy_id: str) -> str:
-    """用指定策略单独分析个股。"""
+    """用指定策略分析个股,联动策略大全给出"来源+核心逻辑+当前信号+理由"。
+
+    流程:
+    1. 在策略大全里查 strategy_id(精确/前缀匹配),拿到来源、描述、engine_id
+    2. 若已实现: 跑 analyze,取 engine_id 对应的信号,输出一条龙
+    3. 若未实现: 告知用户该策略尚未实现,列出最接近的已实现策略作为替代
+    4. 若查不到: 走老逻辑直接用 strategy_id 跑 analyze
+    """
     try:
         import strategy_engine as se
-        # 调用 analyze 跑全部,然后只取指定策略的信号
+
+        # 1. 查策略大全
+        hits = _lookup_library_strategy(strategy_id)
+
+        # 2. 决定实际引擎策略 id
+        engine_id = strategy_id
+        lib_section = ""
+        if hits:
+            # 优先选已实现的命中
+            impl_hits = [h for h in hits if h["implemented"]]
+            if impl_hits:
+                h = impl_hits[0]
+                engine_id = h["engine_id"] or h["id"]
+                # 来源 + 核心逻辑
+                src_lines = []
+                for hh in impl_hits:
+                    src_lines.append(
+                        f"  - 📚 {hh['source_name']} · {hh['category']}: **{hh['name']}**"
+                    )
+                lib_section = (
+                    "\n📖 **策略来源**\n" + "\n".join(src_lines) +
+                    f"\n\n📝 **核心逻辑**: {h['desc']}"
+                )
+            else:
+                # 全部未实现
+                h = hits[0]
+                src_lines = []
+                for hh in hits:
+                    src_lines.append(f"  - 📚 {hh['source_name']} · {hh['category']}: {hh['name']}")
+                lib_section = (
+                    "\n📖 **策略来源**\n" + "\n".join(src_lines) +
+                    f"\n\n📝 **核心逻辑**: {h['desc']}"
+                    f"\n\n⚠️ **该策略尚未实现**,无法直接分析。"
+                )
+                # 找一个相近的已实现策略作替代建议
+                # 简单启发:若 strategy_id 含某关键字(如 bottom/top/macd/kdj/boll),给对应已实现策略
+                _ALIAS = {
+                    "bottom": "bottom", "抄底": "bottom",
+                    "top": "top", "逃顶": "top",
+                    "zt": "zt", "涨停": "zt",
+                    "macd": "macd", "kdj": "kdj", "boll": "boll",
+                    "rsi": "rsi", "dmi": "dmi", "bias": "bias", "sar": "sar",
+                }
+                suggest = ""
+                for kw, sid in _ALIAS.items():
+                    if kw in strategy_id.lower() or kw in h.get("name", "").lower() or kw in h.get("desc", "").lower():
+                        suggest = sid
+                        break
+                if suggest:
+                    lib_section += f"\n💡 可用相近策略 **{suggest}** 替代,如需分析请说\"用 {suggest} 分析 {code}\"。"
+                return lib_section
+
+        # 3. 跑 analyze
         r = se.analyze(code, use_ai=False)
         if "error" in r:
             return f"❌ {code} 分析失败: {r['error']}"
         signals = r.get("signals", [])
-        target = next((s for s in signals if s.get("key") == strategy_id), None)
+        target = next((s for s in signals if s.get("key") == engine_id), None)
         if not target:
-            return f"❌ 未找到策略 {strategy_id},可用策略: {', '.join(s.get('key','') for s in signals)}"
+            avail = ", ".join(s.get("key", "") for s in signals)
+            return f"❌ 未找到策略 {strategy_id}(engine_id={engine_id}),可用策略: {avail}"
+
+        # 4. 组装结果
         rt = r.get("realtime") or {}
         price = rt.get("price", 0)
         pct = rt.get("pct", 0)
         emoji = "📈" if pct > 0 else "📉" if pct < 0 else "➡️"
-        sig_emoji = {"buy": "✅买入", "sell": "⚠️卖出", "hold": "➡️观望"}.get(target.get("signal", "hold"), "")
+        sig_emoji = {"buy": "✅买入", "sell": "⚠️卖出", "hold": "➡️观望"}.get(
+            target.get("signal", "hold"), ""
+        )
         return (
             f"📊 {code} {rt.get('name', '')} {emoji} {price:.2f} ({pct:+.2f}%)\n"
             f"**策略 {target.get('name', strategy_id)}**: {sig_emoji}\n"
             f"理由: {target.get('reason', '')}"
+            f"{lib_section}"
         )
     except Exception as e:
         return f"❌ 分析 {code} 出错: {e}"
@@ -1028,7 +1124,10 @@ SYSTEM_PROMPT = """你是 A 股量化分析助手(集成于飞书群聊),拥有�
   · include_meta: true=附带书的作者/简介/章节列表
   · cross_ref: 跨来源对比,传策略id(如macd)查它在哪些书里出现(优先级最高)
 - get_yujie_detail(): 查玉姐精选10条评分规则+权重+回测表现
-- analyze_with_strategy(code, strategy_id): 用指定策略单独分析个股
+- analyze_with_strategy(code, strategy_id): 用指定策略分析个股,联动策略大全给出"来源+核心逻辑+当前信号+理由"
+  · strategy_id 支持引擎id(macd/kdj/boll)、大全id(macd_8/bottom)、中文名(抄底/逃顶)模糊匹配
+  · 若策略已实现: 跑引擎分析,返回完整来源+逻辑+信号
+  · 若策略未实现: 告知尚未实现,建议相近的已实现策略
 - toggle_strategy(strategy_id, enabled): 开关策略(操作类,需用户明确意图)
 - set_strategy_params(strategy_id, params): 调策略参数(操作类,需用户明确意图)
 - enable_library_strategy(library_id): 从大全引入策略(操作类)
@@ -1073,7 +1172,9 @@ SYSTEM_PROMPT = """你是 A 股量化分析助手(集成于飞书群聊),拥有�
 - "漫画书里哪些没实现" → get_strategy_library(source=book_cartoon, implemented_only=false)
 - "MACD在哪些书里出现" → get_strategy_library(cross_ref="macd")
 - "玉姐怎么打分" → get_yujie_detail()
-- "看下茅台的MACD信号" → analyze_with_strategy(code=600519, strategy_id=macd)
+- "看下茅台的MACD信号" → analyze_with_strategy(code=600519, strategy_id=macd) → 来源+逻辑+信号
+- "用抄底策略分析茅台" → analyze_with_strategy(code=600519, strategy_id=bottom) → 来源+逻辑+信号
+- "操练大全的MACD怎么样测茅台" → analyze_with_strategy(code=600519, strategy_id=macd_8) → 自动映射到 macd 引擎
 - "关闭均线组合策略" → toggle_strategy(strategy_id=ma_combo, enabled=false)
 - "把BOLL周期改成30" → set_strategy_params(strategy_id=boll, params={period:30})
 - "回测MACD策略" → backtest_strategy(strategy_id=macd) → 整理回测数据
