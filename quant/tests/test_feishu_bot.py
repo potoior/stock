@@ -7,6 +7,7 @@ import json
 import sqlite3
 import threading
 import time
+from pathlib import Path
 from unittest.mock import patch
 
 import feishu_bot
@@ -14,6 +15,7 @@ import stock_names
 from feishu_bot import (
     _get_session_lock,
     _is_reset_command,
+    _log_tool_call,
     _split_long_text,
     _truncate_history,
     _truncate_tool_result,
@@ -477,4 +479,104 @@ def test_session_lock_serializes():
         assert "-end" in order[i + 1]
         # 同一 worker 的 start 紧跟 end
         assert order[i].split("-")[0] == order[i + 1].split("-")[0]
+
+
+# ============ 结构化工具调用日志(JSONL) ============
+
+
+def test_log_tool_call_writes_jsonl(tmp_path, monkeypatch):
+    """工具调用日志应写到 JSONL 文件,每行一条 JSON。"""
+    log_file = tmp_path / "audit.jsonl"
+    monkeypatch.setattr(feishu_bot, "TOOL_AUDIT_LOG", log_file)
+
+    _log_tool_call("sessA", 1, "analyze_stock", {"code": "600519"},
+                   500, 123, error=None)
+    _log_tool_call("sessA", 2, "get_market_status", {},
+                   800, 45, error="exec: network")
+
+    lines = log_file.read_text(encoding="utf-8").strip().split("\n")
+    assert len(lines) == 2
+    r1 = json.loads(lines[0])
+    assert r1["session_id"] == "sessA"
+    assert r1["step"] == 1
+    assert r1["tool"] == "analyze_stock"
+    assert r1["args"] == {"code": "600519"}
+    assert r1["result_size"] == 500
+    assert r1["duration_ms"] == 123
+    assert r1["error"] is None
+    assert "ts" in r1 and "pid" in r1
+
+    r2 = json.loads(lines[1])
+    assert r2["error"] == "exec: network"
+
+
+def test_log_tool_call_failure_silent(tmp_path, monkeypatch):
+    """日志写入失败不应抛异常(不影响主流程)。"""
+    # 指向一个不存在的目录(不可写)
+    monkeypatch.setattr(feishu_bot, "TOOL_AUDIT_LOG", Path("/nonexistent_dir/audit.jsonl"))
+    # 不应抛
+    _log_tool_call("s", 1, "x", {}, 0, 0, error=None)
+
+
+# ============ 历史压缩(Compaction) ============
+
+
+def _make_agent_with_mock_llm(summary_text: str):
+    """构造 FeishuAgent,但 _summarize_with_llm 被 mock。"""
+    agent = feishu_bot.FeishuAgent.__new__(feishu_bot.FeishuAgent)
+    agent.api_key = "fake"
+    agent.base_url = "http://fake"
+    agent.model = "fake"
+    agent._summarize_with_llm = lambda text, max_tokens=300: summary_text
+    return agent
+
+
+def test_compact_below_threshold():
+    """历史条数 < COMPACTION_THRESHOLD 不压缩。"""
+    agent = _make_agent_with_mock_llm("摘要")
+    history = [{"role": "user", "content": f"Q{i}"} for i in range(5)]
+    out = agent._compact_history(history)
+    assert out is history  # 原样返回
+
+
+def test_compact_above_threshold():
+    """历史 >= COMPACTION_THRESHOLD 触发压缩,旧消息变 1 条摘要。"""
+    agent = _make_agent_with_mock_llm("用户问了茅台,分析了玉姐评分7分。")
+    history = []
+    for i in range(feishu_bot.COMPACTION_THRESHOLD + 2):
+        history.append({"role": "user", "content": f"Q{i}"})
+        history.append({"role": "assistant", "content": f"A{i}"})
+    # history 长度 = (THRESHOLD+2)*2 = 24
+    out = agent._compact_history(history)
+    # 期望: 1 条摘要 + COMPACTION_KEEP_RECENT 条原文
+    assert len(out) == 1 + feishu_bot.COMPACTION_KEEP_RECENT
+    assert "[历史摘要]" in out[0]["content"]
+    assert "茅台" in out[0]["content"]
+    # 最近的几条原文保留
+    assert out[-1]["content"] == f"A{feishu_bot.COMPACTION_THRESHOLD + 1}"
+
+
+def test_compact_llm_failure_degrades():
+    """LLM 摘要失败时应降级返回原 history(由 _truncate_history 兜底)。"""
+    agent = feishu_bot.FeishuAgent.__new__(feishu_bot.FeishuAgent)
+    agent.api_key = "fake"
+    agent.base_url = "http://fake"
+    agent.model = "fake"
+
+    def raise_fn(text, max_tokens=300):
+        raise RuntimeError("LLM down")
+    agent._summarize_with_llm = raise_fn
+
+    history = [{"role": "user", "content": f"Q{i}"} for i in range(20)]
+    out = agent._compact_history(history)
+    assert out is history  # 原样返回,不抛
+
+
+def test_compact_empty_summary_degrades():
+    """LLM 返空字符串时降级。"""
+    agent = _make_agent_with_mock_llm("")
+    history = [{"role": "user", "content": f"Q{i}"} for i in range(20)]
+    out = agent._compact_history(history)
+    assert out is history
+
 

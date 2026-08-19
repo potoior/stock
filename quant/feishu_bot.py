@@ -62,6 +62,31 @@ CONFIG_PATH = ENGINE_HOME / "config.json"
 REPORTS_DIR = ENGINE_HOME / "reports"
 AGENT_DB = ENGINE_HOME / "agent_data.db"
 
+# 结构化工具调用日志(JSONL),便于审计/统计(OpenClaw 风格)
+TOOL_AUDIT_LOG = Path("/tmp/feishu_bot_audit.jsonl")
+
+
+def _log_tool_call(session_id: str, step: int, fn_name: str, fn_args: dict,
+                   result_size: int, duration_ms: int, error: str | None = None) -> None:
+    """写一条工具调用的结构化日志(JSONL)。失败不影响主流程。"""
+    try:
+        import os
+        record = {
+            "ts": datetime.now().isoformat(timespec="seconds"),
+            "pid": os.getpid(),
+            "session_id": session_id,
+            "step": step,
+            "tool": fn_name,
+            "args": fn_args,
+            "result_size": result_size,
+            "duration_ms": duration_ms,
+            "error": error,
+        }
+        with open(TOOL_AUDIT_LOG, "a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except Exception:
+        pass  # 审计日志失败不影响主流程
+
 # 命令路由关键字
 CMD_ANALYZE = ("分析", "看看", "看看股")
 CMD_MARKET = ("市场", "大盘", "行情", "今日")
@@ -113,6 +138,11 @@ def _load_history(session_id: str) -> list:
 # 历史里 assistant 消息裁剪阈值(超长截断到摘要,避免回测/策略大全等长回复撑爆历史)
 HISTORY_MSG_MAX_CHARS = 500
 HISTORY_MSG_KEEP_CHARS = 200
+
+# 历史压缩(Compaction, OpenClaw 风格):历史达到 N 条时,把最旧的几轮用 LLM 总结成 1 条
+# 触发阈值: 10 条(5 轮);压缩后: 1 条摘要 + 最近 8 条(4 轮)原文
+COMPACTION_THRESHOLD = 10
+COMPACTION_KEEP_RECENT = 8
 
 
 def _truncate_history(history: list) -> list:
@@ -1814,6 +1844,61 @@ class FeishuAgent:
         if not self.api_key or not self.base_url:
             raise RuntimeError("AI_API_KEY/AI_BASE_URL 未配置(检查 .env)")
 
+    def _summarize_with_llm(self, text: str, max_tokens: int = 300) -> str:
+        """调 LLM 做摘要,失败抛异常。无 tools,纯文本。"""
+        import httpx
+        payload = {
+            "model": self.model,
+            "messages": [{"role": "user", "content": text}],
+            "temperature": 0.2,
+            "max_tokens": max_tokens,
+        }
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        with httpx.Client(timeout=30, trust_env=False) as c:
+            r = c.post(self.base_url, json=payload, headers=headers)
+        if r.status_code != 200:
+            raise RuntimeError(f"LLM 摘要 HTTP {r.status_code}")
+        return (r.json()["choices"][0]["message"]["content"] or "").strip()
+
+    def _compact_history(self, history: list) -> list:
+        """压缩历史(OpenClaw compaction 风格):旧的几轮用 LLM 总结成一条摘要,
+        保留最近 COMPACTION_KEEP_RECENT 条原文。
+
+        - 阈值: COMPACTION_THRESHOLD 条(默认 10 = 5 轮)
+        - 失败降级: 返回原 history,_save_history 会再走 _truncate_history 兜底
+        - 单条消息已超 HISTORY_MSG_MAX_CHARS 的优先走 _truncate_history
+        """
+        if len(history) < COMPACTION_THRESHOLD:
+            return history
+        old = history[:-COMPACTION_KEEP_RECENT]
+        recent = history[-COMPACTION_KEEP_RECENT:]
+        try:
+            # 拼接旧消息(每条截 300 字防 token 爆)
+            text_parts = []
+            for m in old:
+                role = m.get("role", "user")
+                c = (m.get("content") or "")[:300]
+                text_parts.append(f"{role}: {c}")
+            joined = "\n".join(text_parts)
+            prompt = (
+                "请用 200 字内总结以下对话的关键信息(涉及的股票代码、用户意图、"
+                "已得到的分析结论),便于后续对话参考。只输出摘要正文,不要前缀:\n"
+                + joined
+            )
+            summary = self._summarize_with_llm(prompt, max_tokens=300)
+            if not summary:
+                return history
+            summary_msg = {"role": "assistant", "content": f"[历史摘要] {summary}"}
+            log.info("历史压缩: %d 条 → 1 条摘要 + %d 条原文",
+                     len(old), len(recent))
+            return [summary_msg] + recent
+        except Exception as e:
+            log.warning("历史压缩失败 %s,降级到硬截断", e)
+            return history
+
     def chat(self, user_text: str, history: list | None = None, session_id: str = "cli") -> tuple[str, list, list[bytes]]:
         """Agent 主循环: ReAct(Reason→Act→Observe)直到模型给出最终答案。
 
@@ -1897,6 +1982,8 @@ class FeishuAgent:
                 if tool_log:
                     log.info("Agent 完成, 共 %d 步, 工具调用: %s", step + 1, tool_log)
                 new_history.append({"role": "assistant", "content": content})
+                # 历史压缩(OpenClaw compaction):旧轮 LLM 总结,降级到硬截断
+                new_history = self._compact_history(new_history)
                 return content, new_history, list(_pending_images)
 
             # 有工具调用: 执行并把结果回灌
@@ -1909,12 +1996,16 @@ class FeishuAgent:
 
             for tc in tool_calls:
                 fn_name = tc["function"]["name"]
+                t_start = time.time()
                 try:
                     fn_args = json.loads(tc["function"]["arguments"] or "{}")
                 except json.JSONDecodeError as e:
                     # 参数 JSON 解析失败 → 自愈:回灌错误让 LLM 修
                     log.warning("Agent step %d %s 参数 JSON 解析失败: %s", step + 1, fn_name, e)
                     tool_log.append(f"{fn_name}!(bad_json)")
+                    _log_tool_call(session_id, step + 1, fn_name, {},
+                                   0, int((time.time() - t_start) * 1000),
+                                   error=f"bad_json: {e}")
                     messages.append({
                         "role": "tool",
                         "tool_call_id": tc["id"],
@@ -1929,6 +2020,9 @@ class FeishuAgent:
                 ok, err = _validate_tool_args(fn_name, fn_args)
                 if not ok:
                     log.warning("Agent step %d %s 参数校验失败: %s", step + 1, fn_name, err)
+                    _log_tool_call(session_id, step + 1, fn_name, fn_args,
+                                   0, int((time.time() - t_start) * 1000),
+                                   error=f"validate: {err}")
                     messages.append({
                         "role": "tool",
                         "tool_call_id": tc["id"],
@@ -1938,6 +2032,9 @@ class FeishuAgent:
 
                 handler = TOOL_HANDLERS.get(fn_name)
                 if handler is None:
+                    _log_tool_call(session_id, step + 1, fn_name, fn_args,
+                                   0, int((time.time() - t_start) * 1000),
+                                   error="unknown_tool")
                     messages.append({
                         "role": "tool",
                         "tool_call_id": tc["id"],
@@ -1947,10 +2044,12 @@ class FeishuAgent:
 
                 try:
                     result = handler(fn_args)
+                    err_msg = None
                 except Exception as e:
                     # 工具执行异常 → 自愈:回灌友好错误让 LLM 修参数或换工具
                     log.error("工具 %s 执行异常: %s", fn_name, e)
                     tool_log[-1] = f"{fn_name}!(exec_err)"
+                    err_msg = f"exec: {e}"
                     result = (
                         f"工具 {fn_name} 执行失败: {e}。"
                         "请检查参数(如 code 是否为 6 位数字股票代码)后重试,"
@@ -1959,6 +2058,12 @@ class FeishuAgent:
 
                 # 工具结果截断(OpenClaw 风格):防止上下文污染
                 result = _truncate_tool_result(result)
+
+                # 结构化日志(JSONL)
+                _log_tool_call(session_id, step + 1, fn_name, fn_args,
+                               len(result) if isinstance(result, str) else 0,
+                               int((time.time() - t_start) * 1000),
+                               error=err_msg)
 
                 # 工具结果回灌(messages 用 role=tool)
                 messages.append({
@@ -2164,8 +2269,9 @@ class FeishuBotClient:
             app_secret=self.app_secret,
             event_handler=event_handler,
             log_level=lark.LogLevel.INFO,
+            auto_reconnect=True,  # ping timeout 后自动重连(默认 False,会导致 Bot 假死)
         )
-        log.info("启动飞书长连接,等待群里 @机器人 提问...")
+        log.info("启动飞书长连接(auto_reconnect=True),等待群里 @机器人 提问...")
         ws_client.start()
 
 
