@@ -1767,14 +1767,38 @@ class FeishuAgent:
             }
 
             try:
-                with httpx.Client(timeout=60, trust_env=False) as c:
-                    r = c.post(self.base_url, json=payload, headers=headers)
+                # 重试 1 次:网络抖动/网关 5xx 时重试,4xx 不重试(参数错误)
+                r = None
+                for attempt in range(2):
+                    try:
+                        with httpx.Client(timeout=60, trust_env=False) as c:
+                            r = c.post(self.base_url, json=payload, headers=headers)
+                        if r.status_code < 500:
+                            break  # 2xx 成功或 4xx 参数错误都不重试
+                        log.warning("LLM 调用 %dxx,重试 %d/2", r.status_code, attempt + 1)
+                        r = None
+                        time.sleep(1)
+                    except (httpx.ConnectError, httpx.ReadTimeout, httpx.RemoteProtocolError) as e:
+                        log.warning("LLM 网络异常 %s,重试 %d/2", e, attempt + 1)
+                        r = None
+                        time.sleep(1)
+                if r is None:
+                    return (
+                        "⚠️ AI 暂时无响应,请稍后重试(网络抖动,已重试2次)",
+                        new_history, list(_pending_images),
+                    )
                 if r.status_code != 200:
-                    return f"❌ AI 调用失败(HTTP {r.status_code}): {r.text[:200]}", new_history, list(_pending_images)
+                    return (
+                        f"⚠️ AI 服务异常(HTTP {r.status_code}),请稍后重试",
+                        new_history, list(_pending_images),
+                    )
                 msg = r.json()["choices"][0]["message"]
             except Exception as e:
                 log.error("Agent LLM 调用失败: %s", e)
-                return f"❌ AI 调用异常: {e}", new_history, list(_pending_images)
+                return (
+                    "⚠️ AI 调用异常,请稍后重试(已记录日志)",
+                    new_history, list(_pending_images),
+                )
 
             tool_calls = msg.get("tool_calls")
             if not tool_calls:
@@ -1830,6 +1854,29 @@ class FeishuAgent:
 # ============ 飞书长连接客户端 ============
 
 
+def _split_long_text(text: str, max_len: int = 3800) -> list[str]:
+    """按段落边界拆分长文本,尽量在 \n\n 处断开。单段超长则硬切。"""
+    if len(text) <= max_len:
+        return [text]
+    chunks = []
+    paragraphs = text.split("\n\n")
+    cur = ""
+    for p in paragraphs:
+        if len(cur) + len(p) + 2 <= max_len:
+            cur = (cur + "\n\n" + p) if cur else p
+        else:
+            if cur:
+                chunks.append(cur)
+            # 单段就超长,硬切
+            while len(p) > max_len:
+                chunks.append(p[:max_len])
+                p = p[max_len:]
+            cur = p
+    if cur:
+        chunks.append(cur)
+    return chunks
+
+
 class FeishuBotClient:
     """飞书长连接机器人客户端。"""
 
@@ -1858,36 +1905,12 @@ class FeishuBotClient:
             return
 
         # 按段落(\n\n)拆分,尽量不破坏 markdown 结构
-        chunks = self._split_long_text(text, max_len=3800)
+        chunks = _split_long_text(text, max_len=3800)
         for i, chunk in enumerate(chunks, 1):
             if len(chunks) > 1:
                 chunk = f"(第{i}/{len(chunks)}段)\n\n{chunk}" if i > 1 else chunk
             self._send_text(chat_id, chunk)
         log.info("长文本拆分: %d 字 → %d 段", len(text), len(chunks))
-
-    @staticmethod
-    def _split_long_text(text: str, max_len: int = 3800) -> list[str]:
-        """按段落边界拆分长文本,尽量在 \n\n 处断开。"""
-        if len(text) <= max_len:
-            return [text]
-        chunks = []
-        # 先按段落分
-        paragraphs = text.split("\n\n")
-        cur = ""
-        for p in paragraphs:
-            if len(cur) + len(p) + 2 <= max_len:
-                cur = (cur + "\n\n" + p) if cur else p
-            else:
-                if cur:
-                    chunks.append(cur)
-                # 单段就超长,硬切
-                while len(p) > max_len:
-                    chunks.append(p[:max_len])
-                    p = p[max_len:]
-                cur = p
-        if cur:
-            chunks.append(cur)
-        return chunks
 
     def _send_text(self, chat_id: str, text: str):
         """实际发送单条文本消息。"""

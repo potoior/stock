@@ -29,6 +29,33 @@ ENGINE_HOME = Path(__file__).parent
 # 中文字体配置(只配一次)
 _FONT_INIT = False
 
+# 图片缓存: (图表类型, code, 日期) → PNG bytes,当日有效
+# gen_kline_chart 2-3 秒,同股同日重复分析时复用省 70% 时间
+_IMG_CACHE: dict[tuple[str, str, str], bytes] = {}
+_IMG_CACHE_MAX = 30  # 最多缓存 30 张图,LRU 简化版(超限清空)
+
+
+def _img_cache_get(chart_type: str, code: str) -> bytes | None:
+    """取当日缓存,跨日自动失效。"""
+    today = datetime.now().strftime("%Y%m%d")
+    return _IMG_CACHE.get((chart_type, code, today))
+
+
+def _img_cache_put(chart_type: str, code: str, png: bytes) -> None:
+    """存当日缓存,超限时清空旧的(简化 LRU)。"""
+    if len(_IMG_CACHE) >= _IMG_CACHE_MAX:
+        # 跨日的全删,当日保留
+        today = datetime.now().strftime("%Y%m%d")
+        for k in list(_IMG_CACHE.keys()):
+            if k[2] != today:
+                del _IMG_CACHE[k]
+        # 还超限就清空当日最早的一半
+        if len(_IMG_CACHE) >= _IMG_CACHE_MAX:
+            for k in list(_IMG_CACHE.keys())[: _IMG_CACHE_MAX // 2]:
+                del _IMG_CACHE[k]
+    today = datetime.now().strftime("%Y%m%d")
+    _IMG_CACHE[(chart_type, code, today)] = png
+
 
 def _init_font():
     global _FONT_INIT
@@ -99,8 +126,11 @@ def gen_kline_chart(code: str, days: int = 120) -> io.BytesIO | None:
     """生成 K 线图 + 成交量 + MACD + KDJ 三联图。
 
     Returns:
-        BytesIO(PNG) 或 None(数据不足)
+        BytesIO(PNG) 或 None(数据不足)。同股同日复用缓存。
     """
+    cached = _img_cache_get("kline", code)
+    if cached:
+        return io.BytesIO(cached)
     _init_font()
     try:
         data = _kline_data(code, days)
@@ -207,6 +237,7 @@ def gen_kline_chart(code: str, days: int = 120) -> io.BytesIO | None:
         fig.savefig(buf, format="png", dpi=110, bbox_inches="tight", facecolor="white")
         buf.seek(0)
         plt.close(fig)
+        _img_cache_put("kline", code, buf.getvalue())
         return buf
     except Exception as e:
         log.error("生成 K 线图失败 %s: %s", code, e)
