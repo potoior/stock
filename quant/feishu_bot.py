@@ -65,6 +65,57 @@ RE_CODE = re.compile(r"\b(60[0-3]\d{3}|00[0-2]\d{3}|30[0-4]\d{3}|688\d{3}|8\d{5}
 # handler 调用过程中累积的图片(给 Agent 用,处理完一轮清空)
 _pending_images: list[bytes] = []
 
+# 跨轮对话历史持久化(按 chat_id 存储,sqlite)
+# 保留最近 MAX_HISTORY_TURNS 轮(1 轮 = user + assistant 两条消息)
+HISTORY_DB = ENGINE_HOME / "agent_history.db"
+MAX_HISTORY_TURNS = 6
+
+
+def _load_history(chat_id: str) -> list:
+    """从 sqlite 加载某 chat 的对话历史(仅 user/assistant 简短消息,不含工具结果)。"""
+    try:
+        conn = sqlite3.connect(str(HISTORY_DB), timeout=5)
+        # 表不存在时静默返回 [](首次启动正常情况)
+        if not conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='agent_history'"
+        ).fetchone():
+            conn.close()
+            return []
+        row = conn.execute(
+            "SELECT history_json FROM agent_history WHERE chat_id=?", (chat_id,)
+        ).fetchone()
+        conn.close()
+        if row and row[0]:
+            return json.loads(row[0])
+    except Exception as e:
+        log.warning("加载历史失败 %s: %s", chat_id, e)
+    return []
+
+
+def _save_history(chat_id: str, history: list) -> None:
+    """保存对话历史到 sqlite,只保留最近 MAX_HISTORY_TURNS 轮。"""
+    try:
+        # 限制历史长度:每轮是 user+assistant 2 条,保留最近 N 轮
+        max_msgs = MAX_HISTORY_TURNS * 2
+        if len(history) > max_msgs:
+            history = history[-max_msgs:]
+        conn = sqlite3.connect(str(HISTORY_DB), timeout=5)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS agent_history (
+                chat_id TEXT PRIMARY KEY,
+                history_json TEXT,
+                ts INTEGER
+            )
+        """)
+        conn.execute(
+            "INSERT OR REPLACE INTO agent_history(chat_id, history_json, ts) VALUES(?,?,?)",
+            (chat_id, json.dumps(history, ensure_ascii=False), int(time.time())),
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        log.warning("保存历史失败 %s: %s", chat_id, e)
+
 # 简单股票名称缓存(避免每次都查 DB)
 _name_cache: dict[str, str] = {}
 _name_cache_loaded = False
@@ -1338,6 +1389,13 @@ SYSTEM_PROMPT = """你是 A 股量化分析助手(集成于飞书群聊),拥有�
 4. 不要编造数据,只基于工具返回的事实
 5. 涉及投资判断时务必加风险提示(非投资建议)
 
+跨轮上下文(重要):
+- 系统会保留最近 6 轮对话历史(user+assistant),用户问题可能承接上文
+- 如用户先问"玉姐前10",再问"11-20呢" → 第二问指代玉姐精选的11-20名
+- 如用户先问"分析茅台",再问"五粮液呢" → 第二问指代用同样方法分析五粮液
+- 如用户先问"MACD策略",再问"KDJ呢" → 第二问指代看KDJ策略
+- 收到指代不明的简短问题(如"11-20呢"/"X呢"/"换一个"),请结合历史理解,不要要求用户重述
+
 操作类工具授权原则:
 - 用户明确表达意图(如"关闭均线组合策略"、"把BOLL周期改成30")才调用
 - 模糊请求(如"看看策略")只调查询类
@@ -1587,13 +1645,16 @@ class FeishuBotClient:
             # Agent 处理(Function Calling ReAct),失败降级到关键词路由
             # 智能判断: 只有调用耗时工具(backtest/grid_search)才发"思考中"提示,
             # 快速回复(分析/查询)直接给答案,避免收到两条消息的体验问题
+            # 跨轮记忆: 按 chat_id 加载/保存历史,让 Agent 能理解"11-20的"等指代
             try:
                 agent = FeishuAgent()
+                history = _load_history(chat_id)
                 # 先看 LLM 第一步是否要调慢工具:用轻量探测(同 LLM 但只取 tool_calls)
                 need_thinking_hint = self._needs_thinking_hint(text)
                 if need_thinking_hint:
                     self._reply_text(chat_id, "🤔 正在思考,需要 1-2 分钟(回测/寻优)...")
-                reply, _, images = agent.chat(text)
+                reply, new_history, images = agent.chat(text, history=history)
+                _save_history(chat_id, new_history)
             except Exception as e:
                 log.warning("Agent 异常 %s, 降级到关键词路由", e)
                 _, reply = route(text)
@@ -1647,7 +1708,10 @@ def main():
 
     if args.agent:
         agent = FeishuAgent()
-        reply, _, images = agent.chat(args.agent)
+        # CLI 模式也走跨轮记忆,用 chat_id="cli",方便测试多轮对话
+        history = _load_history("cli")
+        reply, new_history, images = agent.chat(args.agent, history=history)
+        _save_history("cli", new_history)
         print("[Agent 回复]")
         print(reply)
         if images:
