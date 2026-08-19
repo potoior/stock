@@ -71,8 +71,12 @@ HISTORY_DB = ENGINE_HOME / "agent_history.db"
 MAX_HISTORY_TURNS = 6
 
 
-def _load_history(chat_id: str) -> list:
-    """从 sqlite 加载某 chat 的对话历史(仅 user/assistant 简短消息,不含工具结果)。"""
+def _load_history(session_id: str) -> list:
+    """从 sqlite 加载某会话的对话历史(按 chat_id+sender 组合隔离)。
+
+    Args:
+        session_id: 格式 "<chat_id>:<open_id>",同一群里不同用户各自独立
+    """
     try:
         conn = sqlite3.connect(str(HISTORY_DB), timeout=5)
         # 表不存在时静默返回 [](首次启动正常情况)
@@ -82,17 +86,17 @@ def _load_history(chat_id: str) -> list:
             conn.close()
             return []
         row = conn.execute(
-            "SELECT history_json FROM agent_history WHERE chat_id=?", (chat_id,)
+            "SELECT history_json FROM agent_history WHERE session_id=?", (session_id,)
         ).fetchone()
         conn.close()
         if row and row[0]:
             return json.loads(row[0])
     except Exception as e:
-        log.warning("加载历史失败 %s: %s", chat_id, e)
+        log.warning("加载历史失败 %s: %s", session_id, e)
     return []
 
 
-def _save_history(chat_id: str, history: list) -> None:
+def _save_history(session_id: str, history: list) -> None:
     """保存对话历史到 sqlite,只保留最近 MAX_HISTORY_TURNS 轮。"""
     try:
         # 限制历史长度:每轮是 user+assistant 2 条,保留最近 N 轮
@@ -102,19 +106,19 @@ def _save_history(chat_id: str, history: list) -> None:
         conn = sqlite3.connect(str(HISTORY_DB), timeout=5)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS agent_history (
-                chat_id TEXT PRIMARY KEY,
+                session_id TEXT PRIMARY KEY,
                 history_json TEXT,
                 ts INTEGER
             )
         """)
         conn.execute(
-            "INSERT OR REPLACE INTO agent_history(chat_id, history_json, ts) VALUES(?,?,?)",
-            (chat_id, json.dumps(history, ensure_ascii=False), int(time.time())),
+            "INSERT OR REPLACE INTO agent_history(session_id, history_json, ts) VALUES(?,?,?)",
+            (session_id, json.dumps(history, ensure_ascii=False), int(time.time())),
         )
         conn.commit()
         conn.close()
     except Exception as e:
-        log.warning("保存历史失败 %s: %s", chat_id, e)
+        log.warning("保存历史失败 %s: %s", session_id, e)
 
 # 简单股票名称缓存(避免每次都查 DB)
 _name_cache: dict[str, str] = {}
@@ -1645,16 +1649,17 @@ class FeishuBotClient:
             # Agent 处理(Function Calling ReAct),失败降级到关键词路由
             # 智能判断: 只有调用耗时工具(backtest/grid_search)才发"思考中"提示,
             # 快速回复(分析/查询)直接给答案,避免收到两条消息的体验问题
-            # 跨轮记忆: 按 chat_id 加载/保存历史,让 Agent 能理解"11-20的"等指代
+            # 跨轮记忆: 按 chat_id+sender 隔离,群里不同用户各自独立历史
+            session_id = f"{chat_id}:{sender}"
             try:
                 agent = FeishuAgent()
-                history = _load_history(chat_id)
+                history = _load_history(session_id)
                 # 先看 LLM 第一步是否要调慢工具:用轻量探测(同 LLM 但只取 tool_calls)
                 need_thinking_hint = self._needs_thinking_hint(text)
                 if need_thinking_hint:
                     self._reply_text(chat_id, "🤔 正在思考,需要 1-2 分钟(回测/寻优)...")
                 reply, new_history, images = agent.chat(text, history=history)
-                _save_history(chat_id, new_history)
+                _save_history(session_id, new_history)
             except Exception as e:
                 log.warning("Agent 异常 %s, 降级到关键词路由", e)
                 _, reply = route(text)
@@ -1708,7 +1713,7 @@ def main():
 
     if args.agent:
         agent = FeishuAgent()
-        # CLI 模式也走跨轮记忆,用 chat_id="cli",方便测试多轮对话
+        # CLI 模式也走跨轮记忆,用 session_id="cli",方便测试多轮对话
         history = _load_history("cli")
         reply, new_history, images = agent.chat(args.agent, history=history)
         _save_history("cli", new_history)
