@@ -30,6 +30,7 @@ import json
 import logging
 import re
 import sqlite3
+import threading
 import time
 import traceback
 from datetime import datetime
@@ -1603,6 +1604,77 @@ MAX_AGENT_STEPS = 6  # 最多 6 步推理(避免无限循环)
 # 耗时工具(超过 10 秒),需先发"思考中"提示用户
 SLOW_TOOLS = {"backtest_strategy", "grid_search_strategy"}
 
+# 工具结果回灌给 LLM 时的字符上限(防止上下文污染,OpenClaw 风格)
+TOOL_RESULT_MAX_CHARS = 3000
+
+# 工具 schema 索引(name → parameters),用于参数预校验(Hermes 风格)
+_TOOL_SCHEMA: dict[str, dict] = {
+    t["function"]["name"]: t["function"].get("parameters", {})
+    for t in TOOLS
+}
+
+
+def _validate_tool_args(fn_name: str, fn_args: dict) -> tuple[bool, str | None]:
+    """对照 TOOLS schema 校验工具参数(Hermes 风格)。
+    检查: required 字段是否齐全 + 基础类型匹配。
+    返回 (ok, error_msg);ok=True 时 error_msg=None。
+    """
+    schema = _TOOL_SCHEMA.get(fn_name)
+    if schema is None:
+        return False, f"未知工具 '{fn_name}',请从已注册工具中选择"
+
+    required = schema.get("required", [])
+    missing = [r for r in required if r not in fn_args or fn_args[r] in (None, "")]
+    if missing:
+        return False, f"缺少必需参数: {missing}(schema 要求 {required})"
+
+    # 基础类型校验:只校验已提供的字段,不强制 default
+    type_map = {"string": str, "number": (int, float), "integer": int, "boolean": bool, "array": list, "object": dict}
+    for k, v in fn_args.items():
+        # 跳过 None(允许 null)
+        if v is None:
+            continue
+        prop = schema.get("properties", {}).get(k)
+        if prop is None:
+            continue  # schema 未声明,放行(允许 LLM 加额外字段)
+        expect = prop.get("type")
+        py_type = type_map.get(expect)
+        if py_type is None:
+            continue  # 未知类型,放行
+        # 特殊:bool 是 int 子类,integer/number 字段收到 bool 视为错
+        if expect in ("integer", "number") and isinstance(v, bool):
+            return False, f"参数 '{k}' 应为 {expect},实际 boolean({v})"
+        if not isinstance(v, py_type):
+            return False, f"参数 '{k}' 应为 {expect},实际 {type(v).__name__}({v!r})"
+    return True, None
+
+
+def _truncate_tool_result(text: str, max_chars: int = TOOL_RESULT_MAX_CHARS) -> str:
+    """截断过长的工具结果,防止上下文污染(OpenClaw 风格)。"""
+    if not isinstance(text, str):
+        text = str(text)
+    if len(text) <= max_chars:
+        return text
+    # 保留前 max_chars 字符(通常前段是最重要的摘要/结论)
+    return f"{text[:max_chars]}\n\n…[结果已截断,原始 {len(text)} 字]"
+
+
+# 会话级并发锁(OpenClaw session lane):同一 session_id 的 Agent 推理串行,
+# 防止用户连发消息时多个 Agent 并发跑、history 互相覆盖。
+_session_locks: dict[str, threading.Lock] = {}
+_session_locks_guard = threading.Lock()
+
+
+def _get_session_lock(session_id: str) -> threading.Lock:
+    """获取(或创建)session 级别的锁。"""
+    with _session_locks_guard:
+        lock = _session_locks.get(session_id)
+        if lock is None:
+            lock = threading.Lock()
+            _session_locks[session_id] = lock
+        return lock
+
+
 SYSTEM_PROMPT = """你是 A 股量化分析助手(集成于飞书群聊),拥有以下工具:
 
 【数据查询类】
@@ -1649,6 +1721,22 @@ SYSTEM_PROMPT = """你是 A 股量化分析助手(集成于飞书群聊),拥有�
 3. 回复要条理清晰,用 markdown 格式(加粗、列表、emoji),不超过 600 字
 4. 不要编造数据,只基于工具返回的事实
 5. 涉及投资判断时务必加风险提示(非投资建议)
+
+多步任务规划(GOAP Scratchpad, Hermes 风格):
+- 对于需要调用 2 个或以上工具的复杂任务,在调用第一个工具前,先在 content 字段用 1-2 句话简述:
+  · 目标(Goal): 用户想要什么
+  · 行动(Actions): 计划调用哪些工具,顺序如何
+- 工具结果返回后,可在下一个 content 字段反思(Observation+Reflection):结果是否符合预期?下一步是否需要调整?
+- 这些思考文字不会展示给用户(只作为你后续推理的上下文),但会保留在对话历史中
+- 单步任务(如"分析茅台")无需规划,直接调工具即可,不要输出多余的思考文字
+- 示例:
+  · "分析茅台和五粮液,对比玉姐评分" → content: "目标:对比两只股票的玉姐评分。行动:先调 analyze_with_yujie(600519),再调 analyze_with_yujie(000858),最后对比。" → 调用 analyze_with_yujie(code=600519)
+  · "玉姐7分以上的,用BOLL回测" → content: "目标:对玉姐高分股做BOLL回测。行动:先 get_yujie_picks(min_score=7) 拿代码,再 backtest_strategy(strategy_id=boll)。" → 调用 get_yujie_picks(min_score=7)
+
+工具调用纪律:
+- 参数严格按 schema 给(如 code 必须是 6 位字符串"600519",不能传"茅台")
+- 工具返回错误时,阅读错误信息并修正参数重试,不要重复同样的错误调用
+- 工具结果可能被截断(超 3000 字),关键信息在前段,如需完整数据可换更精确的查询
 
 跨轮上下文(重要):
 - 系统会保留最近 6 轮对话历史(user+assistant),用户问题可能承接上文
@@ -1823,21 +1911,54 @@ class FeishuAgent:
                 fn_name = tc["function"]["name"]
                 try:
                     fn_args = json.loads(tc["function"]["arguments"] or "{}")
-                except json.JSONDecodeError:
-                    fn_args = {}
+                except json.JSONDecodeError as e:
+                    # 参数 JSON 解析失败 → 自愈:回灌错误让 LLM 修
+                    log.warning("Agent step %d %s 参数 JSON 解析失败: %s", step + 1, fn_name, e)
+                    tool_log.append(f"{fn_name}!(bad_json)")
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc["id"],
+                        "content": f"参数 JSON 解析失败: {e}。请用合法 JSON 重新调用 {fn_name}。",
+                    })
+                    continue
 
                 log.info("Agent step %d 调用 %s(%s)", step + 1, fn_name, fn_args)
                 tool_log.append(fn_name)
 
+                # 参数预校验(Hermes 风格):不合法直接回灌,不浪费一次执行
+                ok, err = _validate_tool_args(fn_name, fn_args)
+                if not ok:
+                    log.warning("Agent step %d %s 参数校验失败: %s", step + 1, fn_name, err)
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc["id"],
+                        "content": f"参数校验失败: {err}。请用正确参数重新调用 {fn_name}。",
+                    })
+                    continue
+
                 handler = TOOL_HANDLERS.get(fn_name)
                 if handler is None:
-                    result = f"错误: 未知工具 {fn_name}"
-                else:
-                    try:
-                        result = handler(fn_args)
-                    except Exception as e:
-                        result = f"工具执行异常: {e}"
-                        log.error("工具 %s 执行异常: %s", fn_name, e)
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc["id"],
+                        "content": f"错误: 未知工具 '{fn_name}',请从已注册工具列表中选择。",
+                    })
+                    continue
+
+                try:
+                    result = handler(fn_args)
+                except Exception as e:
+                    # 工具执行异常 → 自愈:回灌友好错误让 LLM 修参数或换工具
+                    log.error("工具 %s 执行异常: %s", fn_name, e)
+                    tool_log[-1] = f"{fn_name}!(exec_err)"
+                    result = (
+                        f"工具 {fn_name} 执行失败: {e}。"
+                        "请检查参数(如 code 是否为 6 位数字股票代码)后重试,"
+                        "或换一个表述清晰的用户意图重新回答。"
+                    )
+
+                # 工具结果截断(OpenClaw 风格):防止上下文污染
+                result = _truncate_tool_result(result)
 
                 # 工具结果回灌(messages 用 role=tool)
                 messages.append({
@@ -1990,6 +2111,17 @@ class FeishuBotClient:
             # Agent 处理(Function Calling ReAct),失败降级到关键词路由
             # 智能判断: 只有调用耗时工具(backtest/grid_search)才发"思考中"提示,
             # 快速回复(分析/查询)直接给答案,避免收到两条消息的体验问题
+            #
+            # 会话级并发锁(OpenClaw session lane):同一 session_id 串行执行,
+            # 防止用户连发消息时多个 Agent 并发跑、history 互相覆盖。
+            session_lock = _get_session_lock(session_id)
+            acquired = session_lock.acquire(timeout=300)
+            if not acquired:
+                self._reply_text(
+                    chat_id,
+                    "⏳ 上一条消息还在处理中,请稍等几秒再发(同一会话最多 5 分钟)。",
+                )
+                return
             try:
                 agent = FeishuAgent()
                 history = _load_history(session_id)
@@ -2003,6 +2135,8 @@ class FeishuBotClient:
                 log.warning("Agent 异常 %s, 降级到关键词路由", e)
                 _, reply = route(text)
                 images = []
+            finally:
+                session_lock.release()
 
             log.info("回复长度 %d, 附图 %d 张", len(reply), len(images))
             self._reply_text(chat_id, reply)

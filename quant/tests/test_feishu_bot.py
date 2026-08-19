@@ -5,15 +5,19 @@
 
 import json
 import sqlite3
+import threading
 import time
 from unittest.mock import patch
 
 import feishu_bot
 import stock_names
 from feishu_bot import (
+    _get_session_lock,
     _is_reset_command,
     _split_long_text,
     _truncate_history,
+    _truncate_tool_result,
+    _validate_tool_args,
     handler_watchlist,
     watchlist_add,
     watchlist_list,
@@ -322,3 +326,155 @@ def test_resolve_codes_from_cache(tmp_path, monkeypatch):
         codes = stock_names.resolve_codes("对比茅台和五粮液")
     assert "600519" in codes
     assert "000858" in codes
+
+
+# ============ 参数 schema 预校验(Hermes 风格) ============
+
+
+def test_validate_args_ok():
+    """正常参数通过校验。"""
+    ok, err = _validate_tool_args("analyze_stock", {"code": "600519"})
+    assert ok is True
+    assert err is None
+
+
+def test_validate_args_missing_required():
+    """缺必需参数应被拒。"""
+    ok, err = _validate_tool_args("analyze_stock", {})
+    assert ok is False
+    assert "code" in err
+
+
+def test_validate_args_empty_string():
+    """空字符串等同缺失。"""
+    ok, err = _validate_tool_args("analyze_stock", {"code": ""})
+    assert ok is False
+    assert "缺少" in err
+
+
+def test_validate_args_wrong_type():
+    """类型不符应被拒(code 应为 string,传 int)。"""
+    ok, err = _validate_tool_args("analyze_stock", {"code": 600519})
+    assert ok is False
+    assert "应为" in err
+
+
+def test_validate_args_bool_for_integer():
+    """bool 传给 integer 字段应被拒(bool 是 int 子类,需特殊排除)。"""
+    ok, err = _validate_tool_args("backtest_strategy", {"strategy_id": "macd", "sample": True})
+    assert ok is False
+    assert "integer" in err
+
+
+def test_validate_args_unknown_tool():
+    """未注册工具应被拒。"""
+    ok, err = _validate_tool_args("nonexistent_tool", {})
+    assert ok is False
+    assert "未知工具" in err
+
+
+def test_validate_args_no_required():
+    """无 required 字段的工具,空 args 通过。"""
+    ok, err = _validate_tool_args("get_market_status", {})
+    assert ok is True
+
+
+def test_validate_args_optional_only():
+    """只有可选字段,不传也通过。"""
+    ok, err = _validate_tool_args("get_yujie_picks", {})
+    assert ok is True
+
+
+def test_validate_args_optional_with_value():
+    """可选字段给了值,类型对则通过。"""
+    ok, err = _validate_tool_args("get_yujie_picks", {"min_score": 7})
+    assert ok is True
+    ok, err = _validate_tool_args("get_yujie_picks", {"min_score": 7.5})
+    assert ok is True
+
+
+def test_validate_args_optional_wrong_type():
+    """可选字段类型错应被拒。"""
+    ok, err = _validate_tool_args("get_yujie_picks", {"min_score": "7"})
+    assert ok is False
+    assert "应为" in err
+
+
+# ============ 工具结果截断(OpenClaw 风格) ============
+
+
+def test_truncate_result_short():
+    """短结果不截断。"""
+    assert _truncate_tool_result("abc") == "abc"
+
+
+def test_truncate_result_exact_limit():
+    """刚好等于上限不截断。"""
+    s = "x" * 3000
+    assert _truncate_tool_result(s) == s
+
+
+def test_truncate_result_over_limit():
+    """超上限截断 + 标注原始长度。"""
+    s = "x" * 5000
+    out = _truncate_tool_result(s)
+    assert len(out) < len(s)
+    assert "5000" in out
+    assert "已截断" in out
+    assert out.startswith("xxx")
+
+
+def test_truncate_result_custom_limit():
+    """自定义上限。"""
+    out = _truncate_tool_result("abcdef", max_chars=3)
+    assert out.startswith("abc")
+    assert "6" in out
+
+
+def test_truncate_result_non_string():
+    """非字符串先转 str 再截断。"""
+    out = _truncate_tool_result(12345)
+    assert out == "12345"
+
+
+# ============ 会话级并发锁(OpenClaw session lane) ============
+
+
+def test_session_lock_same_session():
+    """同一 session_id 返回同一把锁。"""
+    lock1 = _get_session_lock("userA")
+    lock2 = _get_session_lock("userA")
+    assert lock1 is lock2
+
+
+def test_session_lock_different_session():
+    """不同 session_id 返回不同锁。"""
+    lock1 = _get_session_lock("userA")
+    lock2 = _get_session_lock("userB")
+    assert lock1 is not lock2
+
+
+def test_session_lock_serializes():
+    """锁能真正串行化并发执行。"""
+    lock = _get_session_lock("test_serialize")
+    order = []
+
+    def worker(name):
+        with lock:
+            order.append(f"{name}-start")
+            time.sleep(0.05)
+            order.append(f"{name}-end")
+
+    threads = [threading.Thread(target=worker, args=(str(i),)) for i in range(3)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    # 严格交替: 0-start, 0-end, 1-start, 1-end, 2-start, 2-end (顺序可能变,但 start/end 必相邻)
+    for i in range(0, len(order), 2):
+        assert "-start" in order[i]
+        assert "-end" in order[i + 1]
+        # 同一 worker 的 start 紧跟 end
+        assert order[i].split("-")[0] == order[i + 1].split("-")[0]
+
