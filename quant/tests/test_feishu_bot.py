@@ -16,10 +16,14 @@ from feishu_bot import (
     _get_session_lock,
     _is_reset_command,
     _log_tool_call,
+    _normalize_date,
     _split_long_text,
     _truncate_history,
     _truncate_tool_result,
     _validate_tool_args,
+    handler_analyze_sector,
+    handler_compare_stocks,
+    handler_query_history_picks,
     handler_watchlist,
     watchlist_add,
     watchlist_list,
@@ -578,5 +582,163 @@ def test_compact_empty_summary_degrades():
     history = [{"role": "user", "content": f"Q{i}"} for i in range(20)]
     out = agent._compact_history(history)
     assert out is history
+
+
+# ============ 多股票对比 compare_stocks ============
+
+
+def test_compare_stocks_empty():
+    """空列表应返错误。"""
+    r = handler_compare_stocks([])
+    assert "❌" in r
+
+
+def test_compare_stocks_not_list():
+    """非 list 应返错误。"""
+    r = handler_compare_stocks("600519")
+    assert "❌" in r
+
+
+def test_compare_stocks_too_many():
+    """超过 8 只应返错误。"""
+    r = handler_compare_stocks(["600519"] * 10)
+    assert "❌" in r or "8" in r
+
+
+def test_compare_stocks_invalid_codes():
+    """全部代码无效应返错误。"""
+    r = handler_compare_stocks(["不存在的xxx", "也存在的yyy"])
+    assert "❌" in r
+
+
+def test_compare_stocks_with_mock_finance(monkeypatch):
+    """mock fetch_finance 后,对比表应正常输出。"""
+    import stock_finance
+    def fake_fetch(code):
+        return {
+            "code": code,
+            "name": f"股票{code}",
+            "pe_ttm": 20.0,
+            "pb": 5.0,
+            "total_mv": 1.5e11,
+            "roe": 15.0,
+            "net_margin": 30.0,
+            "report_name": "2026中报",
+        }
+    monkeypatch.setattr(stock_finance, "fetch_finance", fake_fetch)
+    r = handler_compare_stocks(["600519", "000858"])
+    assert "股票600519" in r
+    assert "股票000858" in r
+    assert "20.00" in r  # PE
+    assert "|" in r  # 表格
+
+
+# ============ 板块分析 analyze_sector ============
+
+
+def test_analyze_sector_known(monkeypatch):
+    """已知板块应返回成分股对比。"""
+    import stock_finance
+    def fake_fetch(code):
+        return {"code": code, "name": f"股{code}", "pe_ttm": 10.0, "pb": 1.0,
+                "total_mv": 1e10, "roe": 5.0, "net_margin": 10.0, "report_name": "2026中报"}
+    monkeypatch.setattr(stock_finance, "fetch_finance", fake_fetch)
+    r = handler_analyze_sector("白酒")
+    assert "600519" in r  # 茅台代码在白酒板块成员里
+
+
+def test_analyze_sector_unknown():
+    """未知板块应提示已知列表。"""
+    r = handler_analyze_sector("不存在的板块xyz")
+    assert "❌" in r
+    assert "白酒" in r  # 列出已知
+
+
+def test_analyze_sector_fuzzy_match():
+    """模糊匹配: '银' 应匹配 '银行'。"""
+    r = handler_analyze_sector("银")
+    # 不应返回未知板块错误(应能匹配到银行)
+    assert "已知板块" not in r
+
+
+def test_analyze_sector_empty():
+    """空板块名应返错误。"""
+    r = handler_analyze_sector("")
+    assert "❌" in r
+
+
+# ============ 历史复盘 query_history_picks ============
+
+
+def test_normalize_date_formats():
+    """各种日期格式应规范化为 YYYYMMDD。"""
+    assert _normalize_date("20260819") == "20260819"
+    assert _normalize_date("2026-08-19") == "20260819"
+    assert _normalize_date("2026/08/19") == "20260819"
+    assert _normalize_date("2026.08.19") == "20260819"
+    assert _normalize_date("xyz") == ""
+    assert _normalize_date("") == feishu_bot.datetime.now().strftime("%Y%m%d")
+
+
+def test_normalize_date_relative():
+    """相对日期应正确解析。"""
+    from datetime import datetime, timedelta
+    assert _normalize_date("今天") == datetime.now().strftime("%Y%m%d")
+    assert _normalize_date("昨日") == (datetime.now() - timedelta(days=1)).strftime("%Y%m%d")
+    assert _normalize_date("前天") == (datetime.now() - timedelta(days=2)).strftime("%Y%m%d")
+    assert _normalize_date("大前天") == (datetime.now() - timedelta(days=3)).strftime("%Y%m%d")
+
+
+def test_query_history_picks_invalid_date():
+    """无效日期格式应返错误。"""
+    r = handler_query_history_picks("xyz")
+    assert "❌" in r
+
+
+def test_query_history_picks_no_data(tmp_path, monkeypatch):
+    """指定日期无数据应提示并显示可用日期。"""
+    # 用临时 db 避免影响真实数据
+    db = tmp_path / "test.db"
+    conn = sqlite3.connect(str(db))
+    conn.execute("CREATE TABLE yujie_picks (date TEXT, rank INTEGER, code TEXT, name TEXT, score REAL, hits TEXT, detail TEXT)")
+    conn.execute("INSERT INTO yujie_picks VALUES(?,?,?,?,?,?,?)", ("20260820", 1, "600519", "茅台", 7.0, "[]", "{}"))
+    conn.commit()
+    conn.close()
+
+    import yujie_scan
+    monkeypatch.setattr(yujie_scan, "CACHE_DB", str(db))
+    monkeypatch.setattr(feishu_bot, "ENGINE_HOME", tmp_path)
+    # 让 stock_cache.db 实际指到临时 db
+    (tmp_path / "stock_cache.db").symlink_to(db) if False else None
+    # 直接复制一份到 stock_cache.db 名字
+    import shutil
+    shutil.copy(str(db), str(tmp_path / "stock_cache.db"))
+
+    r = handler_query_history_picks("20260101")
+    assert "❌" in r
+    assert "20260101" in r
+
+
+def test_query_history_picks_with_data(tmp_path, monkeypatch):
+    """指定日期有数据应返回 Top10 列表。"""
+    db = tmp_path / "stock_cache.db"
+    conn = sqlite3.connect(str(db))
+    conn.execute("CREATE TABLE yujie_picks (date TEXT, rank INTEGER, code TEXT, name TEXT, score REAL, hits TEXT, detail TEXT)")
+    for i in range(15):
+        conn.execute("INSERT INTO yujie_picks VALUES(?,?,?,?,?,?,?)",
+                     ("20260819", i + 1, f"600{i:03d}", f"股票{i}", 7.0 - i * 0.3, '[]', "{}"))
+    conn.commit()
+    conn.close()
+
+    import yujie_scan
+    monkeypatch.setattr(yujie_scan, "CACHE_DB", str(db))
+    monkeypatch.setattr(feishu_bot, "ENGINE_HOME", tmp_path)
+
+    r = handler_query_history_picks("20260819")
+    assert "20260819" in r
+    assert "Top10" in r or "Top" in r
+    assert "评分分布" in r
+    assert "共 15" in r  # 总共 15 只
+
 
 

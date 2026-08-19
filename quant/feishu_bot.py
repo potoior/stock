@@ -33,7 +33,7 @@ import sqlite3
 import threading
 import time
 import traceback
-from datetime import datetime
+from datetime import datetime, timedelta
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
@@ -699,6 +699,184 @@ def handler_finance(code: str) -> str:
     return fmt_finance(data)
 
 
+def handler_compare_stocks(codes: list) -> str:
+    """多股票对比: 一次给 N 只股票的对比表(PE/PB/ROE/市值/净利率)。
+
+    Args:
+        codes: 股票代码或名称列表,如 ["600519","000858"] 或 ["茅台","五粮液"]
+    """
+    import stock_names
+    from stock_finance import fetch_finance
+
+    if not codes or not isinstance(codes, list):
+        return "❌ 请提供要对比的股票列表,如 ['茅台','五粮液']"
+    if len(codes) > 8:
+        return "❌ 最多对比 8 只股票,请精简列表"
+
+    # 解析代码(支持中文简称)
+    resolved = []
+    for c in codes:
+        c = (c or "").strip()
+        if not c:
+            continue
+        if c.isdigit() and len(c) == 6:
+            resolved.append(c)
+        else:
+            r = stock_names.resolve_codes(c)
+            if r:
+                resolved.append(r[0])
+    if not resolved:
+        return f"❌ 无法解析任何代码,输入: {codes}"
+    if len(resolved) > 8:
+        resolved = resolved[:8]
+
+    # 拉数据(每只调 fetch_finance,有缓存不会慢)
+    rows = []
+    for code in resolved:
+        d = fetch_finance(code)
+        if "error" in d:
+            rows.append(("-", code) + tuple(["-"] * 7))
+            continue
+        rows.append((
+            d.get("name", "-"),
+            code,
+            f"{d['pe_ttm']:.2f}" if isinstance(d.get("pe_ttm"), (int, float)) else "-",
+            f"{d['pb']:.2f}" if isinstance(d.get("pb"), (int, float)) else "-",
+            f"{d['total_mv']/1e8:.0f}亿" if d.get("total_mv") else "-",
+            f"{d['roe']:.2f}%" if isinstance(d.get("roe"), (int, float)) else "-",
+            f"{d['net_margin']:.2f}%" if isinstance(d.get("net_margin"), (int, float)) else "-",
+            d.get("report_name", "-"),
+        ))
+
+    # 表格输出
+    lines = [
+        f"### 📊 {len(resolved)} 只股票对比",
+        "",
+        "| 名称 | 代码 | PE(TTM) | PB | 总市值 | ROE | 净利率 | 财报 |",
+        "|---|---|---|---|---|---|---|---|",
+    ]
+    for r in rows:
+        lines.append("| " + " | ".join(str(x) for x in r) + " |")
+    lines.append("")
+    lines.append("💡 可继续追问单只股票详情(如'茅台基本面')")
+    return "\n".join(lines)
+
+
+# 主流板块成分股(简化版,涵盖 A 股常见板块,每板块 8 只代表股)
+_SECTOR_MEMBERS = {
+    "白酒": ["600519", "000858", "000568", "600809", "002304", "000596", "603369", "600779"],
+    "银行": ["601398", "601939", "601288", "601318", "600036", "601166", "600000", "601628"],
+    "医药": ["600276", "300015", "600436", "000538", "600196", "300003", "000999", "600085"],
+    "新能源": ["300750", "002594", "601012", "600438", "002460", "603259", "300274", "002129"],
+    "半导体": ["688981", "002049", "603501", "603160", "688012", "300661", "300223", "002405"],
+    "消费": ["600887", "000651", "600690", "000333", "002508", "600061", "603288", "000858"],
+    "军工": ["600760", "000768", "600031", "002179", "600150", "000901", "600893", "002049"],
+    "地产": ["000002", "600048", "001914", "600340", "000671", "600208", "600383", "000961"],
+    "电力": ["600900", "601016", "600795", "000875", "600025", "600674", "003816", "600027"],
+    "有色": ["601899", "603993", "600547", "002460", "000831", "600362", "002203", "600497"],
+}
+
+
+def handler_analyze_sector(sector: str) -> str:
+    """板块分析: 给出板块成分股的对比表(PE/PB/ROE/市值/净利率)。
+
+    Args:
+        sector: 板块名(中文),如"白酒"/"银行"/"医药"/"新能源"/"半导体"
+    """
+    if not sector:
+        return "❌ 请提供板块名,如'白酒'/'银行'/'医药'/'新能源'/'半导体'"
+
+    # 模糊匹配板块名
+    sector = sector.strip()
+    matched = None
+    for k in _SECTOR_MEMBERS:
+        if sector == k or sector in k or k in sector:
+            matched = k
+            break
+    if not matched:
+        known = "、".join(_SECTOR_MEMBERS.keys())
+        return f"❌ 未识别板块 '{sector}'。已知板块: {known}"
+
+    members = _SECTOR_MEMBERS[matched]
+    return handler_compare_stocks(members)
+
+
+def _normalize_date(date_str: str) -> str:
+    """规范化日期输入为 YYYYMMDD。
+    支持: '20260819' / '2026-08-19' / '2026/08/19' / '昨天' / '前天' / '大前天'
+    """
+    if not date_str:
+        return datetime.now().strftime("%Y%m%d")
+    s = date_str.strip()
+    # 相对日期
+    if s in ("昨天", "昨日", "yesterday"):
+        return (datetime.now() - timedelta(days=1)).strftime("%Y%m%d")
+    if s in ("前天",):
+        return (datetime.now() - timedelta(days=2)).strftime("%Y%m%d")
+    if s in ("大前天",):
+        return (datetime.now() - timedelta(days=3)).strftime("%Y%m%d")
+    if s in ("今天", "今日", "today"):
+        return datetime.now().strftime("%Y%m%d")
+    # 数字日期
+    s = s.replace("-", "").replace("/", "").replace(".", "")
+    if s.isdigit() and len(s) == 8:
+        return s
+    return ""  # 无效
+
+
+def handler_query_history_picks(date: str) -> str:
+    """查询过去某天的玉姐精选(历史复盘)。
+
+    Args:
+        date: 日期,支持 '20260819' / '2026-08-19' / '昨天' / '前天'
+    """
+    import yujie_scan
+
+    date_str = _normalize_date(date)
+    if not date_str:
+        return (f"❌ 日期格式错误: '{date}'。"
+                "支持 YYYYMMDD / YYYY-MM-DD / 昨天 / 前天 / 大前天")
+
+    picks = yujie_scan.load_picks(date_str)
+    if not picks:
+        # 看看 db 里有哪些日期
+        try:
+            conn = sqlite3.connect(str(ENGINE_HOME / "stock_cache.db"), timeout=5)
+            rows = conn.execute(
+                "SELECT DISTINCT date FROM yujie_picks ORDER BY date DESC LIMIT 5"
+            ).fetchall()
+            conn.close()
+            available = "、".join(r[0] for r in rows) if rows else "无"
+        except Exception:
+            available = "查询失败"
+        return (
+            f"❌ {date_str} 没有玉姐精选数据。\n"
+            f"最近可查日期: {available}\n"
+            "提示: 玉姐精选每日 09:00 自动生成,历史数据需当天跑过才有。"
+        )
+
+    # Top10 列表
+    top = picks[:10]
+    lines = [f"📅 {date_str} 玉姐精选 Top{len(top)}(共 {len(picks)} 只)"]
+    for p in top:
+        hits = "、".join(p.get("hits", [])) if p.get("hits") else "无命中"
+        lines.append(f"{p['rank']}. **{p['code']} {p['name']}** | {p['score']:g}分 | {hits}")
+
+    if len(picks) > 10:
+        lines.append(f"\n(共 {len(picks)} 只,仅显示前 10)")
+
+    # 评分分布
+    scores = [p.get("score", 0) for p in picks]
+    if scores:
+        high = sum(1 for s in scores if s >= 7)
+        mid = sum(1 for s in scores if 5 <= s < 7)
+        low = sum(1 for s in scores if s < 5)
+        lines.append(f"\n评分分布: 7+分 {high} 只 / 5-7分 {mid} 只 / <5分 {low} 只")
+
+    lines.append(f"\n💡 可继续追问单只股票: '分析 {top[0]['code']}'")
+    return "\n".join(lines)
+
+
 def handler_ai(text: str) -> str:
     """AI 自由问答。"""
     try:
@@ -789,6 +967,58 @@ TOOLS = [
                     }
                 },
                 "required": ["code"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "compare_stocks",
+            "description": "多股票对比:一次给 N 只股票(最多8只)的对比表(PE/PB/总市值/ROE/净利率/财报期)。用户问'对比X和Y'/'X和Y哪个好'/'比较几只股票'时调用,支持中文简称批量。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "codes": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "股票代码或名称列表,如 ['600519','000858'] 或 ['茅台','五粮液'],最多8只"
+                    }
+                },
+                "required": ["codes"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "analyze_sector",
+            "description": "板块分析:展开板块成分股(8只代表股)批量对比 PE/PB/ROE/市值/净利率。已知板块:白酒/银行/医药/新能源/半导体/消费/军工/地产/电力/有色。用户问'分析白酒板块'/'看下银行板块'/'医药板块怎样'时调用。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "sector": {
+                        "type": "string",
+                        "description": "板块名(中文),如'白酒'/'银行'/'医药'/'新能源'/'半导体'"
+                    }
+                },
+                "required": ["sector"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "query_history_picks",
+            "description": "查询过去某天的玉姐精选(历史复盘):列出那天的 Top10 + 评分分布。用户问'昨天的玉姐'/'前天玉姐精选'/'20260818的玉姐'时调用。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "date": {
+                        "type": "string",
+                        "description": "日期,支持 '20260819' / '2026-08-19' / '昨天' / '前天' / '大前天'"
+                    }
+                },
+                "required": ["date"]
             }
         }
     },
@@ -1630,6 +1860,9 @@ TOOL_HANDLERS = {
     ),
     "get_portfolio": lambda args: handler_portfolio(),
     "get_finance": lambda args: handler_finance(args.get("code", "")),
+    "compare_stocks": lambda args: handler_compare_stocks(args.get("codes", [])),
+    "analyze_sector": lambda args: handler_analyze_sector(args.get("sector", "")),
+    "query_history_picks": lambda args: handler_query_history_picks(args.get("date", "")),
     "manage_watchlist": lambda args: handler_watchlist(
         args.get("action", "list"),
         args.get("codes", []),
@@ -1755,6 +1988,15 @@ SYSTEM_PROMPT = """你是 A 股量化分析助手(集成于飞书群聊),拥有�
   · code 支持 6 位代码或中文简称(茅台/byd/宁德时代)
   · 用户问"基本面/估值/财务/PE/ROE/市值"时调用
   · 数据来源:东方财富双接口(实时估值 + 最新一期财报)
+- compare_stocks(codes): 多股票对比(最多8只),一次给 PE/PB/总市值/ROE/净利率 对比表
+  · codes 支持代码或中文简称,如 ["600519","000858"] 或 ["茅台","五粮液"]
+  · 用户问"对比X和Y"/"X和Y哪个好"时调用,比 get_finance 多次调用更高效
+- analyze_sector(sector): 板块分析,展开成分股批量对比
+  · 已知板块:白酒/银行/医药/新能源/半导体/消费/军工/地产/电力/有色
+  · 用户问"分析X板块"/"X板块怎样"时调用
+- query_history_picks(date): 历史玉姐精选复盘
+  · date 支持 '20260819' / '2026-08-19' / '昨天' / '前天' / '大前天'
+  · 用户问"昨天的玉姐"/"前天玉姐精选"时调用
 - manage_watchlist(action, codes?): 自选股管理(按用户隔离,每人独立列表)
   · action: "add"添加/"remove"删除/"list"列出
   · codes: 股票代码或名称列表,如 ["600519"] 或 ["茅台","五粮液"]
@@ -1850,7 +2092,14 @@ SYSTEM_PROMPT = """你是 A 股量化分析助手(集成于飞书群聊),拥有�
 - "茅台估值多少" → get_finance(code=600519) → 实时 PE/总市值
 - "茅台财报" → get_finance(code=600519) → 营收/净利润/同比/EPS/ROE
 - "宁德时代ROE" → get_finance(code=300750) → 单项指标也可查
-- "茅台和五粮液估值对比" → get_finance(code=600519) + get_finance(code=000858) → 对比表
+- "茅台和五粮液估值对比" → compare_stocks(codes=["茅台","五粮液"]) → 一次给对比表
+- "茅台五粮液哪个好" → compare_stocks(codes=["600519","000858"]) → PE/PB/ROE 对比
+- "分析白酒板块" → analyze_sector(sector="白酒") → 8 只白酒股批量对比
+- "看下银行板块" → analyze_sector(sector="银行") → 8 只银行股对比
+- "医药板块怎样" → analyze_sector(sector="医药") → 8 只医药股对比
+- "昨天的玉姐精选" → query_history_picks(date="昨天") → 历史复盘
+- "前天玉姐" → query_history_picks(date="前天") → 历史 Top10
+- "20260818的玉姐" → query_history_picks(date="20260818") → 指定日期
 - "加自选茅台" → manage_watchlist(action="add", codes=["茅台"]) → 自动解析名称为代码
 - "加自选茅台五粮液" → manage_watchlist(action="add", codes=["茅台","五粮液"]) → 批量
 - "删自选 600519" → manage_watchlist(action="remove", codes=["600519"])
