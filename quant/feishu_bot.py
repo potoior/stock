@@ -120,6 +120,33 @@ def _save_history(session_id: str, history: list) -> None:
     except Exception as e:
         log.warning("保存历史失败 %s: %s", session_id, e)
 
+
+# 用户重置历史的触发词(整句匹配,大小写不敏感)
+# 注意:用精确匹配避免误判"重置BOLL参数"等正常操作
+RESET_KEYWORDS = ("重置", "新话题", "忘了吧", "清空", "重新开始", "清空历史",
+                  "重置历史", "清空对话", "重置一下", "请重置", "请清空",
+                  "清空一下", "忘掉吧", "从头开始",
+                  "/reset", "/new", "/clear")
+
+
+def _is_reset_command(text: str) -> bool:
+    """判断用户是否想清空对话历史。整句精确匹配,避免误判正常操作。"""
+    t = text.lower().strip()
+    # 去掉标点
+    t = re.sub(r"[。,.!?！？\s]+", "", t)
+    return t in RESET_KEYWORDS
+
+
+def _clear_history(session_id: str) -> None:
+    """清空某会话的对话历史。"""
+    try:
+        conn = sqlite3.connect(str(HISTORY_DB), timeout=5)
+        conn.execute("DELETE FROM agent_history WHERE session_id=?", (session_id,))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        log.warning("清空历史失败 %s: %s", session_id, e)
+
 # 简单股票名称缓存(避免每次都查 DB)
 _name_cache: dict[str, str] = {}
 _name_cache_loaded = False
@@ -1399,6 +1426,7 @@ SYSTEM_PROMPT = """你是 A 股量化分析助手(集成于飞书群聊),拥有�
 - 如用户先问"分析茅台",再问"五粮液呢" → 第二问指代用同样方法分析五粮液
 - 如用户先问"MACD策略",再问"KDJ呢" → 第二问指代看KDJ策略
 - 收到指代不明的简短问题(如"11-20呢"/"X呢"/"换一个"),请结合历史理解,不要要求用户重述
+- 用户说"重置"/"新话题"/"忘了吧"/"清空"等会被系统自动识别并清空历史,你无需处理
 
 操作类工具授权原则:
 - 用户明确表达意图(如"关闭均线组合策略"、"把BOLL周期改成30")才调用
@@ -1646,11 +1674,25 @@ class FeishuBotClient:
 
             log.info("收到消息 chat=%s sender=%s text=%r", chat_id, sender, text[:100])
 
+            # 跨轮记忆: 按 chat_id+sender 隔离,群里不同用户各自独立历史
+            session_id = f"{chat_id}:{sender}"
+
+            # 重置命令:用户想清空历史时直接短路,不走 Agent
+            if _is_reset_command(text):
+                _clear_history(session_id)
+                self._reply_text(
+                    chat_id,
+                    "🧹 已清空对话历史,我们重新开始吧!\n"
+                    "你可以直接问问题,例如:\n"
+                    "- 分析 600519\n"
+                    "- 玉姐推荐什么\n"
+                    "- 用 MACD 策略看茅台",
+                )
+                return
+
             # Agent 处理(Function Calling ReAct),失败降级到关键词路由
             # 智能判断: 只有调用耗时工具(backtest/grid_search)才发"思考中"提示,
             # 快速回复(分析/查询)直接给答案,避免收到两条消息的体验问题
-            # 跨轮记忆: 按 chat_id+sender 隔离,群里不同用户各自独立历史
-            session_id = f"{chat_id}:{sender}"
             try:
                 agent = FeishuAgent()
                 history = _load_history(session_id)
