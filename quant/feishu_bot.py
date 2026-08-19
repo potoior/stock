@@ -73,6 +73,9 @@ RE_CODE = re.compile(r"\b(60[0-3]\d{3}|00[0-2]\d{3}|30[0-4]\d{3}|688\d{3}|8\d{5}
 # handler 调用过程中累积的图片(给 Agent 用,处理完一轮清空)
 _pending_images: list[bytes] = []
 
+# 当前请求的 session_id(供 handler_watchlist 等需要用户隔离的 handler 用)
+_current_session_id: str = "cli"
+
 # 跨轮对话历史持久化(按 session_id 存储,sqlite)
 # 保留最近 MAX_HISTORY_TURNS 轮(1 轮 = user + assistant 两条消息)
 # 超过 HISTORY_EXPIRE_DAYS 天未活跃的 session 自动清理(启动时跑一次)
@@ -205,6 +208,74 @@ def _purge_old_history() -> int:
     except Exception as e:
         log.warning("清理过期历史失败: %s", e)
         return 0
+
+
+# ============ 自选股 ============
+
+WATCHLIST_DB = ENGINE_HOME / "agent_watchlist.db"
+
+
+def _watchlist_db():
+    """自选股 sqlite,按 session_id(用户)隔离。"""
+    conn = sqlite3.connect(str(WATCHLIST_DB), timeout=5)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS watchlist (
+            session_id TEXT,
+            code TEXT,
+            name TEXT,
+            ts INTEGER,
+            PRIMARY KEY (session_id, code)
+        )
+    """)
+    conn.commit()
+    return conn
+
+
+def watchlist_add(session_id: str, code: str, name: str = "") -> str:
+    """添加自选股。"""
+    try:
+        conn = _watchlist_db()
+        conn.execute(
+            "INSERT OR REPLACE INTO watchlist(session_id, code, name, ts) VALUES(?,?,?,?)",
+            (session_id, code, name, int(time.time())),
+        )
+        conn.commit()
+        conn.close()
+        return f"✅ 已添加 {code} {name} 到自选"
+    except Exception as e:
+        return f"❌ 添加自选失败: {e}"
+
+
+def watchlist_remove(session_id: str, code: str) -> str:
+    """删除自选股。"""
+    try:
+        conn = _watchlist_db()
+        cur = conn.execute(
+            "DELETE FROM watchlist WHERE session_id=? AND code=?",
+            (session_id, code),
+        )
+        n = cur.rowcount
+        conn.commit()
+        conn.close()
+        return f"✅ 已从自选移除 {code} (删了 {n} 条)" if n else f"⚠️ 自选中没有 {code}"
+    except Exception as e:
+        return f"❌ 删除自选失败: {e}"
+
+
+def watchlist_list(session_id: str) -> list[dict]:
+    """列出自选股,返回 [{code, name, ts}]。"""
+    try:
+        conn = _watchlist_db()
+        rows = conn.execute(
+            "SELECT code, name, ts FROM watchlist WHERE session_id=? ORDER BY ts",
+            (session_id,),
+        ).fetchall()
+        conn.close()
+        return [{"code": r[0], "name": r[1], "ts": r[2]} for r in rows]
+    except Exception:
+        return []
+
+
 
 # 简单股票名称缓存(避免每次都查 DB)
 _name_cache: dict[str, str] = {}
@@ -490,6 +561,73 @@ def handler_yujie(min_score: float = 0, hit_rule: str = "") -> str:
         return f"❌ 读取玉姐精选出错: {e}"
 
 
+def handler_watchlist(action: str, codes: list = None, session_id: str = "cli") -> str:
+    """自选股管理:add/remove/list,按 session_id 隔离(每人独立)。
+
+    codes 里的元素可以是代码或名称,统一解析成 6 位代码 + 名称。
+    """
+    if action == "list":
+        items = watchlist_list(session_id)
+        if not items:
+            return "📭 你的自选股列表为空。\n用 \"加自选 茅台\" 或 \"加自选 600519\" 添加。"
+        lines = [f"📌 你的自选股({len(items)} 只)"]
+        for i, it in enumerate(items, 1):
+            lines.append(f"{i}. {it['code']} {it['name'] or '-'}")
+        return "\n".join(lines)
+
+    if not codes:
+        return "❌ add/remove 操作需要 codes 参数,如 [\"600519\"] 或 [\"茅台\"]"
+
+    # 解析每个 code/name 为 6 位代码
+    try:
+        from stock_names import resolve_code
+    except ImportError:
+        # 退化:直接当代码用
+        resolve_code = lambda x: x if len(x) == 6 and x.isdigit() else None  # noqa: E731
+
+    resolved = []  # [(code, name)]
+    for c in codes:
+        code = resolve_code(c)
+        if not code:
+            # 6 位代码直接用
+            if len(c) == 6 and c.isdigit():
+                code = c
+            else:
+                continue
+        # 拿名称:用户输入是名称就用它,是代码就用空名(后续可拿实时名补)
+        if c.isdigit():
+            name = ""
+        else:
+            name = c
+        resolved.append((code, name))
+
+    if not resolved:
+        return f"❌ 未能识别任何股票: {codes}"
+
+    if action == "add":
+        # 名称缺失时通过实时接口补名(批量查,1次网络)
+        code_only = [c for c, n in resolved if not n]
+        if code_only:
+            try:
+                import strategy_engine as se
+                rt_list = se.fetch_realtime(code_only)
+                rt_map = {r["code"]: r.get("name", "") for r in rt_list}
+                resolved = [(c, n or rt_map.get(c, "")) for c, n in resolved]
+            except Exception:
+                pass
+        msgs = []
+        for code, name in resolved:
+            msgs.append(watchlist_add(session_id, code, name))
+        return "\n".join(msgs) + f"\n\n当前自选 {len(watchlist_list(session_id))} 只,发\"我的自选\"查看"
+    elif action == "remove":
+        msgs = []
+        for code, _ in resolved:
+            msgs.append(watchlist_remove(session_id, code))
+        return "\n".join(msgs)
+    else:
+        return f"❌ 未知 action: {action},应为 add/remove/list"
+
+
 def handler_portfolio() -> str:
     """持仓查询。"""
     if not AGENT_DB.exists():
@@ -586,6 +724,29 @@ TOOLS = [
             "name": "get_portfolio",
             "description": "查询当前模拟盘持仓:股票代码、数量、成本、买入日期。用户问'持仓/仓位/portfolio/股票池'时调用。",
             "parameters": {"type": "object", "properties": {}}
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "manage_watchlist",
+            "description": "管理自选股列表(按用户隔离)。用户说'加自选X'/'删自选X'/'我的自选'/'自选股'时调用。可批量加多只。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["add", "remove", "list"],
+                        "description": "add=添加,remove=删除,list=列出"
+                    },
+                    "codes": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "股票代码或名称列表,如 [\"600519\"] 或 [\"茅台\",\"五粮液\"]。list 动作可省略"
+                    }
+                },
+                "required": ["action"]
+            }
         }
     },
     # ---------- 策略管理 skill ----------
@@ -1402,6 +1563,11 @@ TOOL_HANDLERS = {
         args.get("min_score", 0), args.get("hit_rule", "")
     ),
     "get_portfolio": lambda args: handler_portfolio(),
+    "manage_watchlist": lambda args: handler_watchlist(
+        args.get("action", "list"),
+        args.get("codes", []),
+        session_id=_current_session_id,
+    ),
     # 策略管理 skill
     "list_strategies": lambda args: handler_list_strategies(),
     "get_strategy_library": lambda args: handler_get_strategy_library(
@@ -1441,11 +1607,16 @@ SYSTEM_PROMPT = """你是 A 股量化分析助手(集成于飞书群聊),拥有�
 
 【数据查询类】
 - analyze_stock(code): 个股技术面分析,返回已启用策略的买卖信号 + K线图
+  · code 支持中文简称(茅台/五粮液)、英文/拼音(byd/gzmt)、6位代码(600519),自动解析
 - get_market_status(): 今日市场概况(涨跌停/成交额)
 - get_yujie_picks(min_score?, hit_rule?): 今日玉姐精选候选股(默认 Top10 + 缩略图墙)
   · min_score: 最低评分门槛,如 7=只看7+分强势股,5=玉姐默认门槛
   · hit_rule: 按命中规则过滤,如 "MACD金叉"/"突破+金叉"/"深回撤"
 - get_portfolio(): 当前模拟盘持仓
+- manage_watchlist(action, codes?): 自选股管理(按用户隔离,每人独立列表)
+  · action: "add"添加/"remove"删除/"list"列出
+  · codes: 股票代码或名称列表,如 ["600519"] 或 ["茅台","五粮液"]
+  · 用户说"加自选茅台"/"删自选600519"/"我的自选"/"自选股"时调用
 
 【策略管理类】
 - list_strategies(): 列出所有策略(23内置+自定义),含开关/参数/回测超额
@@ -1517,6 +1688,10 @@ SYSTEM_PROMPT = """你是 A 股量化分析助手(集成于飞书群聊),拥有�
 - "玉姐推荐什么" → get_yujie_picks() → 列出 Top5 并点评 + 缩略图墙
 - "玉姐7分以上的" → get_yujie_picks(min_score=7) → 强势股列表 + 图
 - "持仓怎样" → get_portfolio() → 列出持仓并点评
+- "加自选茅台" → manage_watchlist(action="add", codes=["茅台"]) → 自动解析名称为代码
+- "加自选茅台五粮液" → manage_watchlist(action="add", codes=["茅台","五粮液"]) → 批量
+- "删自选 600519" → manage_watchlist(action="remove", codes=["600519"])
+- "我的自选" → manage_watchlist(action="list") → 列出自选股
 - "有哪些策略" → list_strategies() → 整理表格回复
 - "策略大全里还有什么" → get_strategy_library(implemented_only=false) → 列出未实现策略
 - "漫画书那本讲了什么" → get_strategy_library(source=book_cartoon, include_meta=true)
@@ -1551,12 +1726,13 @@ class FeishuAgent:
         if not self.api_key or not self.base_url:
             raise RuntimeError("AI_API_KEY/AI_BASE_URL 未配置(检查 .env)")
 
-    def chat(self, user_text: str, history: list | None = None) -> tuple[str, list, list[bytes]]:
+    def chat(self, user_text: str, history: list | None = None, session_id: str = "cli") -> tuple[str, list, list[bytes]]:
         """Agent 主循环: ReAct(Reason→Act→Observe)直到模型给出最终答案。
 
         Args:
             user_text: 用户输入
             history: 之前的对话历史(用于多轮)
+            session_id: 会话 id(chat_id:sender),供 watchlist 等需用户隔离的 handler 用
         Returns:
             (reply_text, new_history, images)  images 是 PNG bytes 列表
         """
@@ -1564,6 +1740,9 @@ class FeishuAgent:
 
         # 每轮对话前清空图片队列
         _pending_images.clear()
+        # 设置当前 session_id(供 watchlist handler 用)
+        global _current_session_id
+        _current_session_id = session_id
 
         messages = [{"role": "system", "content": SYSTEM_PROMPT}]
         if history:
@@ -1795,7 +1974,7 @@ class FeishuBotClient:
                 need_thinking_hint = self._needs_thinking_hint(text)
                 if need_thinking_hint:
                     self._reply_text(chat_id, "🤔 正在思考,需要 1-2 分钟(回测/寻优)...")
-                reply, new_history, images = agent.chat(text, history=history)
+                reply, new_history, images = agent.chat(text, history=history, session_id=session_id)
                 _save_history(session_id, new_history)
             except Exception as e:
                 log.warning("Agent 异常 %s, 降级到关键词路由", e)
