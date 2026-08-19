@@ -681,6 +681,24 @@ def handler_portfolio() -> str:
         return f"❌ 查询持仓出错: {e}"
 
 
+def handler_finance(code: str) -> str:
+    """获取个股财务数据(PE/PB/市值/ROE/毛利率/净利率/营收/净利润/同比)。"""
+    import stock_names
+    from stock_finance import fetch_finance, fmt_finance
+
+    # 支持中文简称:先用 stock_names 解析
+    if code and not code.isdigit():
+        codes = stock_names.resolve_codes(code)
+        if not codes:
+            return f"❌ 无法识别股票名 '{code}',请用 6 位代码或全名(如 '600519' 或 '茅台')"
+        code = codes[0]
+    if not code or not code.isdigit() or len(code) != 6:
+        return f"❌ 代码格式错误: '{code}',需 6 位数字"
+
+    data = fetch_finance(code)
+    return fmt_finance(data)
+
+
 def handler_ai(text: str) -> str:
     """AI 自由问答。"""
     try:
@@ -755,6 +773,23 @@ TOOLS = [
             "name": "get_portfolio",
             "description": "查询当前模拟盘持仓:股票代码、数量、成本、买入日期。用户问'持仓/仓位/portfolio/股票池'时调用。",
             "parameters": {"type": "object", "properties": {}}
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_finance",
+            "description": "获取个股财务数据:PE/PB/总市值/流通市值/ROE/毛利率/净利率/EPS/营收/净利润/同比/资产负债率。用户问'财务/基本面/估值/PE/ROE/市值'时调用。支持中文简称(茅台)或6位代码。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "code": {
+                        "type": "string",
+                        "description": "6位A股代码(600519)或中文简称(茅台)"
+                    }
+                },
+                "required": ["code"]
+            }
         }
     },
     {
@@ -1594,6 +1629,7 @@ TOOL_HANDLERS = {
         args.get("min_score", 0), args.get("hit_rule", "")
     ),
     "get_portfolio": lambda args: handler_portfolio(),
+    "get_finance": lambda args: handler_finance(args.get("code", "")),
     "manage_watchlist": lambda args: handler_watchlist(
         args.get("action", "list"),
         args.get("codes", []),
@@ -1715,6 +1751,10 @@ SYSTEM_PROMPT = """你是 A 股量化分析助手(集成于飞书群聊),拥有�
   · min_score: 最低评分门槛,如 7=只看7+分强势股,5=玉姐默认门槛
   · hit_rule: 按命中规则过滤,如 "MACD金叉"/"突破+金叉"/"深回撤"
 - get_portfolio(): 当前模拟盘持仓
+- get_finance(code): 个股财务数据(PE/PB/市值/ROE/毛利率/净利率/EPS/营收/净利润/同比)
+  · code 支持 6 位代码或中文简称(茅台/byd/宁德时代)
+  · 用户问"基本面/估值/财务/PE/ROE/市值"时调用
+  · 数据来源:东方财富双接口(实时估值 + 最新一期财报)
 - manage_watchlist(action, codes?): 自选股管理(按用户隔离,每人独立列表)
   · action: "add"添加/"remove"删除/"list"列出
   · codes: 股票代码或名称列表,如 ["600519"] 或 ["茅台","五粮液"]
@@ -1806,6 +1846,11 @@ SYSTEM_PROMPT = """你是 A 股量化分析助手(集成于飞书群聊),拥有�
 - "玉姐推荐什么" → get_yujie_picks() → 列出 Top5 并点评 + 缩略图墙
 - "玉姐7分以上的" → get_yujie_picks(min_score=7) → 强势股列表 + 图
 - "持仓怎样" → get_portfolio() → 列出持仓并点评
+- "茅台基本面" → get_finance(code=600519) → PE/PB/市值/ROE/毛利率/净利率
+- "茅台估值多少" → get_finance(code=600519) → 实时 PE/总市值
+- "茅台财报" → get_finance(code=600519) → 营收/净利润/同比/EPS/ROE
+- "宁德时代ROE" → get_finance(code=300750) → 单项指标也可查
+- "茅台和五粮液估值对比" → get_finance(code=600519) + get_finance(code=000858) → 对比表
 - "加自选茅台" → manage_watchlist(action="add", codes=["茅台"]) → 自动解析名称为代码
 - "加自选茅台五粮液" → manage_watchlist(action="add", codes=["茅台","五粮液"]) → 批量
 - "删自选 600519" → manage_watchlist(action="remove", codes=["600519"])
