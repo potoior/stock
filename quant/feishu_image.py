@@ -213,6 +213,172 @@ def gen_kline_chart(code: str, days: int = 120) -> io.BytesIO | None:
         return None
 
 
+# ============ 玉姐专属图表 ============
+
+
+def gen_yujie_chart(code: str, score: float, hits: list, detail: dict) -> io.BytesIO | None:
+    """玉姐专属图表: K线+成交量+MACD + 评分命中标注。
+
+    与 gen_kline_chart 区别:
+    - 去掉 KDJ 副图,加玉姐评分标题
+    - 在 K 线主图右上角标注评分+命中规则列表
+    - 在 MACD 图标注金叉/绿柱缩短等命中点
+
+    Args:
+        code: 股票代码
+        score: 玉姐评分
+        hits: 命中规则名列表(中文,如 ["MACD金叉","突破+金叉"])
+        detail: score_stock 返回的 detail dict(含 ma5/ma10/macd_dif 等)
+    """
+    _init_font()
+    try:
+        data = _kline_data(code, days=120)
+        if data is None:
+            return None
+        df = data["df"]
+
+        import strategy_engine as se
+        try:
+            res = se.analyze(code, use_ai=False)
+            rt = res.get("realtime") or {}
+            name = rt.get("name", code)
+            price = rt.get("price", df["close"].iloc[-1])
+            pct = rt.get("pct", 0)
+        except Exception:
+            name = code
+            price = df["close"].iloc[-1]
+            pct = 0
+
+        # 评分颜色
+        if score >= 7:
+            score_color = "#e53935"  # 红=强势
+            score_tag = "[强势]"
+        elif score >= 5:
+            score_color = "#ff9800"  # 橙=中等
+            score_tag = "[中等]"
+        elif score >= 3:
+            score_color = "#1976d2"  # 蓝=偏弱
+            score_tag = "[偏弱]"
+        else:
+            score_color = "#9e9e9e"  # 灰=弱
+            score_tag = "[弱]"
+
+        fig, axes = plt.subplots(3, 1, figsize=(10, 8), sharex=True,
+                                 gridspec_kw={"height_ratios": [4, 1, 1.5]})
+        fig.subplots_adjust(hspace=0.05, left=0.08, right=0.95, top=0.88, bottom=0.07)
+
+        x = range(len(df))
+
+        # --- 主图: K 线 + BOLL ---
+        ax = axes[0]
+        for i in range(len(df)):
+            o, c, hi, lo = df["open"].iloc[i], df["close"].iloc[i], df["high"].iloc[i], df["low"].iloc[i]
+            color = COLOR_UP if c >= o else COLOR_DN
+            ax.vlines(i, lo, hi, color=color, linewidth=0.8)
+            body_low, body_high = min(o, c), max(o, c)
+            ax.add_patch(mpatches.Rectangle(
+                (i - 0.3, body_low), 0.6, max(body_high - body_low, 0.001),
+                facecolor=color, edgecolor=color, linewidth=0.5,
+            ))
+        # BOLL
+        if data["boll_u"] is not None:
+            ax.plot(x, data["boll_u"], color=COLOR_BOLL_U, linewidth=0.8, label="BOLL上轨")
+            ax.plot(x, data["boll_l"], color=COLOR_BOLL_L, linewidth=0.8, label="BOLL下轨")
+            ax.plot(x, data["boll_m"], color=COLOR_BOLL_M, linewidth=0.8, label="BOLL中轨")
+            ax.fill_between(x, data["boll_u"], data["boll_l"], alpha=0.05, color="#7e57c2")
+        # 均线
+        if detail:
+            for w, col, lbl in [(5, "#e53935", "MA5"), (10, "#ff9800", "MA10"),
+                                (20, "#1976d2", "MA20"), (60, "#7e57c2", "MA60")]:
+                key = f"ma{w}"
+                if key in detail and detail[key] is not None:
+                    try:
+                        ma = df["close"].rolling(w).mean()
+                        ax.plot(x, ma, color=col, linewidth=0.7, label=lbl, alpha=0.7)
+                    except Exception:
+                        pass
+
+        # 标题含评分
+        pct_emoji = "↑" if pct > 0 else "↓" if pct < 0 else "→"
+        ax.set_title(
+            f"{score_tag} {name} ({code})  {price:.2f} {pct_emoji} {pct:+.2f}%   "
+            f"玉姐评分: {score:g} 分",
+            fontsize=13, fontweight="bold", color=score_color,
+        )
+
+        # 右上角命中规则文本框
+        if hits:
+            hit_text = "命中规则:\n" + "\n".join(f"[+] {h}" for h in hits)
+        else:
+            hit_text = "未命中任何规则"
+        ax.text(
+            0.98, 0.02, hit_text, transform=ax.transAxes,
+            fontsize=8, va="bottom", ha="right",
+            bbox=dict(boxstyle="round,pad=0.4", facecolor="white", edgecolor=score_color, alpha=0.85),
+        )
+
+        ax.grid(True, alpha=0.2)
+        ax.legend(loc="upper left", fontsize=7)
+
+        # --- 成交量 ---
+        ax = axes[1]
+        vol = df["volume"]
+        colors = [COLOR_UP if df["close"].iloc[i] >= df["open"].iloc[i] else COLOR_DN for i in range(len(df))]
+        ax.bar(x, vol, color=colors, width=0.7)
+        ax.set_ylabel("量", fontsize=8)
+        ax.grid(True, alpha=0.2)
+        ax.tick_params(labelsize=7)
+
+        # --- MACD + 玉姐命中标注 ---
+        ax = axes[2]
+        diff = data["macd_diff"]
+        dea = data["macd_dea"]
+        bar = data["macd_bar"]
+        ax.plot(x, diff, color=COLOR_MACD, linewidth=1, label="DIFF")
+        ax.plot(x, dea, color=COLOR_DEA, linewidth=1, label="DEA")
+        bar_colors = [COLOR_UP if b >= 0 else COLOR_DN for b in bar]
+        ax.bar(x, bar, color=bar_colors, width=0.7, alpha=0.6)
+        ax.axhline(0, color="gray", linewidth=0.5)
+
+        # 标注玉姐命中的 MACD 相关规则
+        last_idx = len(df) - 1
+        annotations = []
+        if "MACD金叉" in hits:
+            annotations.append(("MACD金叉 +2", last_idx, float(diff.iloc[last_idx]), "#e53935"))
+        if "MACD即将金叉" in hits:
+            annotations.append(("即将金叉 +1", last_idx, float(diff.iloc[last_idx]), "#ff9800"))
+        if "MACD绿柱缩短" in hits:
+            annotations.append(("绿柱缩短 +1", last_idx, float(bar.iloc[last_idx]), "#1976d2"))
+        for text, xi, yi, color in annotations:
+            ax.annotate(
+                text, xy=(xi, yi), xytext=(xi - 15, yi + (0.3 if yi >= 0 else -0.3)),
+                fontsize=7, color=color, fontweight="bold",
+                arrowprops=dict(arrowstyle="->", color=color, lw=0.8),
+            )
+
+        ax.set_ylabel("MACD", fontsize=8)
+        ax.grid(True, alpha=0.2)
+        ax.legend(loc="upper left", fontsize=7)
+        ax.tick_params(labelsize=7)
+
+        # x 轴日期
+        if "date" in df.columns:
+            n = len(df)
+            tick_step = max(1, n // 8)
+            ticks = list(range(0, n, tick_step))
+            ax.set_xticks(ticks)
+            ax.set_xticklabels([df["date"].iloc[i].strftime("%m-%d") for i in ticks], rotation=30)
+
+        buf = io.BytesIO()
+        fig.savefig(buf, format="png", dpi=110, bbox_inches="tight", facecolor="white")
+        buf.seek(0)
+        plt.close(fig)
+        return buf
+    except Exception as e:
+        log.error("生成玉姐图失败 %s: %s", code, e)
+        return None
+
+
 # ============ 回测收益曲线 ============
 
 

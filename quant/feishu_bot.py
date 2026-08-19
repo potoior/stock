@@ -282,8 +282,8 @@ def _parse_market_from_report(section: str) -> dict | None:
         return None
 
 
-def handler_yujie() -> str:
-    """今日玉姐精选 Top10。"""
+def handler_yujie(min_score: float = 0, hit_rule: str = "") -> str:
+    """今日玉姐精选 Top10,支持按最低评分和命中规则过滤。"""
     try:
         import yujie_scan
         picks = yujie_scan.load_picks()
@@ -292,18 +292,56 @@ def handler_yujie() -> str:
                 "今日玉姐精选尚未生成。\n"
                 "运行 `python yujie_scan.py` 或等待 09:00 自动任务。"
             )
+
+        # 过滤
+        filtered = picks
+        if min_score > 0:
+            filtered = [p for p in filtered if p.get("score", 0) >= min_score]
+        if hit_rule:
+            filtered = [p for p in filtered if hit_rule in (p.get("hits") or [])]
+
+        if not filtered:
+            cond = []
+            if min_score > 0:
+                cond.append(f"score>={min_score}")
+            if hit_rule:
+                cond.append(f"命中'{hit_rule}'")
+            return f"❌ 今日玉姐精选无匹配(条件: {', '.join(cond) or '无'})"
+
+        # 默认只看 Top10(排名前10);有过滤条件时显示过滤后的全部(最多20)
+        has_filter = min_score > 0 or bool(hit_rule)
+        show = filtered if has_filter else filtered[:10]
+        show = show[:20]  # 最多20只避免消息过长
+
         # 生成候选墙图
         try:
             from feishu_image import gen_yujie_wall
-            img = gen_yujie_wall(picks)
+            img = gen_yujie_wall(show)
             if img:
                 _pending_images.append(img.getvalue())
         except Exception as e:
             log.warning("生成玉姐墙失败: %s", e)
-        lines = [f"🎯 今日玉姐精选 Top {min(len(picks), 10)}"]
-        for p in picks[:10]:
-            hits = "、".join(p.get("hits", [])[:3]) if p.get("hits") else "-"
-            lines.append(f"{p['rank']}. {p['code']} {p['name']} | {p['score']}分 | {hits}")
+
+        # 描述过滤条件
+        cond_str = ""
+        if has_filter:
+            parts = []
+            if min_score > 0:
+                parts.append(f"≥{min_score:g}分")
+            if hit_rule:
+                parts.append(f"命中'{hit_rule}'")
+            cond_str = f"(过滤: {'、'.join(parts)})"
+        else:
+            cond_str = " Top10"
+
+        lines = [f"🎯 今日玉姐精选{cond_str} 共 {len(filtered)} 只"]
+        for p in show:
+            hits = "、".join(p.get("hits", [])) if p.get("hits") else "无命中"
+            lines.append(
+                f"{p['rank']}. **{p['code']} {p['name']}** | {p['score']:g}分 | {hits}"
+            )
+        if len(filtered) > len(show):
+            lines.append(f"\n(共 {len(filtered)} 只,仅显示前 {len(show)} 只)")
         if _pending_images:
             lines.append("\n[已附候选 K 线缩略图墙]")
         return "\n".join(lines)
@@ -384,8 +422,21 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "get_yujie_picks",
-            "description": "获取今日玉姐精选 Top10 候选股(多因子评分排行,含命中规则)。用户问'玉姐/候选/精选/top/选股'时调用。",
-            "parameters": {"type": "object", "properties": {}}
+            "description": "获取今日玉姐精选 Top10 候选股(多因子评分排行,含命中规则)。用户问'玉姐/候选/精选/top/选股'时调用。支持按最低评分和命中规则过滤。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "min_score": {
+                        "type": "number",
+                        "description": "最低评分门槛,只返回≥此分的股票。如 7=只看7+分强势股,5=玉姐精选默认门槛。不传=不过滤",
+                        "default": 0
+                    },
+                    "hit_rule": {
+                        "type": "string",
+                        "description": "按命中规则过滤,只返回命中该规则的股票。规则名(中文)如 'MACD金叉'/'突破+金叉'/'RSI金叉'/'多线多头'/'深回撤'/'MOS低点'。不传=不过滤"
+                    }
+                }
+            }
         }
     },
     {
@@ -913,12 +964,25 @@ def handler_analyze_with_strategy(code: str, strategy_id: str) -> str:
         sig_emoji = {"buy": "✅买入", "sell": "⚠️卖出", "hold": "➡️观望"}.get(
             target.get("signal", "hold"), ""
         )
-        return (
+
+        # 生成 K 线图
+        try:
+            from feishu_image import gen_kline_chart
+            img = gen_kline_chart(code)
+            if img:
+                _pending_images.append(img.getvalue())
+        except Exception as e:
+            log.warning("生成 K 线图失败 %s: %s", code, e)
+
+        out = (
             f"📊 {code} {rt.get('name', '')} {emoji} {price:.2f} ({pct:+.2f}%)\n"
             f"**策略 {target.get('name', strategy_id)}**: {sig_emoji}\n"
             f"理由: {target.get('reason', '')}"
             f"{lib_section}"
         )
+        if _pending_images:
+            out += "\n[已附 K 线+指标图]"
+        return out
     except Exception as e:
         return f"❌ 分析 {code} 出错: {e}"
 
@@ -960,6 +1024,15 @@ def handler_analyze_with_yujie(code: str) -> str:
         if detail is None:
             min_days = params.get("scope", {}).get("min_history_days", 60)
             return f"❌ {code} 数据不足(需 ≥{min_days} 个交易日),无法用玉姐规则分析"
+
+        # 2.5 生成玉姐专属图(K线+评分命中标注)
+        try:
+            from feishu_image import gen_yujie_chart
+            img = gen_yujie_chart(code, score, hits, detail)
+            if img:
+                _pending_images.append(img.getvalue())
+        except Exception as e:
+            log.warning("生成玉姐图失败 %s: %s", code, e)
 
         # 3. 拿实时价格
         import strategy_engine as se
@@ -1015,6 +1088,8 @@ def handler_analyze_with_yujie(code: str) -> str:
         lines.append(
             "\n⚠️ 风险提示:玉姐评分为技术面多因子打分,不构成投资建议,请结合基本面与市场情绪综合判断。"
         )
+        if _pending_images:
+            lines.append("\n[已附玉姐专属图: K线+评分标注]")
         return "\n".join(lines)
     except Exception as e:
         return f"❌ 玉姐分析 {code} 出错: {e}"
@@ -1182,7 +1257,9 @@ def handler_grid_search(strategy_id: str, sample: int = 400) -> str:
 TOOL_HANDLERS = {
     "analyze_stock": lambda args: handler_analyze(args.get("code", "")),
     "get_market_status": lambda args: handler_market(),
-    "get_yujie_picks": lambda args: handler_yujie(),
+    "get_yujie_picks": lambda args: handler_yujie(
+        args.get("min_score", 0), args.get("hit_rule", "")
+    ),
     "get_portfolio": lambda args: handler_portfolio(),
     # 策略管理 skill
     "list_strategies": lambda args: handler_list_strategies(),
@@ -1222,9 +1299,11 @@ SLOW_TOOLS = {"backtest_strategy", "grid_search_strategy"}
 SYSTEM_PROMPT = """你是 A 股量化分析助手(集成于飞书群聊),拥有以下工具:
 
 【数据查询类】
-- analyze_stock(code): 个股技术面分析,返回已启用策略的买卖信号
+- analyze_stock(code): 个股技术面分析,返回已启用策略的买卖信号 + K线图
 - get_market_status(): 今日市场概况(涨跌停/成交额)
-- get_yujie_picks(): 今日玉姐精选 Top10 候选
+- get_yujie_picks(min_score?, hit_rule?): 今日玉姐精选候选股(默认 Top10 + 缩略图墙)
+  · min_score: 最低评分门槛,如 7=只看7+分强势股,5=玉姐默认门槛
+  · hit_rule: 按命中规则过滤,如 "MACD金叉"/"突破+金叉"/"深回撤"
 - get_portfolio(): 当前模拟盘持仓
 
 【策略管理类】
@@ -1236,13 +1315,14 @@ SYSTEM_PROMPT = """你是 A 股量化分析助手(集成于飞书群聊),拥有�
   · include_meta: true=附带书的作者/简介/章节列表
   · cross_ref: 跨来源对比,传策略id(如macd)查它在哪些书里出现(优先级最高)
 - get_yujie_detail(): 查玉姐精选10条评分规则+权重+回测表现
-- analyze_with_strategy(code, strategy_id): 用指定策略分析个股,联动策略大全给出"来源+核心逻辑+当前信号+理由"
+- analyze_with_strategy(code, strategy_id): 用指定策略分析个股,联动策略大全给出"来源+核心逻辑+当前信号+理由" + K线图
   · strategy_id 支持引擎id(macd/kdj/boll)、大全id(macd_8/bottom)、中文名(抄底/逃顶)模糊匹配
   · 若策略已实现: 跑引擎分析,返回完整来源+逻辑+信号
   · 若策略未实现: 告知尚未实现,建议相近的已实现策略
-- analyze_with_yujie(code): 用玉姐精选10条评分规则分析个股,给出综合评分+命中规则+解读
+- analyze_with_yujie(code): 用玉姐精选10条评分规则分析个股,给出综合评分+命中规则+解读 + 玉姐专属图
   · 玉姐是复合评分(10条规则累加),不是单策略买卖信号,需用此独立工具
   · 返回评分(满分12)、命中规则(带分值+说明)、未命中规则、评分解读
+  · 附玉姐专属图: K线+评分命中标注(MACD金叉/绿柱缩短等箭头标注)
 - toggle_strategy(strategy_id, enabled): 开关策略(操作类,需用户明确意图)
 - set_strategy_params(strategy_id, params): 调策略参数(操作类,需用户明确意图)
 - enable_library_strategy(library_id): 从大全引入策略(操作类)
@@ -1275,10 +1355,18 @@ SYSTEM_PROMPT = """你是 A 股量化分析助手(集成于飞书群聊),拥有�
 - "MACD在哪些书里/X策略在哪些来源出现" → cross_ref
 - "玉姐怎么打分/玉姐评分规则" → get_yujie_detail()
 
+玉姐精选查询模式:
+- "玉姐推荐什么/今日玉姐精选" → get_yujie_picks() → Top10 + 缩略图墙
+- "玉姐7分以上的股票" → get_yujie_picks(min_score=7) → 强势股过滤
+- "玉姐里命中MACD金叉的" → get_yujie_picks(hit_rule="MACD金叉") → 规则过滤
+- "玉姐里的赤天化怎么样" → analyze_with_yujie(code=600227) → 评分+命中+玉姐专属图
+- "用玉姐策略看茅台" → analyze_with_yujie(code=600519) → 评分+命中+玉姐专属图
+
 示例:
-- "分析茅台" → analyze_stock(code=600519) → 整理结果回复
+- "分析茅台" → analyze_stock(code=600519) → 整理结果回复 + K线图
 - "今天怎样" → get_market_status() → 总结市场情绪
-- "玉姐推荐什么" → get_yujie_picks() → 列出 Top5 并点评
+- "玉姐推荐什么" → get_yujie_picks() → 列出 Top5 并点评 + 缩略图墙
+- "玉姐7分以上的" → get_yujie_picks(min_score=7) → 强势股列表 + 图
 - "持仓怎样" → get_portfolio() → 列出持仓并点评
 - "有哪些策略" → list_strategies() → 整理表格回复
 - "策略大全里还有什么" → get_strategy_library(implemented_only=false) → 列出未实现策略
@@ -1287,11 +1375,12 @@ SYSTEM_PROMPT = """你是 A 股量化分析助手(集成于飞书群聊),拥有�
 - "漫画书里哪些没实现" → get_strategy_library(source=book_cartoon, implemented_only=false)
 - "MACD在哪些书里出现" → get_strategy_library(cross_ref="macd")
 - "玉姐怎么打分" → get_yujie_detail()
-- "看下茅台的MACD信号" → analyze_with_strategy(code=600519, strategy_id=macd) → 来源+逻辑+信号
-- "用抄底策略分析茅台" → analyze_with_strategy(code=600519, strategy_id=bottom) → 来源+逻辑+信号
+- "看下茅台的MACD信号" → analyze_with_strategy(code=600519, strategy_id=macd) → 来源+逻辑+信号+K线图
+- "用抄底策略分析茅台" → analyze_with_strategy(code=600519, strategy_id=bottom) → 来源+逻辑+信号+K线图
 - "操练大全的MACD怎么样测茅台" → analyze_with_strategy(code=600519, strategy_id=macd_8) → 自动映射到 macd 引擎
-- "用玉姐策略分析茅台" → analyze_with_yujie(code=600519) → 评分+命中规则+解读
-- "玉姐评分看下五粮液" → analyze_with_yujie(code=000858) → 评分+命中规则+解读
+- "用玉姐策略分析茅台" → analyze_with_yujie(code=600519) → 评分+命中规则+玉姐专属图
+- "玉姐评分看下五粮液" → analyze_with_yujie(code=000858) → 评分+命中规则+玉姐专属图
+- "玉姐里的赤天化怎么样" → analyze_with_yujie(code=600227) → 评分+命中规则+玉姐专属图
 - "关闭均线组合策略" → toggle_strategy(strategy_id=ma_combo, enabled=false)
 - "把BOLL周期改成30" → set_strategy_params(strategy_id=boll, params={period:30})
 - "回测MACD策略" → backtest_strategy(strategy_id=macd) → 整理回测数据
