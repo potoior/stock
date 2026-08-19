@@ -33,6 +33,7 @@ import sqlite3
 import time
 import traceback
 from datetime import datetime
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 import lark_oapi as lark
@@ -42,9 +43,16 @@ from lark_oapi.api.im.v1 import (
     P2ImMessageReceiveV1,
 )
 
+# 日志: 控制台 + 轮转文件(5MB×3,总上限 15MB)
+_log_dir = Path("/tmp")
+_log_file = _log_dir / "feishu_bot.log"
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    handlers=[
+        logging.StreamHandler(),
+        RotatingFileHandler(_log_file, maxBytes=5 * 1024 * 1024, backupCount=3, encoding="utf-8"),
+    ],
 )
 log = logging.getLogger("feishu_bot")
 
@@ -65,10 +73,12 @@ RE_CODE = re.compile(r"\b(60[0-3]\d{3}|00[0-2]\d{3}|30[0-4]\d{3}|688\d{3}|8\d{5}
 # handler 调用过程中累积的图片(给 Agent 用,处理完一轮清空)
 _pending_images: list[bytes] = []
 
-# 跨轮对话历史持久化(按 chat_id 存储,sqlite)
+# 跨轮对话历史持久化(按 session_id 存储,sqlite)
 # 保留最近 MAX_HISTORY_TURNS 轮(1 轮 = user + assistant 两条消息)
+# 超过 HISTORY_EXPIRE_DAYS 天未活跃的 session 自动清理(启动时跑一次)
 HISTORY_DB = ENGINE_HOME / "agent_history.db"
 MAX_HISTORY_TURNS = 6
+HISTORY_EXPIRE_DAYS = 7
 
 
 def _load_history(session_id: str) -> list:
@@ -96,13 +106,36 @@ def _load_history(session_id: str) -> list:
     return []
 
 
+# 历史里 assistant 消息裁剪阈值(超长截断到摘要,避免回测/策略大全等长回复撑爆历史)
+HISTORY_MSG_MAX_CHARS = 500
+HISTORY_MSG_KEEP_CHARS = 200
+
+
+def _truncate_history(history: list) -> list:
+    """裁剪历史中的超长 assistant 消息,保留首部 N 字 + 截断标记。
+
+    user 消息通常很短不裁剪,只裁 assistant(可能含完整回测报告/策略列表)。
+    """
+    out = []
+    for m in history:
+        c = m.get("content", "")
+        if m.get("role") == "assistant" and len(c) > HISTORY_MSG_MAX_CHARS:
+            c = c[:HISTORY_MSG_KEEP_CHARS] + "...(已截断)"
+            out.append({**m, "content": c})
+        else:
+            out.append(m)
+    return out
+
+
 def _save_history(session_id: str, history: list) -> None:
-    """保存对话历史到 sqlite,只保留最近 MAX_HISTORY_TURNS 轮。"""
+    """保存对话历史到 sqlite,只保留最近 MAX_HISTORY_TURNS 轮 + 裁剪超长消息。"""
     try:
         # 限制历史长度:每轮是 user+assistant 2 条,保留最近 N 轮
         max_msgs = MAX_HISTORY_TURNS * 2
         if len(history) > max_msgs:
             history = history[-max_msgs:]
+        # 裁剪超长 assistant 消息(省 token + 省 sqlite 体积)
+        history = _truncate_history(history)
         conn = sqlite3.connect(str(HISTORY_DB), timeout=5)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS agent_history (
@@ -146,6 +179,32 @@ def _clear_history(session_id: str) -> None:
         conn.close()
     except Exception as e:
         log.warning("清空历史失败 %s: %s", session_id, e)
+
+
+def _purge_old_history() -> int:
+    """清理超过 HISTORY_EXPIRE_DAYS 天未活跃的会话历史。
+
+    Bot 启动时调用一次,防止 sqlite 长期积累无用 session。
+    返回清理的条数。
+    """
+    try:
+        conn = sqlite3.connect(str(HISTORY_DB), timeout=5)
+        if not conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='agent_history'"
+        ).fetchone():
+            conn.close()
+            return 0
+        cutoff = int(time.time()) - HISTORY_EXPIRE_DAYS * 86400
+        cur = conn.execute("DELETE FROM agent_history WHERE ts < ?", (cutoff,))
+        n = cur.rowcount
+        conn.commit()
+        conn.close()
+        if n > 0:
+            log.info("清理过期历史 %d 条(>%d天未活跃)", n, HISTORY_EXPIRE_DAYS)
+        return n
+    except Exception as e:
+        log.warning("清理过期历史失败: %s", e)
+        return 0
 
 # 简单股票名称缓存(避免每次都查 DB)
 _name_cache: dict[str, str] = {}
@@ -1613,10 +1672,46 @@ class FeishuBotClient:
         return any(kw in text.lower() for kw in slow_keywords)
 
     def _reply_text(self, chat_id: str, text: str):
-        """发送文本消息到 chat_id。"""
-        # 飞书文本消息长度上限约 4096,超长截断
-        if len(text) > 4000:
-            text = text[:4000] + "\n...(内容过长已截断)"
+        """发送文本消息到 chat_id。超长自动分段(按段落边界拆分)。"""
+        # 飞书文本消息长度上限约 4096,超过则按段落边界拆分多条发送
+        if len(text) <= 4000:
+            self._send_text(chat_id, text)
+            return
+
+        # 按段落(\n\n)拆分,尽量不破坏 markdown 结构
+        chunks = self._split_long_text(text, max_len=3800)
+        for i, chunk in enumerate(chunks, 1):
+            if len(chunks) > 1:
+                chunk = f"(第{i}/{len(chunks)}段)\n\n{chunk}" if i > 1 else chunk
+            self._send_text(chat_id, chunk)
+        log.info("长文本拆分: %d 字 → %d 段", len(text), len(chunks))
+
+    @staticmethod
+    def _split_long_text(text: str, max_len: int = 3800) -> list[str]:
+        """按段落边界拆分长文本,尽量在 \n\n 处断开。"""
+        if len(text) <= max_len:
+            return [text]
+        chunks = []
+        # 先按段落分
+        paragraphs = text.split("\n\n")
+        cur = ""
+        for p in paragraphs:
+            if len(cur) + len(p) + 2 <= max_len:
+                cur = (cur + "\n\n" + p) if cur else p
+            else:
+                if cur:
+                    chunks.append(cur)
+                # 单段就超长,硬切
+                while len(p) > max_len:
+                    chunks.append(p[:max_len])
+                    p = p[max_len:]
+                cur = p
+        if cur:
+            chunks.append(cur)
+        return chunks
+
+    def _send_text(self, chat_id: str, text: str):
+        """实际发送单条文本消息。"""
         body = CreateMessageRequestBody.builder() \
             .receive_id(chat_id) \
             .msg_type("text") \
@@ -1768,6 +1863,8 @@ def main():
         return
 
     client = FeishuBotClient()
+    # 启动时清理过期历史
+    _purge_old_history()
     # 重连循环(异常自动重启)
     while True:
         try:
