@@ -14,10 +14,13 @@ import feishu_bot
 import stock_names
 from feishu_bot import (
     _get_session_lock,
+    _incr_stats,
     _is_reset_command,
     _log_tool_call,
     _normalize_date,
+    _print_stats,
     _split_long_text,
+    _stats_add_session,
     _truncate_history,
     _truncate_tool_result,
     _validate_tool_args,
@@ -637,34 +640,111 @@ def test_compare_stocks_with_mock_finance(monkeypatch):
 
 
 def test_analyze_sector_known(monkeypatch):
-    """已知板块应返回成分股对比。"""
+    """已知板块(fallback 路径,东财接口被 mock 为空)应返回成分股对比。"""
     import stock_finance
+
     def fake_fetch(code):
         return {"code": code, "name": f"股{code}", "pe_ttm": 10.0, "pb": 1.0,
                 "total_mv": 1e10, "roe": 5.0, "net_margin": 10.0, "report_name": "2026中报"}
+
     monkeypatch.setattr(stock_finance, "fetch_finance", fake_fetch)
+    # mock 东财板块索引返回空(强制走 fallback _SECTOR_MEMBERS)
+    monkeypatch.setattr(feishu_bot, "_fetch_sector_index", lambda: {})
     r = handler_analyze_sector("白酒")
     assert "600519" in r  # 茅台代码在白酒板块成员里
 
 
-def test_analyze_sector_unknown():
+def test_analyze_sector_dynamic(monkeypatch):
+    """东财动态查询:mock 板块索引返回 {'白酒': 'BK0896'},mock 成分股返回 8 个代码。"""
+    import stock_finance
+
+    def fake_fetch(code):
+        return {"code": code, "name": f"股{code}", "pe_ttm": 10.0, "pb": 1.0,
+                "total_mv": 1e10, "roe": 5.0, "net_margin": 10.0, "report_name": "2026中报"}
+
+    monkeypatch.setattr(stock_finance, "fetch_finance", fake_fetch)
+    monkeypatch.setattr(feishu_bot, "_fetch_sector_index",
+                        lambda: {"白酒": "BK0896", "银行": "BK1283"})
+    monkeypatch.setattr(feishu_bot, "_fetch_sector_members",
+                        lambda bk, top_n=8: ["600519", "000858", "000568"][:top_n])
+    r = handler_analyze_sector("白酒")
+    assert "白酒" in r
+    assert "600519" in r
+    assert "成交额" in r  # 动态查询的标题里有"按成交额排序"
+
+
+def test_analyze_sector_dynamic_fuzzy(monkeypatch):
+    """动态查询模糊匹配: '银' 应匹配到 '银行'。"""
+    import stock_finance
+
+    monkeypatch.setattr(stock_finance, "fetch_finance",
+                        lambda code: {"code": code, "name": f"股{code}", "pe_ttm": 10.0,
+                                      "pb": 1.0, "total_mv": 1e10, "roe": 5.0,
+                                      "net_margin": 10.0, "report_name": "2026中报"})
+    monkeypatch.setattr(feishu_bot, "_fetch_sector_index",
+                        lambda: {"银行": "BK1283"})
+    monkeypatch.setattr(feishu_bot, "_fetch_sector_members",
+                        lambda bk, top_n=8: ["601398", "601939"])
+    r = handler_analyze_sector("银")
+    assert "银行" in r
+    assert "601398" in r
+
+
+def test_analyze_sector_dynamic_fail_fallback(monkeypatch):
+    """东财动态查询失败(成分股返回空)应 fallback 到 _SECTOR_MEMBERS。"""
+    import stock_finance
+
+    monkeypatch.setattr(stock_finance, "fetch_finance",
+                        lambda code: {"code": code, "name": f"股{code}", "pe_ttm": 10.0,
+                                      "pb": 1.0, "total_mv": 1e10, "roe": 5.0,
+                                      "net_margin": 10.0, "report_name": "2026中报"})
+    # 板块索引有"白酒"但成分股请求失败
+    monkeypatch.setattr(feishu_bot, "_fetch_sector_index",
+                        lambda: {"白酒": "BK0896"})
+    monkeypatch.setattr(feishu_bot, "_fetch_sector_members",
+                        lambda bk, top_n=8: [])
+    r = handler_analyze_sector("白酒")
+    # 应 fallback 到硬编码白酒成员,包含 600519
+    assert "600519" in r
+
+
+def test_analyze_sector_unknown(monkeypatch):
     """未知板块应提示已知列表。"""
+    monkeypatch.setattr(feishu_bot, "_fetch_sector_index", lambda: {"白酒": "BK0896"})
     r = handler_analyze_sector("不存在的板块xyz")
     assert "❌" in r
     assert "白酒" in r  # 列出已知
-
-
-def test_analyze_sector_fuzzy_match():
-    """模糊匹配: '银' 应匹配 '银行'。"""
-    r = handler_analyze_sector("银")
-    # 不应返回未知板块错误(应能匹配到银行)
-    assert "已知板块" not in r
 
 
 def test_analyze_sector_empty():
     """空板块名应返错误。"""
     r = handler_analyze_sector("")
     assert "❌" in r
+
+
+def test_fetch_sector_index_fail_cooldown(monkeypatch):
+    """东财板块索引失败后,5 分钟内不再重试。"""
+    import urllib.request
+
+    call_count = {"n": 0}
+
+    def fake_urlopen(*a, **kw):
+        call_count["n"] += 1
+        raise Exception("mock 502")
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    # 清空缓存 + 重置失败时间
+    monkeypatch.setattr(feishu_bot, "_SECTOR_INDEX_CACHE", {})
+    monkeypatch.setattr(feishu_bot, "_SECTOR_INDEX_FAIL_TS", 0.0)
+    # 第一次调用:会真请求并失败
+    r1 = feishu_bot._fetch_sector_index()
+    assert r1 == {}
+    assert call_count["n"] > 0
+    n1 = call_count["n"]
+    # 第二次调用:冷却期内,不应再请求
+    r2 = feishu_bot._fetch_sector_index()
+    assert r2 == {}
+    assert call_count["n"] == n1  # 没有新请求
 
 
 # ============ 历史复盘 query_history_picks ============
@@ -739,6 +819,93 @@ def test_query_history_picks_with_data(tmp_path, monkeypatch):
     assert "Top10" in r or "Top" in r
     assert "评分分布" in r
     assert "共 15" in r  # 总共 15 只
+
+
+# ============ Bot 运行状态统计 ============
+
+
+def test_stats_incr_basic():
+    """_incr_stats 累加计数器。"""
+    before = feishu_bot._STATS.get("tool_calls", 0)
+    _incr_stats("tool_calls", 1)
+    after = feishu_bot._STATS.get("tool_calls", 0)
+    assert after == before + 1
+
+
+def test_stats_incr_multiple():
+    """多次累加。"""
+    before = feishu_bot._STATS.get("llm_calls", 0)
+    for _ in range(5):
+        _incr_stats("llm_calls", 1)
+    after = feishu_bot._STATS.get("llm_calls", 0)
+    assert after == before + 5
+
+
+def test_stats_add_session():
+    """会话 ID 应去重存入 set。"""
+    before = len(feishu_bot._STATS["sessions"])
+    _stats_add_session("test_sess_A")
+    _stats_add_session("test_sess_A")  # 重复不应增加
+    _stats_add_session("test_sess_B")
+    after = len(feishu_bot._STATS["sessions"])
+    assert after == before + 2  # A、B 两个新会话
+
+
+def test_log_tool_call_increments_stats(tmp_path, monkeypatch):
+    """_log_tool_call 应同步累加 tool_calls / tool_failures / sessions。"""
+    log_file = tmp_path / "audit.jsonl"
+    monkeypatch.setattr(feishu_bot, "TOOL_AUDIT_LOG", log_file)
+    tc_before = feishu_bot._STATS.get("tool_calls", 0)
+    tf_before = feishu_bot._STATS.get("tool_failures", 0)
+    sess_before = len(feishu_bot._STATS["sessions"])
+
+    _log_tool_call("test_stats_sess", 1, "analyze_stock", {"code": "600519"},
+                   200, 100, error=None)
+    _log_tool_call("test_stats_sess", 2, "backtest_strategy", {},
+                   0, 50, error="timeout")
+
+    assert feishu_bot._STATS["tool_calls"] == tc_before + 2
+    assert feishu_bot._STATS["tool_failures"] == tf_before + 1
+    assert len(feishu_bot._STATS["sessions"]) == sess_before + 1  # 同 session_id 只算 1 个
+
+
+def test_print_stats_no_crash(capsys):
+    """_print_stats 在零数据时不应崩溃。"""
+    # 临时把 _STATS 改成零数据
+    orig = dict(feishu_bot._STATS)
+    feishu_bot._STATS.update({
+        "start_time": feishu_bot.datetime.now(),
+        "llm_calls": 0, "llm_total_ms": 0, "llm_failures": 0,
+        "tool_calls": 0, "tool_failures": 0, "sessions": set(),
+    })
+    try:
+        _print_stats()  # 不应抛异常
+    finally:
+        feishu_bot._STATS.update(orig)
+
+
+def test_print_stats_with_data(capsys):
+    """有数据时 _print_stats 应输出完整摘要。"""
+    orig = dict(feishu_bot._STATS)
+    feishu_bot._STATS.update({
+        "start_time": feishu_bot.datetime.now(),
+        "llm_calls": 10, "llm_total_ms": 5000, "llm_failures": 1,
+        "tool_calls": 20, "tool_failures": 2, "sessions": {"a", "b", "c"},
+    })
+    try:
+        with patch("feishu_bot.log") as mock_log:
+            _print_stats()
+            assert mock_log.info.called
+            # log.info 用 %-格式化,call_args[0] 是 (template, *args)
+            template = mock_log.info.call_args[0][0]
+            fmt_args = mock_log.info.call_args[0][1:]
+            rendered = template % fmt_args
+            assert "LLM 调用 10 次" in rendered
+            assert "工具调用 20 次" in rendered
+            assert "累计会话 3 个" in rendered
+    finally:
+        feishu_bot._STATS.update(orig)
+
 
 
 

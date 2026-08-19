@@ -9,21 +9,22 @@ A 股量化分析系统,集成飞书群聊 Bot(Function Calling ReAct Agent),覆
 - 23 内置策略信号引擎(MACD/KDJ/BOLL/RSI/玉姐 10 条规则等)
 - 玉姐精选全市场扫描(多因子评分排行)
 - 回测 + 参数网格寻优
-- 飞书 Bot Agent(15 个 skill,跨轮记忆,自选股)
+- 飞书 Bot Agent(19 个 skill,跨轮记忆,自选股,财务数据,板块分析,历史复盘)
 - 策略大全(4 来源 73 策略:漫画书 29 + 操练大全 32 + 玉姐 10 + AI 2)
 
 ## 目录结构
 
 ```
 quant/
-├── feishu_bot.py          # 飞书长连接 Agent(~2200 行,15 skill)
+├── feishu_bot.py          # 飞书长连接 Agent(~2620 行,19 skill)
 ├── feishu_image.py        # matplotlib 图表(K 线/玉姐/回测/市场)
 ├── feishu.py              # 飞书 webhook 推送(日报/告警)
 ├── stock_names.py         # 股票名称解析(腾讯 smartbox + sqlite 缓存)
+├── stock_finance.py       # 财务数据(东方财富双接口,PE/PB/ROE/市值/EPS,sqlite 缓存 1 天)
 ├── strategy_engine.py     # 23 策略信号引擎
 ├── backtest_builtin.py    # 回测引擎(workers=1,非线程安全)
 ├── yujie_scan.py          # 玉姐精选评分(10 条规则)
-├── daily_scan.py          # 每日 09:00 全市场扫描 + 飞书日报
+├── daily_scan.py          # 每日 09:00 全市场扫描 + 飞书日报(systemd timer)
 ├── strategy_library.json  # 策略大全(4 来源 73 策略)
 ├── data_fetcher.py        # 数据获取(腾讯/新浪)
 ├── api.py                 # FastAPI 服务(/api/* 端点)
@@ -32,7 +33,7 @@ quant/
 ├── config.json            # 配置(.gitignore,含飞书 app_id/secret)
 ├── .env                   # 环境变量(.gitignore,AI_API_KEY 等)
 ├── tests/                 # pytest 测试
-│   ├── test_feishu_bot.py     # 25+18 用例(历史/分段/重置/自选股/校验/锁)
+│   ├── test_feishu_bot.py     # 63 用例(历史/分段/重置/自选股/校验/锁/对比/板块/复盘/日志/压缩)
 │   ├── test_feishu.py        # 16 用例(飞书推送)
 │   └── ...
 └── reports/               # 日报输出(daily_YYYYMMDD.md)
@@ -64,10 +65,15 @@ systemctl --user restart feishu-bot.service
 systemctl --user status feishu-bot.service
 journalctl --user -u feishu-bot -f
 
+# daily-scan 定时器(每个交易日 09:00 自动跑)
+systemctl --user list-timers daily-scan.timer
+systemctl --user start daily-scan.service   # 立即手动触发一次
+journalctl --user -u daily-scan -f
+
 # CLI 测试 Agent(不走飞书)
 .venv/bin/python feishu_bot.py --agent "分析茅台"
 
-# 单次跑日报
+# 单次跑日报(同 daily-scan.service 但不通过 systemd)
 .venv/bin/python daily_scan.py
 ```
 
@@ -76,6 +82,7 @@ journalctl --user -u feishu-bot -f
 ### 部署
 - **systemd user service**,配置在 `~/.config/systemd/user/feishu-bot.service` 和 `quant-api.service`
 - 都 `enabled`,Restart=on-failure
+- **daily-scan**: `daily-scan.timer`(Mon-Fri 09:00 CST) 触发 `daily-scan.service`(oneshot),日志写 `/tmp/daily_scan.log`
 - 配置文件 `config.json` 和 `.env` 在 `.gitignore` 中,**不要提交**
 
 ### 测试
@@ -85,10 +92,18 @@ journalctl --user -u feishu-bot -f
 
 ### Agent 设计
 - **Function Calling ReAct**: LLM 自主决策调工具,失败降级到 `route()` 关键词路由
-- **15 个 skill**: 4 数据查询 + 5 策略查询 + 3 策略操作 + 2 回测寻优 + 1 自选股
+- **19 个 skill**: 4 数据查询 + 5 策略查询 + 3 策略操作 + 2 回测寻优 + 1 自选股 + 1 财务 + 3 批量(对比/板块/历史复盘)
+  - 数据查询: `analyze_stock` / `get_market_status` / `get_yujie_picks` / `get_portfolio`
+  - 策略查询: `list_strategies` / `get_strategy_library` / `get_yujie_detail` / `analyze_with_strategy` / `analyze_with_yujie`
+  - 策略操作: `toggle_strategy` / `set_strategy_params` / `enable_library_strategy`
+  - 回测寻优: `backtest_strategy` / `grid_search_params`
+  - 自选股: `watchlist`(add/remove/list)
+  - 财务: `get_finance`(单股 PE/PB/市值/ROE/毛利率/净利率/EPS/营收/净利润)
+  - 批量: `compare_stocks`(多股对比) / `analyze_sector`(板块成分股) / `query_history_picks`(历史玉姐复盘)
 - **跨轮记忆**: `session_id = f"{chat_id}:{sender}"`,sqlite `agent_history.db`,最近 6 轮
   - assistant >500 字裁到 200 字 + 截断标记
   - >7 天自动过期(`_purge_old_history` 启动时清理)
+  - **历史压缩**(Compaction): >=10 条触发 LLM 总结旧轮成 1 条摘要,保留最近 8 条原文,失败降级硬截断
 - **重置命令**: 整句精确匹配(去标点),不用子串匹配(避免"重置 BOLL 参数"误判)
 - **会话级并发锁**: 同 session_id 串行,防连发消息 race
 - **参数 schema 预校验**: 对照 TOOLS schema,不合法直接回灌不执行
@@ -107,9 +122,10 @@ journalctl --user -u feishu-bot -f
 - `RotatingFileHandler` `/tmp/feishu_bot.log` 5MB×3
 - 同时输出控制台(journalctl 可查)
 - 工具调用记 `Agent step N 调用 X(args)`
+- **结构化审计日志**: `/tmp/feishu_bot_audit.jsonl`(JSONL,每行一次工具调用,含 ts/session_id/step/tool/args/result_size/duration_ms/error)
 
 ### 数据缓存
-- `stock_cache.db`: 日 K 线(`daily` 表,~440 万行 405MB,正常)+ 玉姐精选 + AI 缓存 + 股票名(17 行)
+- `stock_cache.db`: 日 K 线(`daily` 表,~440 万行 405MB,正常)+ 玉姐精选 + AI 缓存 + 股票名(17 行)+ 财务数据
 - `agent_history.db`: 对话历史
 - `agent_watchlist.db`: 自选股(按 session_id 隔离)
 - 所有 `*.db` 在 `.gitignore` 中
@@ -124,6 +140,11 @@ journalctl --user -u feishu-bot -f
 - 中文简称:腾讯 smartbox 搜索 + sqlite 缓存(1 天)
 - 不预抓全市场,按需搜索
 - 缓存全称 + 简称(去地名前缀)
+
+### 财务数据(stock_finance.py)
+- 东方财富双接口:push2 实时估值(PE/PB/市值)+ F10 财报(ROE/毛利率/净利率/EPS)
+- sqlite 缓存 1 天(PE/市值每日变,财报不变)
+- 字段: pe_ttm/pb/total_mv/float_mv/roe/gross_margin/net_margin/eps/revenue/net_profit/revenue_yoy/profit_yoy
 
 ## 已知问题
 

@@ -86,6 +86,70 @@ def _log_tool_call(session_id: str, step: int, fn_name: str, fn_args: dict,
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
     except Exception:
         pass  # 审计日志失败不影响主流程
+    # 同步累加运行状态
+    _incr_stats("tool_calls", 1)
+    if error:
+        _incr_stats("tool_failures", 1)
+    _stats_add_session(session_id)
+
+
+# Bot 运行状态统计(进程级,线程安全)
+_STATS: dict = {
+    "start_time": datetime.now(),
+    "llm_calls": 0,
+    "llm_total_ms": 0,
+    "llm_failures": 0,
+    "tool_calls": 0,
+    "tool_failures": 0,
+    "sessions": set(),
+}
+_STATS_LOCK = threading.Lock()
+
+
+def _incr_stats(key: str, delta: int = 1) -> None:
+    """累加统计计数器(线程安全)。"""
+    with _STATS_LOCK:
+        _STATS[key] = _STATS.get(key, 0) + delta
+
+
+def _stats_add_session(session_id: str) -> None:
+    """记录会话 ID(去重统计)。"""
+    with _STATS_LOCK:
+        _STATS["sessions"].add(session_id)
+
+
+def _print_stats() -> None:
+    """打印 Bot 运行状态摘要(启动时 + SIGUSR1 信号触发)。"""
+    with _STATS_LOCK:
+        s = dict(_STATS)
+    uptime = datetime.now() - s["start_time"]
+    hours = uptime.total_seconds() / 3600
+    llm_avg = s["llm_total_ms"] / s["llm_calls"] if s["llm_calls"] else 0
+    tool_err_rate = s["tool_failures"] / s["tool_calls"] * 100 if s["tool_calls"] else 0
+    llm_err_rate = s["llm_failures"] / s["llm_calls"] * 100 if s["llm_calls"] else 0
+    log.info(
+        "Bot 运行状态 | 启动 %s | 在线 %.1fh | LLM 调用 %d 次(平均 %.0fms,失败 %d=%.1f%%) | "
+        "工具调用 %d 次(失败 %d=%.1f%%) | 累计会话 %d 个",
+        s["start_time"].strftime("%Y-%m-%d %H:%M:%S"),
+        hours, s["llm_calls"], llm_avg, s["llm_failures"], llm_err_rate,
+        s["tool_calls"], s["tool_failures"], tool_err_rate,
+        len(s["sessions"]),
+    )
+
+
+def _signal_handler_signusr1(signum, frame):
+    """SIGUSR1 信号: 打印运行状态(journalctl 可见)。"""
+    _print_stats()
+
+
+def _register_stats_signal() -> None:
+    """注册 SIGUSR1 信号(仅 main 线程可注册,失败静默)。"""
+    import signal
+    try:
+        signal.signal(signal.SIGUSR1, _signal_handler_signusr1)
+        log.info("已注册 SIGUSR1: kill -USR1 <pid> 可触发运行状态打印")
+    except (ValueError, OSError):
+        pass  # 非 main 线程或 Windows,跳过
 
 # 命令路由关键字
 CMD_ANALYZE = ("分析", "看看", "看看股")
@@ -763,6 +827,7 @@ def handler_compare_stocks(codes: list) -> str:
 
 
 # 主流板块成分股(简化版,涵盖 A 股常见板块,每板块 8 只代表股)
+# 仅作为东财板块接口失败时的 fallback,正常情况下走动态查询
 _SECTOR_MEMBERS = {
     "白酒": ["600519", "000858", "000568", "600809", "002304", "000596", "603369", "600779"],
     "银行": ["601398", "601939", "601288", "601318", "600036", "601166", "600000", "601628"],
@@ -776,9 +841,86 @@ _SECTOR_MEMBERS = {
     "有色": ["601899", "603993", "600547", "002460", "000831", "600362", "002203", "600497"],
 }
 
+# 东财行业板块列表缓存: {板块名: BK代码},进程级缓存,首次查询后不再请求
+_SECTOR_INDEX_CACHE: dict[str, str] = {}
+_SECTOR_INDEX_FAIL_TS: float = 0.0  # 上次失败时间,失败后 5 分钟内不再重试
+
+
+def _fetch_sector_index() -> dict[str, str]:
+    """拉取东财板块索引(m:90 t=2 概念 + t=3 行业,共 ~1000 个),返回 {板块名: BK代码}。
+
+    失败返回 {}。结果进程级缓存,避免重复请求。
+    东财单页最多 100 条,需分页拉取。
+    失败后 5 分钟内不再重试,避免短时故障时每次调用都打 API。
+    """
+    global _SECTOR_INDEX_FAIL_TS
+    if _SECTOR_INDEX_CACHE:
+        return _SECTOR_INDEX_CACHE
+    # 失败冷却:5 分钟内不重试
+    if _SECTOR_INDEX_FAIL_TS and (time.time() - _SECTOR_INDEX_FAIL_TS) < 300:
+        return {}
+    import urllib.request
+    out = {}
+    try:
+        for t in (2, 3):  # 2=概念板块, 3=行业板块
+            for page in range(1, 10):  # 单类最多 9 页 900 个,足够覆盖
+                url = (
+                    f"http://17.push2.eastmoney.com/api/qt/clist/get"
+                    f"?pn={page}&pz=100&po=1&np=1&fltt=2&invt=2&fid=f3&fs=m:90+t:{t}&fields=f12,f14"
+                )
+                req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+                data = json.loads(urllib.request.urlopen(req, timeout=10).read().decode("utf-8"))
+                diff = (data.get("data") or {}).get("diff") or []
+                if not diff:
+                    break
+                for r in diff:
+                    name = r.get("f14")
+                    code = r.get("f12")
+                    if name and code and isinstance(name, str):
+                        out[name] = code
+                if len(diff) < 100:
+                    break
+        _SECTOR_INDEX_CACHE.update(out)
+        log.info("东财板块索引加载 %d 个(概念+行业)", len(out))
+    except Exception as e:
+        _SECTOR_INDEX_FAIL_TS = time.time()
+        log.warning("东财板块列表获取失败: %s", e)
+    return _SECTOR_INDEX_CACHE
+
+
+def _fetch_sector_members(bk_code: str, top_n: int = 8) -> list[str]:
+    """从东财板块接口取成分股(按成交额降序,取前 top_n 只 6 位代码)。
+
+    Args:
+        bk_code: BK 板块代码,如 "BK0896"(白酒)
+        top_n: 取前 N 只(默认 8,与对比表上限一致)
+
+    Returns: 6 位代码列表,失败返回 []
+    """
+    import urllib.request
+    url = (
+        f"http://17.push2.eastmoney.com/api/qt/clist/get"
+        f"?pn=1&pz={top_n}&po=1&np=1&fltt=2&invt=2&fid=f6&fs=b:{bk_code}&fields=f12"
+    )
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        data = json.loads(urllib.request.urlopen(req, timeout=10).read().decode("utf-8"))
+        out = []
+        for r in (data.get("data") or {}).get("diff", []) or []:
+            code = r.get("f12")
+            if code and isinstance(code, str) and code.isdigit() and len(code) == 6:
+                out.append(code)
+        return out
+    except Exception as e:
+        log.warning("东财板块成分股获取失败 %s: %s", bk_code, e)
+        return []
+
 
 def handler_analyze_sector(sector: str) -> str:
     """板块分析: 给出板块成分股的对比表(PE/PB/ROE/市值/净利率)。
+
+    优先用东财板块接口动态查成分股(覆盖全 A 股 ~500 个行业板块),
+    失败 fallback 到 _SECTOR_MEMBERS 硬编码 10 个主流板块。
 
     Args:
         sector: 板块名(中文),如"白酒"/"银行"/"医药"/"新能源"/"半导体"
@@ -786,19 +928,61 @@ def handler_analyze_sector(sector: str) -> str:
     if not sector:
         return "❌ 请提供板块名,如'白酒'/'银行'/'医药'/'新能源'/'半导体'"
 
-    # 模糊匹配板块名
     sector = sector.strip()
+
+    # 1. 优先用东财动态查询(板块名精确或模糊匹配)
+    sectors = _fetch_sector_index()
+    matched_bk = None
+    matched_name = None
+    if sectors:
+        # 精确匹配优先
+        if sector in sectors:
+            matched_bk = sectors[sector]
+            matched_name = sector
+        else:
+            # 模糊匹配: 找包含 sector 的板块名
+            for name, bk in sectors.items():
+                if sector in name or name in sector:
+                    matched_bk = bk
+                    matched_name = name
+                    break
+
+    if matched_bk:
+        members = _fetch_sector_members(matched_bk, top_n=8)
+        if members:
+            return _format_sector_compare(matched_name, members)
+        # 动态查询失败,继续 fallback
+
+    # 2. Fallback: 硬编码 _SECTOR_MEMBERS
     matched = None
     for k in _SECTOR_MEMBERS:
         if sector == k or sector in k or k in sector:
             matched = k
             break
-    if not matched:
-        known = "、".join(_SECTOR_MEMBERS.keys())
-        return f"❌ 未识别板块 '{sector}'。已知板块: {known}"
+    if matched:
+        return _format_sector_compare(matched, _SECTOR_MEMBERS[matched])
 
-    members = _SECTOR_MEMBERS[matched]
-    return handler_compare_stocks(members)
+    # 都没匹配上,提示用户
+    known_hard = "、".join(_SECTOR_MEMBERS.keys())
+    hint = f"❌ 未识别板块 '{sector}'。已支持主流板块: {known_hard}"
+    if sectors:
+        # 给出几个东财也有的相似板块名作为提示
+        similar = [n for n in sectors if sector[:2] in n][:5]
+        if similar:
+            hint += f"\n💡 东财板块中相似名: {', '.join(similar)}"
+    return hint
+
+
+def _format_sector_compare(sector_name: str, members: list) -> str:
+    """板块成分股对比的统一输出格式。"""
+    header = f"### 📊 板块【{sector_name}】成分股对比({len(members)} 只,按成交额排序)\n\n"
+    body = handler_compare_stocks(members)
+    # compare_stocks 内部已有标题"📊 N 只股票对比",这里替换为板块标题
+    # body 第一行是 "### 📊 N 只股票对比",第二行空,第三行起是表头
+    parts = body.split("\n", 2)
+    if len(parts) == 3 and parts[0].startswith("### 📊"):
+        return header + parts[2]
+    return header + body
 
 
 def _normalize_date(date_str: str) -> str:
@@ -2236,6 +2420,7 @@ class FeishuAgent:
             try:
                 # 重试 1 次:网络抖动/网关 5xx 时重试,4xx 不重试(参数错误)
                 r = None
+                llm_start = time.time()
                 for attempt in range(2):
                     try:
                         with httpx.Client(timeout=60, trust_env=False) as c:
@@ -2250,18 +2435,26 @@ class FeishuAgent:
                         r = None
                         time.sleep(1)
                 if r is None:
+                    _incr_stats("llm_calls", 1)
+                    _incr_stats("llm_failures", 1)
                     return (
                         "⚠️ AI 暂时无响应,请稍后重试(网络抖动,已重试2次)",
                         new_history, list(_pending_images),
                     )
                 if r.status_code != 200:
+                    _incr_stats("llm_calls", 1)
+                    _incr_stats("llm_failures", 1)
                     return (
                         f"⚠️ AI 服务异常(HTTP {r.status_code}),请稍后重试",
                         new_history, list(_pending_images),
                     )
                 msg = r.json()["choices"][0]["message"]
+                _incr_stats("llm_calls", 1)
+                _incr_stats("llm_total_ms", int((time.time() - llm_start) * 1000))
             except Exception as e:
                 log.error("Agent LLM 调用失败: %s", e)
+                _incr_stats("llm_calls", 1)
+                _incr_stats("llm_failures", 1)
                 return (
                     "⚠️ AI 调用异常,请稍后重试(已记录日志)",
                     new_history, list(_pending_images),
@@ -2513,12 +2706,13 @@ class FeishuBotClient:
             #
             # 会话级并发锁(OpenClaw session lane):同一 session_id 串行执行,
             # 防止用户连发消息时多个 Agent 并发跑、history 互相覆盖。
+            # 优化: 锁等待 3 秒,拿不到立即提示"忙",避免连发消息被卡 5 分钟。
             session_lock = _get_session_lock(session_id)
-            acquired = session_lock.acquire(timeout=300)
+            acquired = session_lock.acquire(timeout=3)
             if not acquired:
                 self._reply_text(
                     chat_id,
-                    "⏳ 上一条消息还在处理中,请稍等几秒再发(同一会话最多 5 分钟)。",
+                    "⏳ 上一条消息还在处理中,请稍等几秒再发。",
                 )
                 return
             try:
@@ -2565,6 +2759,8 @@ class FeishuBotClient:
             log_level=lark.LogLevel.INFO,
             auto_reconnect=True,  # ping timeout 后自动重连(默认 False,会导致 Bot 假死)
         )
+        _register_stats_signal()
+        _print_stats()  # 启动时打印一次
         log.info("启动飞书长连接(auto_reconnect=True),等待群里 @机器人 提问...")
         ws_client.start()
 
