@@ -2555,6 +2555,12 @@ class FeishuAgent:
                 "tool_calls": tool_calls,
             })
 
+            # 清空上一轮的图片,只保留本轮工具调用生成的图。
+            # 原因: ReAct 循环中 LLM 可能先猜错代码再纠正(如 301395→688395),
+            # 若不清空,错误代码的 K 线图也会发给用户("发很多东西")。
+            # 清空后只保留最后一轮(正确)的图片。
+            _pending_images.clear()
+
             for tc in tool_calls:
                 fn_name = tc["function"]["name"]
                 t_start = time.time()

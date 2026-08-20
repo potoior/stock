@@ -553,6 +553,130 @@ def test_prune_idle_session_locks():
             held.release()
 
 
+# ============ ReAct 图片清理(多步只保留最后一轮) ============
+
+
+def test_react_clears_images_between_steps(monkeypatch):
+    """ReAct 循环中 LLM 猜错代码再纠正时,只保留最后一轮的图片。
+
+    模拟场景: 用户问"正弦电气呢",
+      step 1: LLM 调 analyze_stock(301395) ← 猜错
+      step 2: LLM 纠正调 analyze_stock(688395) ← 正确
+      step 3: LLM 给出最终文本
+    只应返回 1 张图(688395),不含错误代码 301395 的图。
+    """
+    import httpx
+
+    # 构造 mock LLM 响应序列
+    class FakeResp:
+        def __init__(self, data):
+            self.status_code = 200
+            self._data = data
+        def json(self):
+            return self._data
+
+    class FakeClient:
+        responses = []
+        def __init__(self, *a, **kw):
+            pass
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            pass
+        def post(self, *a, **kw):
+            return FakeResp(FakeClient.responses.pop(0))
+
+    FakeClient.responses = [
+        # Step 1: LLM 调 analyze_stock(错误代码 301395)
+        {"choices": [{"message": {"tool_calls": [
+            {"id": "c1", "function": {"name": "analyze_stock", "arguments": '{"code": "301395"}'}}
+        ]}}]},
+        # Step 2: LLM 纠正为 688395
+        {"choices": [{"message": {"tool_calls": [
+            {"id": "c2", "function": {"name": "analyze_stock", "arguments": '{"code": "688395"}'}}
+        ]}}]},
+        # Step 3: LLM 给出最终答案
+        {"choices": [{"message": {"content": "正弦电气(688395)分析完成"}}]},
+    ]
+    monkeypatch.setattr(httpx, "Client", FakeClient)
+
+    # mock analyze_stock: 每次追加一张"图"(用 bytes 标记代码)
+    def fake_analyze(args):
+        code = args.get("code", "")
+        feishu_bot._pending_images.append(f"IMG_{code}".encode())
+        return f"分析结果 {code}"
+
+    monkeypatch.setitem(feishu_bot.TOOL_HANDLERS, "analyze_stock", lambda args: fake_analyze(args))
+
+    # 构造 Agent(绕过 __init__ 的 .env 依赖)
+    agent = feishu_bot.FeishuAgent.__new__(feishu_bot.FeishuAgent)
+    agent.api_key = "fake"
+    agent.base_url = "http://fake"
+    agent.model = "fake"
+
+    reply, _history, images = agent.chat("正弦电气呢", session_id="test")
+    assert "分析完成" in reply
+    # 关键: 只保留最后一轮(688395)的图,错误代码 301395 的图被清掉
+    assert len(images) == 1
+    assert images == [b"IMG_688395"]
+
+
+def test_react_keeps_parallel_images(monkeypatch):
+    """同一轮多个工具调用的图片都应保留(如同时分析茅台+看市场)。"""
+    import httpx
+
+    class FakeResp:
+        def __init__(self, data):
+            self.status_code = 200
+            self._data = data
+        def json(self):
+            return self._data
+
+    class FakeClient:
+        responses = []
+        def __init__(self, *a, **kw):
+            pass
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            pass
+        def post(self, *a, **kw):
+            return FakeResp(FakeClient.responses.pop(0))
+
+    FakeClient.responses = [
+        # Step 1: LLM 同时调 analyze_stock + get_market_status(并行)
+        {"choices": [{"message": {"tool_calls": [
+            {"id": "c1", "function": {"name": "analyze_stock", "arguments": '{"code": "600519"}'}},
+            {"id": "c2", "function": {"name": "get_market_status", "arguments": '{}'}}
+        ]}}]},
+        # Step 2: 最终答案
+        {"choices": [{"message": {"content": "茅台+市场分析完成"}}]},
+    ]
+    monkeypatch.setattr(httpx, "Client", FakeClient)
+
+    def fake_analyze(args):
+        feishu_bot._pending_images.append(b"KLINE_600519")
+        return "茅台分析"
+    def fake_market(args):
+        feishu_bot._pending_images.append(b"MARKET_CHART")
+        return "市场概况"
+
+    monkeypatch.setitem(feishu_bot.TOOL_HANDLERS, "analyze_stock", lambda args: fake_analyze(args))
+    monkeypatch.setitem(feishu_bot.TOOL_HANDLERS, "get_market_status", lambda args: fake_market(args))
+
+    agent = feishu_bot.FeishuAgent.__new__(feishu_bot.FeishuAgent)
+    agent.api_key = "fake"
+    agent.base_url = "http://fake"
+    agent.model = "fake"
+
+    reply, _history, images = agent.chat("分析茅台和市场", session_id="test")
+    assert "完成" in reply
+    # 同一轮两个工具的图都保留
+    assert len(images) == 2
+    assert b"KLINE_600519" in images
+    assert b"MARKET_CHART" in images
+
+
 # ============ 结构化工具调用日志(JSONL) ============
 
 
