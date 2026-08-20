@@ -484,6 +484,35 @@ DEFAULT_STRATEGY_PARAMS = {
     "bottom": {"lookback": 20, "vol_shrink": 0.5, "drop_pct": -5},
     "top": {"lookback": 20, "vol_expand": 2.0, "rise_pct": 5},
     "zt": {"zt_pct": 9.6, "min_vol_ratio": 1.5},
+    # 操练大全12章 投资法则
+    "trend_follow": {"threshold": 25, "weak": 20},
+    "pyramid": {"n": 20, "step": 0.1},
+    "stop_profit": {"short": 5, "long": 10, "short_pct": 20, "long_pct": 30},
+    "plan_trade": {"ma_period": 10},
+    # 漫画书 量能/实战战法
+    "high_volume": {"n": 20},
+    "demon_stock": {"consec": 3, "consec_pct": 5, "hot": 5, "hot_pct": 30},
+    "dragon_pullback": {"lookback": 30, "zt_pct": 9.6, "band": 3, "vol_ratio": 1.5},
+    "support_resistance": {"n": 20, "vol_ratio": 1.5},
+    "range_trade": {"n": 20, "low_pct": 0.2, "high_pct": 0.2},
+    # 操练大全15章 抄底
+    "bottom_ma": {},
+    # 操练大全16章 逃顶(周/月线)
+    "top_weekly": {"rise_pct": 15},
+    "top_monthly": {"rise_pct": 25},
+    # 操练大全17章 跟庄
+    "zhuang_test": {"shadow_ratio": 2, "shrink": 0.7, "low_pct": 0.3, "n": 60},
+    "zhuang_build": {"low_pct": 0.3, "vol_ratio": 1.5, "amplitude": 10, "n": 60},
+    "zhuang_pull": {"vol_ratio": 2, "rise_pct": 5, "n": 20},
+    "zhuang_ship": {"high_pct": 0.7, "vol_ratio": 1.5, "stale_pct": 2, "n": 60},
+    "zhuang_wash": {"rise_pct": 10, "shrink": 0.8, "pull_min": -8, "pull_max": -3},
+    # 操练大全20章 涨停细分
+    "zt_type": {"zt_pct": 9.6, "tolerance": 0.5},
+    "zt_unsealed": {"zt_pct": 9.6, "break_pct": 1, "vol_ratio": 2},
+    "zt_pull": {"zt_pct": 9.6, "pull_min": 5, "vol_ratio": 2, "body_ratio": 70},
+    # 操练大全14章 基本面
+    "pe_select": {"low_pe": 15, "high_pe": 50},
+    "roe_pe": {"roe_min": 15, "pe_max": 25, "roe_bad": 5, "pe_high": 50},
 }
 
 
@@ -1125,6 +1154,685 @@ def strategy_zt(ctx, params):
     return "hold", f"无涨停信号(+{pct:.1f}%,量比{vol_ratio:.1f})"
 
 
+# ---------------- 操练大全12章 投资法则与策略 ----------------
+
+
+def strategy_trend_follow(ctx, params):
+    """顺势而为(操练大全12章):ADX 趋势强度 + 均线多头/空头排列复合判断。
+
+    规则:
+      - ADX>threshold(默认25) + MA5>MA10>MA20 多头排列 → buy
+      - ADX>threshold + MA5<MA10<MA20 空头排列 → sell
+      - ADX<weak(默认20) → hold(无明显趋势)
+      - 否则按均线方向倾向
+    """
+    threshold = float(params.get("threshold", 25))
+    weak = float(params.get("weak", 20))
+    i = ctx["i"]
+    if i < 60:
+        return "hold", "数据不足"
+    adx = ctx["adx"]
+    ma5, ma10, ma20 = ctx["ma5"], ctx["ma10"], ctx["ma20"]
+    a = adx.iloc[i]
+    m5, m10, m20 = ma5.iloc[i], ma10.iloc[i], ma20.iloc[i]
+    if pd.isna(a) or pd.isna(m20):
+        return "hold", "指标数据不足"
+    bull = m5 > m10 > m20
+    bear = m5 < m10 < m20
+    if a >= threshold and bull:
+        return "buy", f"ADX={a:.1f}≥{threshold} 强趋势+均线多头排列(MA5>MA10>MA20),顺势做多"
+    if a >= threshold and bear:
+        return "sell", f"ADX={a:.1f}≥{threshold} 强趋势+均线空头排列(MA5<MA10<MA20),顺势做空"
+    if a < weak:
+        return "hold", f"ADX={a:.1f}<{weak} 无明显趋势,观望"
+    if bull:
+        return "buy", f"均线多头排列(MA5>MA10>MA20),ADX={a:.1f} 趋势走强"
+    if bear:
+        return "sell", f"均线空头排列(MA5<MA10<MA20),ADX={a:.1f} 趋势走弱"
+    return "hold", f"ADX={a:.1f} 均线纠缠(MA5={m5:.2f}/MA10={m10:.2f}/MA20={m20:.2f}),方向不明"
+
+
+def strategy_pyramid(ctx, params):
+    """金字塔形买卖法(操练大全12章):以近 N 日均价为基准,阶梯加仓/减仓。
+
+    规则:
+      - 当前价 < 基准×(1-step) → buy(下跌加仓)
+      - 当前价 > 基准×(1+step) → sell(上涨减仓)
+      - step 控制阶梯宽度,默认 10%
+    """
+    n = int(params.get("n", 20))
+    step = float(params.get("step", 0.1))
+    i = ctx["i"]
+    close = ctx["close"]
+    if i < n:
+        return "hold", "数据不足"
+    base = close.iloc[i - n:i].mean()
+    price = ctx["price"]
+    if price < base * (1 - step):
+        ret = (price - base) / base * 100
+        return "buy", f"价{price:.2f}<均价{base:.2f}×(1-{step})={base*(1-step):.2f},低{ret:+.1f}%,金字塔加仓"
+    if price > base * (1 + step):
+        ret = (price - base) / base * 100
+        return "sell", f"价{price:.2f}>均价{base:.2f}×(1+{step})={base*(1+step):.2f},高{ret:+.1f}%,金字塔减仓"
+    return "hold", f"价{price:.2f} 在均价{base:.2f}±{step*100:.0f}%区间内,持仓观望"
+
+
+def strategy_stop_profit(ctx, params):
+    """有暴利便收手(操练大全12章):短期累计涨幅过大时主动止盈。
+
+    规则:
+      - 近 short 日(默认5)累计涨幅 ≥ short_pct(默认20) → sell
+      - 近 long 日(默认10)累计涨幅 ≥ long_pct(默认30) → sell
+      - 否则 hold
+    """
+    short = int(params.get("short", 5))
+    long_ = int(params.get("long", 10))
+    short_pct = float(params.get("short_pct", 20))
+    long_pct = float(params.get("long_pct", 30))
+    i = ctx["i"]
+    close = ctx["close"]
+    if i < long_:
+        return "hold", "数据不足"
+    ret_short = (close.iloc[i] - close.iloc[i - short]) / close.iloc[i - short] * 100
+    ret_long = (close.iloc[i] - close.iloc[i - long_]) / close.iloc[i - long_] * 100
+    if ret_long >= long_pct:
+        return "sell", f"近{long_}日涨{ret_long:.1f}%≥{long_pct}%,暴利收手"
+    if ret_short >= short_pct:
+        return "sell", f"近{short}日涨{ret_short:.1f}%≥{short_pct}%,短期暴利止盈"
+    return "hold", f"近{short}日{ret_short:+.1f}%/近{long_}日{ret_long:+.1f}%,未达止盈阈值"
+
+
+def strategy_plan_trade(ctx, params):
+    """计划你的交易(操练大全12章):进场后用 MA10 跟踪止损 + MACD 死叉复合。
+
+    规则:
+      - close > MA10 + MACD 多头(DIFF>DEA) → buy(趋势完好,持有/进场)
+      - close < MA10 → sell(破位止损)
+      - MACD 死叉(DIFF 下穿 DEA) → sell(趋势转折)
+    """
+    ma_period = int(params.get("ma_period", 10))
+    i = ctx["i"]
+    if i < max(ma_period, 35):
+        return "hold", "数据不足"
+    ma = ctx["ma10"] if ma_period == 10 else ctx["close"].rolling(ma_period).mean()
+    price = ctx["price"]
+    ma_v = ma.iloc[i]
+    diff, dea = ctx["macd_diff"], ctx["macd_dea"]
+    if pd.isna(ma_v):
+        return "hold", "MA数据不足"
+    death = diff.iloc[i] < dea.iloc[i] and diff.iloc[i - 1] >= dea.iloc[i - 1]
+    if death:
+        return "sell", f"MACD死叉(DIFF={diff.iloc[i]:.2f}下穿DEA={dea.iloc[i]:.2f}),趋势转折止损"
+    if price < ma_v:
+        return "sell", f"价{price:.2f}跌破MA{ma_period}({ma_v:.2f}),破位止损"
+    if price > ma_v and diff.iloc[i] > dea.iloc[i]:
+        return "buy", f"价{price:.2f}>MA{ma_period}({ma_v:.2f})+MACD多头,趋势完好"
+    return "hold", f"价{price:.2f} vs MA{ma_period}({ma_v:.2f}),MACD未确认方向"
+
+
+# ---------------- 漫画书 量能/实战战法 ----------------
+
+
+def strategy_high_volume(ctx, params):
+    """高量柱战法(漫画书):成交量突破 N 日最高量 + 价突破,放量启动信号。
+
+    买入条件:
+      - 当日量 > 近 N 日最高量(高量柱)
+      - 当日 close > 近 N 日最高 close(突破前高)
+    卖出条件:
+      - 高量柱 + close < 近 N 日最低 close(放量破位)
+    """
+    n = int(params.get("n", 20))
+    i = ctx["i"]
+    df = ctx["df"]
+    if i < n:
+        return "hold", "数据不足"
+    vol_max = df["volume"].iloc[i - n:i].max()
+    close_max = ctx["close"].iloc[i - n:i].max()
+    close_min = ctx["close"].iloc[i - n:i].min()
+    v = df["volume"].iloc[i]
+    c = ctx["close"].iloc[i]
+    if v > vol_max and c > close_max:
+        return "buy", f"高量柱(量{v/1e4:.0f}万>{n}日最高{vol_max/1e4:.0f}万)+突破前高{close_max:.2f},放量启动"
+    if v > vol_max and c < close_min:
+        return "sell", f"高量柱(量{v/1e4:.0f}万>{n}日最高{vol_max/1e4:.0f}万)+跌破前低{close_min:.2f},放量破位"
+    return "hold", f"量{v/1e4:.0f}万/{n}日最高{vol_max/1e4:.0f}万,价{c:.2f}/{close_min:.2f}~{close_max:.2f}"
+
+
+def strategy_demon_stock(ctx, params):
+    """看妖股战法(漫画书):连续大涨识别妖股,启动期买入,过热期卖出。
+
+    规则:
+      - 近 consec 日(默认3)每日涨幅均 ≥ consec_pct(默认5%) → buy(启动期强势)
+      - 近 hot 日(默认5)累计涨幅 ≥ hot_pct(默认30%) → sell(过热风险)
+    """
+    consec = int(params.get("consec", 3))
+    consec_pct = float(params.get("consec_pct", 5))
+    hot = int(params.get("hot", 5))
+    hot_pct = float(params.get("hot_pct", 30))
+    i = ctx["i"]
+    close = ctx["close"]
+    if i < max(consec, hot):
+        return "hold", "数据不足"
+    daily_ret = close.pct_change() * 100
+    consec_strong = all(daily_ret.iloc[i - k] >= consec_pct for k in range(consec))
+    if consec_strong:
+        rets = [f"+{daily_ret.iloc[i-k]:.1f}%" for k in range(consec)]
+        return "buy", f"近{consec}日连续大涨({'/'.join(rets[::-1])}),妖股启动期"
+    ret_hot = (close.iloc[i] - close.iloc[i - hot]) / close.iloc[i - hot] * 100
+    if ret_hot >= hot_pct:
+        return "sell", f"近{hot}日累计涨{ret_hot:.1f}%≥{hot_pct}%,妖股过热,获利盘出逃风险"
+    return "hold", f"近{hot}日{ret_hot:+.1f}%,无妖股特征"
+
+
+def strategy_dragon_pullback(ctx, params):
+    """龙回头战法(漫画书):前期涨停后回调到均线支撑 + 放量反弹二次启动。
+
+    买入条件(全部满足):
+      - 近 lookback 日(默认30)内出现过涨停(涨幅 ≥ zt_pct)
+      - 当前回调到 MA10 附近(close 在 MA10 ± band% 内)
+      - 当日放量反弹(量比 ≥ vol_ratio)
+    """
+    lookback = int(params.get("lookback", 30))
+    zt_pct = float(params.get("zt_pct", 9.6))
+    band = float(params.get("band", 3))
+    vol_ratio_t = float(params.get("vol_ratio", 1.5))
+    i = ctx["i"]
+    df = ctx["df"]
+    close = ctx["close"]
+    if i < max(lookback, 60):
+        return "hold", "数据不足"
+    daily_ret = close.pct_change() * 100
+    has_zt = any(daily_ret.iloc[i - k] >= zt_pct for k in range(1, lookback + 1))
+    if not has_zt:
+        return "hold", f"近{lookback}日无涨停,非龙回头"
+    ma10 = ctx["ma10"].iloc[i]
+    if pd.isna(ma10):
+        return "hold", "MA10数据不足"
+    price = ctx["price"]
+    near_ma = abs(price - ma10) / ma10 * 100 <= band
+    if not near_ma:
+        return "hold", f"价{price:.2f}距MA10({ma10:.2f})超±{band}%,未回调到位"
+    avg_vol = df["volume"].iloc[i - 20:i].mean()
+    v_ratio = df["volume"].iloc[i] / avg_vol if avg_vol > 0 else 0
+    if v_ratio >= vol_ratio_t and daily_ret.iloc[i] > 0:
+        return "buy", f"前期涨停+回调到MA10({ma10:.2f},±{band}%)+放量反弹(量比{v_ratio:.1f}),龙回头买点"
+    return "hold", f"已回调到MA10({ma10:.2f})但量比{v_ratio:.1f}(需≥{vol_ratio_t})或未反弹,等待确认"
+
+
+def strategy_support_resistance(ctx, params):
+    """压力支撑法(漫画书):突破近 N 日高点/跌破低点 + 放量确认。
+
+    规则:
+      - close > 近 N 日最高 + 量比 ≥ vol_ratio → buy(突破压力)
+      - close < 近 N 日最低 + 量比 ≥ vol_ratio → sell(跌破支撑)
+    """
+    n = int(params.get("n", 20))
+    vol_ratio_t = float(params.get("vol_ratio", 1.5))
+    i = ctx["i"]
+    df = ctx["df"]
+    close = ctx["close"]
+    if i < n:
+        return "hold", "数据不足"
+    hi = close.iloc[i - n:i].max()
+    lo = close.iloc[i - n:i].min()
+    price = ctx["price"]
+    avg_vol = df["volume"].iloc[i - n:i].mean()
+    v_ratio = df["volume"].iloc[i] / avg_vol if avg_vol > 0 else 1
+    if price > hi and v_ratio >= vol_ratio_t:
+        return "buy", f"突破{n}日压力{hi:.2f}+放量(量比{v_ratio:.1f}),看涨"
+    if price < lo and v_ratio >= vol_ratio_t:
+        return "sell", f"跌破{n}日支撑{lo:.2f}+放量(量比{v_ratio:.1f}),看跌"
+    return "hold", f"价{price:.2f}在支撑{lo:.2f}~压力{hi:.2f}区间内,量比{v_ratio:.1f}"
+
+
+def strategy_range_trade(ctx, params):
+    """区间交易法/地摊法(漫画书):在 N 日高低点区间内低买高卖。
+
+    规则:
+      - 价格 ≤ 支撑位(lo + (hi-lo)*low_pct) → buy
+      - 价格 ≥ 压力位(hi - (hi-lo)*high_pct) → sell
+    """
+    n = int(params.get("n", 20))
+    low_pct = float(params.get("low_pct", 0.2))
+    high_pct = float(params.get("high_pct", 0.2))
+    i = ctx["i"]
+    close = ctx["close"]
+    if i < n:
+        return "hold", "数据不足"
+    hi = close.iloc[i - n:i].max()
+    lo = close.iloc[i - n:i].min()
+    span = hi - lo
+    if span <= 0:
+        return "hold", "区间过窄,无法交易"
+    support = lo + span * low_pct
+    resistance = hi - span * high_pct
+    price = ctx["price"]
+    if price <= support:
+        return "buy", f"价{price:.2f}≤支撑{support:.2f}(区间下{low_pct*100:.0f}%),地摊法低买"
+    if price >= resistance:
+        return "sell", f"价{price:.2f}≥压力{resistance:.2f}(区间上{high_pct*100:.0f}%),地摊法高卖"
+    return "hold", f"价{price:.2f}在支撑{support:.2f}~压力{resistance:.2f}区间中段"
+
+
+# ---------------- 操练大全15章 抄底策略 ----------------
+
+
+def strategy_bottom_ma(ctx, params):
+    """均线识底抄底(操练大全15章):均线多头排列确认底部。
+
+    买入条件:
+      - MA5 上穿 MA10(短期转强)
+      - MA10 > MA20(中期支撑)
+      - MA20 斜率向上(长期趋势)
+    """
+    i = ctx["i"]
+    if i < 65:
+        return "hold", "数据不足"
+    ma5, ma10, ma20, ma60 = ctx["ma5"], ctx["ma10"], ctx["ma20"], ctx["ma60"]
+    m5, m10, m20, m60 = ma5.iloc[i], ma10.iloc[i], ma20.iloc[i], ma60.iloc[i]
+    if any(pd.isna(x) for x in (m5, m10, m20, m60)):
+        return "hold", "均线数据不足"
+    golden = m5 > m10 and ma5.iloc[i - 1] <= ma10.iloc[i - 1]
+    ma20_slope = ma20.iloc[i - 5:i].mean() > ma20.iloc[i - 10:i].mean()
+    if golden and m10 > m20 and ma20_slope:
+        return "buy", f"MA5({m5:.2f})上穿MA10({m10:.2f})+MA10>MA20({m20:.2f})+MA20斜率向上,均线确认底"
+    if m10 > m20 and ma20_slope and m5 > m10:
+        return "buy", "均线多头排列(MA5>MA10>MA20)+MA20向上,底部形态"
+    return "hold", f"MA5={m5:.2f}/MA10={m10:.2f}/MA20={m20:.2f},均线未确认底"
+
+
+# ---------------- 操练大全16章 逃顶策略(周/月线) ----------------
+
+
+def _resample_period(df, n):
+    """从日 K 合成近 n 个交易日的周/月 K 线。"""
+    recent = df.iloc[-n:]
+    return {
+        "open": recent["open"].iloc[0],
+        "close": recent["close"].iloc[-1],
+        "high": recent["high"].max(),
+        "low": recent["low"].min(),
+        "volume": recent["volume"].sum(),
+    }
+
+
+def strategy_top_weekly(ctx, params):
+    """周线见顶(操练大全16章):周巨阳线 + 长上影见顶信号。
+
+    卖出条件(同时满足):
+      - 近 5 日(模拟一周)累计涨幅 ≥ rise_pct(默认 15%)
+      - 上影线长度 > 实体长度(高位遇阻)
+    """
+    rise_pct = float(params.get("rise_pct", 15))
+    i = ctx["i"]
+    df = ctx["df"]
+    if i < 5:
+        return "hold", "数据不足"
+    wk = _resample_period(df, 5)
+    ret = (wk["close"] - wk["open"]) / wk["open"] * 100
+    upper_shadow = wk["high"] - max(wk["close"], wk["open"])
+    body = abs(wk["close"] - wk["open"])
+    if ret >= rise_pct and upper_shadow > body and body > 0:
+        return "sell", f"周涨{ret:.1f}%≥{rise_pct}%+长上影(上影{upper_shadow:.2f}>实体{body:.2f}),周线见顶"
+    if ret >= rise_pct:
+        return "sell", f"周涨{ret:.1f}%≥{rise_pct}%,周巨阳线警惕见顶"
+    return "hold", f"本周涨{ret:+.1f}%,无周线见顶信号"
+
+
+def strategy_top_monthly(ctx, params):
+    """月线见顶(操练大全16章):月巨阳线 + 长上影见顶信号。
+
+    卖出条件(同时满足):
+      - 近 22 日(模拟一月)累计涨幅 ≥ rise_pct(默认 25%)
+      - 上影线长度 > 实体长度
+    """
+    rise_pct = float(params.get("rise_pct", 25))
+    i = ctx["i"]
+    df = ctx["df"]
+    if i < 22:
+        return "hold", "数据不足"
+    mo = _resample_period(df, 22)
+    ret = (mo["close"] - mo["open"]) / mo["open"] * 100
+    upper_shadow = mo["high"] - max(mo["close"], mo["open"])
+    body = abs(mo["close"] - mo["open"])
+    if ret >= rise_pct and upper_shadow > body and body > 0:
+        return "sell", f"月涨{ret:.1f}%≥{rise_pct}%+长上影(上影{upper_shadow:.2f}>实体{body:.2f}),月线见顶"
+    if ret >= rise_pct:
+        return "sell", f"月涨{ret:.1f}%≥{rise_pct}%,月巨阳线警惕见顶"
+    return "hold", f"本月涨{ret:+.1f}%,无月线见顶信号"
+
+
+# ---------------- 操练大全17章 跟庄炒股 ----------------
+
+
+def _percentile_pos(close, i, n, pct):
+    """当前价在近 n 日价格分位(0~1,0=最低,1=最高)。"""
+    if i < n:
+        return 0.5
+    window = close.iloc[i - n:i]
+    lo, hi = window.min(), window.max()
+    if hi == lo:
+        return 0.5
+    return (close.iloc[i] - lo) / (hi - lo)
+
+
+def strategy_zhuang_test(ctx, params):
+    """庄家试盘识别(操练大全17章):长上影 + 缩量 + 低位,庄家试探上方压力。
+
+    识别条件(同时满足):
+      - 上影线 > 实体 × shadow_ratio(默认2)
+      - 当日量 < 5 日均量 × shrink(默认0.7)
+      - 当前价在近 60 日 low_pct(默认30%)分位以下
+    """
+    shadow_ratio = float(params.get("shadow_ratio", 2))
+    shrink = float(params.get("shrink", 0.7))
+    low_pct = float(params.get("low_pct", 0.3))
+    n = int(params.get("n", 60))
+    i = ctx["i"]
+    df = ctx["df"]
+    close = ctx["close"]
+    if i < max(n, 5):
+        return "hold", "数据不足"
+    o, c, h, _ = df["open"].iloc[i], df["close"].iloc[i], df["high"].iloc[i], df["low"].iloc[i]
+    upper_shadow = h - max(o, c)
+    body = abs(c - o)
+    if body <= 0:
+        return "hold", "十字星,无实体"
+    avg_vol = df["volume"].iloc[i - 5:i].mean()
+    v_ratio = df["volume"].iloc[i] / avg_vol if avg_vol > 0 else 1
+    pos = _percentile_pos(close, i, n, low_pct)
+    if upper_shadow > body * shadow_ratio and v_ratio < shrink and pos <= low_pct:
+        return "hold", f"试盘:上影{upper_shadow:.2f}>实体{body:.2f}×{shadow_ratio}+缩量(量比{v_ratio:.1f})+低位(分位{pos*100:.0f}%),庄家试探"
+    return "hold", "无试盘特征"
+
+
+def strategy_zhuang_build(ctx, params):
+    """庄家建仓识别(操练大全17章):低位 + 放量 + 横盘震荡吸筹。
+
+    买入条件(同时满足):
+      - 当前价在近 60 日 low_pct 分位以下(低位)
+      - 近 5 日均量 > 近 20 日均量 × vol_ratio(放量)
+      - 近 20 日振幅 < amplitude(默认 10%,横盘)
+    """
+    low_pct = float(params.get("low_pct", 0.3))
+    vol_ratio_t = float(params.get("vol_ratio", 1.5))
+    amplitude = float(params.get("amplitude", 10))
+    n = int(params.get("n", 60))
+    i = ctx["i"]
+    df = ctx["df"]
+    close = ctx["close"]
+    if i < max(n, 20):
+        return "hold", "数据不足"
+    pos = _percentile_pos(close, i, n, low_pct)
+    recent5_vol = df["volume"].iloc[i - 5:i].mean()
+    recent20_vol = df["volume"].iloc[i - 20:i].mean()
+    v_ratio = recent5_vol / recent20_vol if recent20_vol > 0 else 1
+    window = close.iloc[i - 20:i]
+    amp = (window.max() - window.min()) / window.mean() * 100
+    if pos <= low_pct and v_ratio >= vol_ratio_t and amp < amplitude:
+        return "buy", f"建仓:低位(分位{pos*100:.0f}%)+放量(近5/20量比{v_ratio:.1f})+横盘(振幅{amp:.1f}%),庄家吸筹"
+    return "hold", f"分位{pos*100:.0f}%/量比{v_ratio:.1f}/振幅{amp:.1f}%,无建仓特征"
+
+
+def strategy_zhuang_pull(ctx, params):
+    """庄家拉高识别(操练大全17章):放量突破 + 大阳线,庄家拉升。
+
+    买入条件(同时满足):
+      - 当日量 > 20 日均量 × vol_ratio(默认 2)
+      - 当日涨幅 ≥ rise_pct(默认 5%)
+      - close > 近 20 日最高(突破)
+    """
+    vol_ratio_t = float(params.get("vol_ratio", 2))
+    rise_pct = float(params.get("rise_pct", 5))
+    n = int(params.get("n", 20))
+    i = ctx["i"]
+    df = ctx["df"]
+    close = ctx["close"]
+    if i < n:
+        return "hold", "数据不足"
+    avg_vol = df["volume"].iloc[i - n:i].mean()
+    v_ratio = df["volume"].iloc[i] / avg_vol if avg_vol > 0 else 0
+    daily_ret = (close.iloc[i] - close.iloc[i - 1]) / close.iloc[i - 1] * 100
+    hi = close.iloc[i - n:i].max()
+    if v_ratio >= vol_ratio_t and daily_ret >= rise_pct and close.iloc[i] > hi:
+        return "buy", f"拉高:放量(量比{v_ratio:.1f})+涨{daily_ret:.1f}%+突破{n}日高{hi:.2f},庄家拉升"
+    return "hold", f"量比{v_ratio:.1f}/涨{daily_ret:.1f}%/前高{hi:.2f},无拉高特征"
+
+
+def strategy_zhuang_ship(ctx, params):
+    """庄家出货识别(操练大全17章):高位 + 放量 + 滞涨。
+
+    卖出条件(同时满足):
+      - 当前价在近 60 日 high_pct(默认70%)分位以上(高位)
+      - 近 5 日均量 > 近 20 日均量 × vol_ratio(放量)
+      - 近 5 日累计涨幅 < stale_pct(默认 2%,滞涨)
+    """
+    high_pct = float(params.get("high_pct", 0.7))
+    vol_ratio_t = float(params.get("vol_ratio", 1.5))
+    stale_pct = float(params.get("stale_pct", 2))
+    n = int(params.get("n", 60))
+    i = ctx["i"]
+    df = ctx["df"]
+    close = ctx["close"]
+    if i < max(n, 20):
+        return "hold", "数据不足"
+    pos = _percentile_pos(close, i, n, high_pct)
+    recent5_vol = df["volume"].iloc[i - 5:i].mean()
+    recent20_vol = df["volume"].iloc[i - 20:i].mean()
+    v_ratio = recent5_vol / recent20_vol if recent20_vol > 0 else 1
+    recent5_ret = (close.iloc[i] - close.iloc[i - 5]) / close.iloc[i - 5] * 100
+    if pos >= high_pct and v_ratio >= vol_ratio_t and recent5_ret < stale_pct:
+        return "sell", f"出货:高位(分位{pos*100:.0f}%)+放量(量比{v_ratio:.1f})+滞涨(5日{recent5_ret:+.1f}%),庄家出货"
+    return "hold", f"分位{pos*100:.0f}%/量比{v_ratio:.1f}/5日{recent5_ret:+.1f}%,无出货特征"
+
+
+def strategy_zhuang_wash(ctx, params):
+    """庄家洗盘识别(操练大全17章):缩量回调 + 不破 MA20 + 前期上涨。
+
+    识别条件(同时满足):
+      - 近 20 日累计涨幅 ≥ rise_pct(默认 10%,前期上涨)
+      - 近 5 日缩量(量比 < shrink,默认 0.8)+ 跌幅在 pull_range(默认 -3%~-8%)
+      - 当前价 > MA20(不破位)
+    """
+    rise_pct = float(params.get("rise_pct", 10))
+    shrink = float(params.get("shrink", 0.8))
+    pull_min = float(params.get("pull_min", -8))
+    pull_max = float(params.get("pull_max", -3))
+    i = ctx["i"]
+    df = ctx["df"]
+    close = ctx["close"]
+    if i < 20:
+        return "hold", "数据不足"
+    recent20_ret = (close.iloc[i] - close.iloc[i - 20]) / close.iloc[i - 20] * 100
+    recent5_ret = (close.iloc[i] - close.iloc[i - 5]) / close.iloc[i - 5] * 100
+    avg_vol = df["volume"].iloc[i - 20:i].mean()
+    v_ratio = df["volume"].iloc[i] / avg_vol if avg_vol > 0 else 1
+    ma20 = ctx["ma20"].iloc[i]
+    if pd.isna(ma20):
+        return "hold", "MA20数据不足"
+    if recent20_ret >= rise_pct and v_ratio < shrink and pull_min <= recent5_ret <= pull_max and close.iloc[i] > ma20:
+        return "hold", f"洗盘:前期涨{recent20_ret:.1f}%+缩量回调(5日{recent5_ret:+.1f}%/量比{v_ratio:.1f})+不破MA20({ma20:.2f}),庄家洗盘"
+    return "hold", f"20日涨{recent20_ret:.1f}%/5日{recent5_ret:+.1f}%/量比{v_ratio:.1f},无洗盘特征"
+
+
+# ---------------- 操练大全20章 涨停板策略(细分) ----------------
+
+
+def strategy_zt_type(ctx, params):
+    """涨停板类型分类(操练大全20章):一字板/T字板/拉高板,根据强度给信号。
+
+    规则(当日涨幅 ≥ zt_pct 默认 9.6%):
+      - 一字板:open≈close≈high≈low(全天封板) → buy(最强势)
+      - T 字板:open≈high≈close 但 low 明显低(开板后回封) → buy(强势)
+      - 拉高板:open 未涨停,close 涨停(盘中拉至涨停) → hold(需次日确认)
+    """
+    zt_pct = float(params.get("zt_pct", 9.6))
+    tolerance = float(params.get("tolerance", 0.5))
+    i = ctx["i"]
+    df = ctx["df"]
+    if i < 1:
+        return "hold", "数据不足"
+    o, c, h, low = df["open"].iloc[i], df["close"].iloc[i], df["high"].iloc[i], df["low"].iloc[i]
+    prev_c = df["close"].iloc[i - 1]
+    pct = (c - prev_c) / prev_c * 100
+    if pct < zt_pct:
+        return "hold", f"未涨停(涨{pct:.1f}%<{zt_pct}%)"
+    zt_price = prev_c * (1 + zt_pct / 100)
+
+    def _near(a, b, tol=tolerance):
+        return abs(a - b) / b * 100 < tol
+
+    if _near(o, zt_price) and _near(c, zt_price) and _near(h, zt_price) and _near(low, zt_price):
+        return "buy", f"一字板(开/收/高/低≈涨停价{zt_price:.2f}),最强势"
+    if _near(o, zt_price) and _near(c, zt_price) and not _near(low, zt_price):
+        return "buy", f"T字板(开/收涨停但 low={low:.2f} 曾开板后回封),强势"
+    return "hold", f"拉高板(开{o:.2f}未涨停+收{c:.2f}涨停),需次日确认"
+
+
+def strategy_zt_unsealed(ctx, params):
+    """涨停封不牢(操练大全20章):涨停但盘中开板,封板力度弱。
+
+    卖出/观望条件:
+      - 当日涨幅 ≥ zt_pct(默认 9.6%,涨停)
+      - low < close × (1 - break_pct)(默认 1%,盘中开板)
+      - 量比 ≥ vol_ratio(默认 2,放量)
+    """
+    zt_pct = float(params.get("zt_pct", 9.6))
+    break_pct = float(params.get("break_pct", 1))
+    vol_ratio_t = float(params.get("vol_ratio", 2))
+    i = ctx["i"]
+    df = ctx["df"]
+    if i < 20:
+        return "hold", "数据不足"
+    c, low = df["close"].iloc[i], df["low"].iloc[i]
+    prev_c = df["close"].iloc[i - 1]
+    pct = (c - prev_c) / prev_c * 100
+    if pct < zt_pct:
+        return "hold", f"未涨停(涨{pct:.1f}%)"
+    avg_vol = df["volume"].iloc[i - 20:i].mean()
+    v_ratio = df["volume"].iloc[i] / avg_vol if avg_vol > 0 else 0
+    opened = low < c * (1 - break_pct / 100)
+    if opened and v_ratio >= vol_ratio_t:
+        return "sell", f"涨停封不牢(涨停{pct:.1f}%+low{low:.2f}<收{c:.2f}×(1-{break_pct}%)+放量量比{v_ratio:.1f}),警惕开板"
+    if opened:
+        return "hold", f"涨停但盘中开板(low{low:.2f}<收{c:.2f}),量比{v_ratio:.1f}未放量,观望"
+    return "hold", f"涨停封板稳(涨{pct:.1f}%+无开板),量比{v_ratio:.1f}"
+
+
+def strategy_zt_pull(ctx, params):
+    """拉高型涨停(操练大全20章):接近涨停但未封板+放量+大阳。
+
+    规则(已融入 zt 主策略,此为细分):
+      - 当日涨幅在 [pull_min, zt_pct)(默认 5~9.6%,接近涨停但未封)
+      - 量比 ≥ vol_ratio(默认 2,放量)
+      - 实体占比 ≥ body_ratio(默认 70%,大阳线)
+    """
+    zt_pct = float(params.get("zt_pct", 9.6))
+    pull_min = float(params.get("pull_min", 5))
+    vol_ratio_t = float(params.get("vol_ratio", 2))
+    body_ratio_t = float(params.get("body_ratio", 70))
+    i = ctx["i"]
+    df = ctx["df"]
+    if i < 20:
+        return "hold", "数据不足"
+    o, c, h, low = df["open"].iloc[i], df["close"].iloc[i], df["high"].iloc[i], df["low"].iloc[i]
+    prev_c = df["close"].iloc[i - 1]
+    pct = (c - prev_c) / prev_c * 100
+    avg_vol = df["volume"].iloc[i - 20:i].mean()
+    v_ratio = df["volume"].iloc[i] / avg_vol if avg_vol > 0 else 0
+    body = abs(c - o)
+    total = h - low
+    body_pct = body / total * 100 if total > 0 else 0
+    if pull_min <= pct < zt_pct and v_ratio >= vol_ratio_t and body_pct >= body_ratio_t:
+        return "hold", f"拉高型涨停:涨{pct:.1f}%({pull_min}~{zt_pct}未封)+量比{v_ratio:.1f}+实体{body_pct:.0f}%,观望是否封板"
+    return "hold", f"涨{pct:.1f}%/量比{v_ratio:.1f}/实体{body_pct:.0f}%,非拉高型"
+
+
+# ---------------- 操练大全14章 选股策略(基本面) ----------------
+
+
+def _fetch_finance_safe(code):
+    """安全获取财务数据,失败返回 None。"""
+    try:
+        import stock_finance as sf
+
+        return sf.fetch_finance(code)
+    except Exception:
+        return None
+
+
+def strategy_pe_select(ctx, params):
+    """市盈率选股(操练大全14章):基于 PE 估值筛选。
+
+    规则:
+      - PE < low_pe(默认15) → buy(低估值)
+      - PE > high_pe(默认50) 或 PE<0(亏损) → sell(高估或亏损)
+      - 否则 hold
+      - 数据不可得 → hold(数据不足)
+    """
+    low_pe = float(params.get("low_pe", 15))
+    high_pe = float(params.get("high_pe", 50))
+    code = ctx.get("code", "")
+    if not code:
+        return "hold", "无股票代码"
+    fin = _fetch_finance_safe(code)
+    if not fin:
+        return "hold", "财务数据不可得"
+    pe = fin.get("pe_ttm")
+    if pe is None or pe == "-" or pe == "":
+        return "hold", "PE 数据缺失"
+    try:
+        pe = float(pe)
+    except (TypeError, ValueError):
+        return "hold", "PE 数据无效"
+    if pe < 0:
+        return "sell", f"PE={pe:.1f}<0 亏损,回避"
+    if pe < low_pe:
+        return "buy", f"PE={pe:.1f}<{low_pe} 低估值"
+    if pe > high_pe:
+        return "sell", f"PE={pe:.1f}>{high_pe} 高估值"
+    return "hold", f"PE={pe:.1f} 估值合理区间({low_pe}~{high_pe})"
+
+
+def strategy_roe_pe(ctx, params):
+    """ROE+PE 复合选股(漫画书 roa_pe_筹码 的可实现部分):优质 + 低估。
+
+    买入条件(同时满足):
+      - ROE ≥ roe_min(默认15%)
+      - PE < pe_max(默认25)
+    卖出条件:
+      - ROE < roe_bad(默认5%) + PE > pe_high(默认50) → sell(差高估)
+    """
+    roe_min = float(params.get("roe_min", 15))
+    pe_max = float(params.get("pe_max", 25))
+    roe_bad = float(params.get("roe_bad", 5))
+    pe_high = float(params.get("pe_high", 50))
+    code = ctx.get("code", "")
+    if not code:
+        return "hold", "无股票代码"
+    fin = _fetch_finance_safe(code)
+    if not fin:
+        return "hold", "财务数据不可得"
+    pe = fin.get("pe_ttm")
+    roe = fin.get("roe")
+    try:
+        pe = float(pe) if pe not in (None, "-", "") else None
+    except (TypeError, ValueError):
+        pe = None
+    try:
+        roe = float(roe) if roe not in (None, "-", "") else None
+    except (TypeError, ValueError):
+        roe = None
+    if pe is None or roe is None:
+        return "hold", f"数据缺失(PE={pe},ROE={roe})"
+    if roe >= roe_min and pe > 0 and pe < pe_max:
+        return "buy", f"ROE={roe:.1f}%≥{roe_min}%+PE={pe:.1f}<{pe_max},优质低估"
+    if roe < roe_bad and pe > pe_high:
+        return "sell", f"ROE={roe:.1f}%<{roe_bad}%+PE={pe:.1f}>{pe_high},差高估"
+    return "hold", f"ROE={roe:.1f}%/PE={pe:.1f},未达优质低估阈值"
+
+
 # ---------------- 自定义可视化规则策略 ----------------
 
 CONDITION_METRIC_META = {
@@ -1507,6 +2215,7 @@ def analyze(code: str, use_ai: bool = True) -> dict:
         "price": price,
         "df": df,
         "close": close,
+        "code": code,
         "realtime": realtime,
         "indicators": indicators,
         "macd_diff": macd_diff,
@@ -1564,6 +2273,35 @@ def analyze(code: str, use_ai: bool = True) -> dict:
         ("bottom", "抄底策略", strategy_bottom),
         ("top", "逃顶策略", strategy_top),
         ("zt", "涨停板策略", strategy_zt),
+        # 操练大全12章 投资法则
+        ("trend_follow", "顺势而为", strategy_trend_follow),
+        ("pyramid", "金字塔买卖", strategy_pyramid),
+        ("stop_profit", "暴利收手", strategy_stop_profit),
+        ("plan_trade", "计划交易", strategy_plan_trade),
+        # 漫画书 量能/实战战法
+        ("high_volume", "高量柱", strategy_high_volume),
+        ("demon_stock", "看妖股", strategy_demon_stock),
+        ("dragon_pullback", "龙回头", strategy_dragon_pullback),
+        ("support_resistance", "压力支撑", strategy_support_resistance),
+        ("range_trade", "区间交易", strategy_range_trade),
+        # 操练大全15章 抄底
+        ("bottom_ma", "均线识底", strategy_bottom_ma),
+        # 操练大全16章 逃顶(周/月线)
+        ("top_weekly", "周线见顶", strategy_top_weekly),
+        ("top_monthly", "月线见顶", strategy_top_monthly),
+        # 操练大全17章 跟庄
+        ("zhuang_test", "庄家试盘", strategy_zhuang_test),
+        ("zhuang_build", "庄家建仓", strategy_zhuang_build),
+        ("zhuang_pull", "庄家拉高", strategy_zhuang_pull),
+        ("zhuang_ship", "庄家出货", strategy_zhuang_ship),
+        ("zhuang_wash", "庄家洗盘", strategy_zhuang_wash),
+        # 操练大全20章 涨停细分
+        ("zt_type", "涨停类型", strategy_zt_type),
+        ("zt_unsealed", "涨停封不牢", strategy_zt_unsealed),
+        ("zt_pull", "拉高型涨停", strategy_zt_pull),
+        # 操练大全14章 基本面
+        ("pe_select", "市盈率选股", strategy_pe_select),
+        ("roe_pe", "ROE+PE选股", strategy_roe_pe),
     ]
 
     strategies_cfg = get_strategies()

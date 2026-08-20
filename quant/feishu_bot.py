@@ -5,7 +5,7 @@
   LLM 整理结果 → 回复用户(可多轮调用)
 
 工具(由 LLM 自动选择调用):
-  analyze_stock(code)  个股技术面分析(23策略信号)
+  analyze_stock(code)  个股技术面分析(45策略信号)
   get_market_status()  今日市场概况
   get_yujie_picks()    今日玉姐精选 Top10
   get_portfolio()      当前模拟盘持仓
@@ -1290,7 +1290,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "list_strategies",
-            "description": "列出所有策略(23个内置+自定义),含开关状态、当前参数、回测超额收益。用户问'有哪些策略/策略状态/策略列表/哪些策略开了'时调用。",
+            "description": "列出所有策略(45个内置+自定义),含开关状态、当前参数、回测超额收益。用户问'有哪些策略/策略状态/策略列表/哪些策略开了'时调用。",
             "parameters": {"type": "object", "properties": {}}
         }
     },
@@ -1339,7 +1339,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "analyze_with_strategy",
-            "description": "用指定策略单独分析个股(只看该策略的信号,不跑全部23个)。用户问'看X的MACD/KDJ/BOLL信号'、'用某策略分析X'时调用。",
+            "description": "用指定策略单独分析个股(只看该策略的信号,不跑全部45个)。用户问'看X的MACD/KDJ/BOLL信号'、'用某策略分析X'时调用。",
             "parameters": {
                 "type": "object",
                 "properties": {

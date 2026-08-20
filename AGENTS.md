@@ -6,11 +6,11 @@
 
 A 股量化分析系统,集成飞书群聊 Bot(Function Calling ReAct Agent),覆盖:
 - 数据获取(腾讯/新浪接口,日 K 线 + 实时价)
-- 23 内置策略信号引擎(MACD/KDJ/BOLL/RSI/玉姐 10 条规则等)
+- 45 内置策略信号引擎(MACD/KDJ/BOLL/RSI/玉姐 10 条规则 + 操练大全12/14/15/16/17/20章 + 漫画书量能/实战战法等)
 - 玉姐精选全市场扫描(多因子评分排行)
 - 回测 + 参数网格寻优
 - 飞书 Bot Agent(19 个 skill,跨轮记忆,自选股,财务数据,板块分析,历史复盘)
-- 策略大全(4 来源 73 策略:漫画书 29 + 操练大全 32 + 玉姐 10 + AI 2)
+- 策略大全(4 来源 73 策略:漫画书 29 + 操练大全 32 + 玉姐 10 + AI 2,已实现 67 个)
 
 ## 目录结构
 
@@ -21,7 +21,7 @@ quant/
 ├── feishu.py              # 飞书 webhook 推送(日报/告警)
 ├── stock_names.py         # 股票名称解析(腾讯 smartbox + sqlite 缓存)
 ├── stock_finance.py       # 财务数据(东方财富双接口,PE/PB/ROE/市值/EPS,sqlite 缓存 1 天)
-├── strategy_engine.py     # 23 策略信号引擎
+├── strategy_engine.py     # 45 策略信号引擎(23 原有 + 22 新增:操练大全12/14/15/16/17/20章 + 漫画书量能/实战战法)
 ├── backtest_builtin.py    # 回测引擎(workers=1,非线程安全)
 ├── yujie_scan.py          # 玉姐精选评分(10 条规则)
 ├── daily_scan.py          # 每日 09:00 全市场扫描 + 飞书日报(systemd timer)
@@ -132,8 +132,21 @@ journalctl --user -u daily-scan -f
 
 ### 策略大全(strategy_library.json)
 - 4 来源: `book_cartoon`(漫画书 29) + `book_caolian`(操练大全 32) + `yujie_custom`(玉姐 10) + `ai_custom`(AI 2)
-- 每个策略有 `id` / `name` / `category` / `implemented`(是否在引擎里实现)
+- 73 策略中 67 已实现,6 保留未实现(打板/T+0/复盘法/policy_select/shareholder_select/bottom_time,需 Level-2/分钟/政策/股东人数/玄学数据)
+- 每个策略有 `id` / `name` / `category` / `implemented`(是否在引擎里实现) / `engine_id`(关联策略引擎中的实现 id)
+- 已融入其他策略的标 `implemented=True` + `engine_id` 指向其融入策略(如 bottom_kline → bottom)
 - `cross_ref` 跨来源查同一策略在哪些书里出现
+
+### 内置策略列表(strategy_engine.py,45 个)
+- 原有 23: macd/kdj/ma_stop/boll/dmi/psy/bias/sar/bbiboll/tower/ma_combo/two_line/life_line/three_third/sparrow/bounce/volume_div/resonance/dmi_psy/rsi/bottom/top/zt
+- 12章 投资法则(4): trend_follow(顺势)/pyramid(金字塔)/stop_profit(暴利收手)/plan_trade(计划交易)
+- 漫画书 量能/实战战法(5): high_volume(高量柱)/demon_stock(看妖股)/dragon_pullback(龙回头)/support_resistance(压力支撑)/range_trade(区间交易)
+- 15章 抄底(1): bottom_ma(均线识底)
+- 16章 逃顶(2): top_weekly(周线见顶)/top_monthly(月线见顶)
+- 17章 跟庄(5): zhuang_test(试盘)/zhuang_build(建仓)/zhuang_pull(拉高)/zhuang_ship(出货)/zhuang_wash(洗盘)
+- 20章 涨停细分(3): zt_type(类型)/zt_unsealed(封不牢)/zt_pull(拉高型)
+- 14章 基本面(2): pe_select(市盈率)/roe_pe(ROE+PE 复合)
+- 板块热点 hotspot_select 在 daily_scan.scan_hotspot_stocks 实现(市场层面,非单股策略)
 
 ### 股票名识别(stock_names.py)
 - 6 位代码直接返回

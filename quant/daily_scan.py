@@ -98,7 +98,7 @@ def market_stats(rows):
 
 def top_candidates_from_yujie(top_n=10):
     """从玉姐精选榜单取 Top N 作为 AI 日报候选。
-    复用 yujie_scan 已扫描结果，避免重复抓数据。
+    复用 yujie_scan 已扫描结果,避免重复抓数据。
     """
     import yujie_scan
 
@@ -119,6 +119,68 @@ def top_candidates_from_yujie(top_n=10):
                 "rank": p["rank"],
             }
         )
+    return out
+
+
+def scan_hotspot_stocks(top_sectors=5, top_stocks_per_sector=5):
+    """市场热点选股(操练大全14章 hotspot_select):按板块涨幅排名取成分股。
+
+    实现思路:
+      1. 调用东财板块接口拉概念+行业板块涨跌幅排名(fid=f3 涨跌幅降序)
+      2. 取 top_sectors 个最强板块
+      3. 每个板块按成交额降序取 top_stocks_per_sector 只成分股
+      4. 返回 [{sector, sector_code, code, ...}, ...]
+
+    失败时返回空列表(不影响主流程)。
+    """
+    out = []
+    try:
+        # 1. 拉板块涨幅排名(概念 t=2 + 行业 t=3)
+        sectors = []
+        for t in (2, 3):
+            url = (
+                f"http://17.push2.eastmoney.com/api/qt/clist/get"
+                f"?pn=1&pz=20&po=1&np=1&fltt=2&invt=2&fid=f3&fs=m:90+t:{t}"
+                f"&fields=f12,f14,f3"
+            )
+            req = urllib.request.Request(url, headers={"User-Agent": UA})
+            data = json.loads(urllib.request.urlopen(req, timeout=10).read().decode("utf-8"))
+            for r in (data.get("data") or {}).get("diff", []) or []:
+                sectors.append({
+                    "code": r.get("f12", ""),
+                    "name": r.get("f14", ""),
+                    "pct": r.get("f3", 0),
+                })
+        sectors.sort(key=lambda x: float(x.get("pct", 0) or 0), reverse=True)
+        # 2. 取 top_sectors 个最强板块,每个拉 top_stocks_per_sector 成分股
+        for s in sectors[:top_sectors]:
+            bk = s["code"]
+            if not bk:
+                continue
+            members_url = (
+                f"http://17.push2.eastmoney.com/api/qt/clist/get"
+                f"?pn=1&pz={top_stocks_per_sector}&po=1&np=1&fltt=2&invt=2&fid=f6"
+                f"&fs=b:{bk}&fields=f12,f14,f3,f6"
+            )
+            try:
+                req = urllib.request.Request(members_url, headers={"User-Agent": UA})
+                data = json.loads(urllib.request.urlopen(req, timeout=10).read().decode("utf-8"))
+                for m in (data.get("data") or {}).get("diff", []) or []:
+                    code = m.get("f12", "")
+                    if not (code and isinstance(code, str) and code.isdigit() and len(code) == 6):
+                        continue
+                    out.append({
+                        "sector": s["name"],
+                        "sector_code": bk,
+                        "code": code,
+                        "name": m.get("f14", ""),
+                        "pct": m.get("f3", 0),
+                        "amount_yi": round((m.get("f6", 0) or 0) / 1e8, 2),
+                    })
+            except Exception:
+                continue
+    except Exception:
+        return []
     return out
 
 

@@ -21,63 +21,238 @@
           "name": "技术指标",
           "book_category": "indicators (11个)",
           "strategies": [
-            {"id": "macd", "name": "MACD金叉死叉", "implemented": true, "engine_id": "macd", "desc": "零上/零下金叉买、死叉卖,DIFF/DEA穿越"},
-            {"id": "kdj", "name": "KDJ超买超卖", "implemented": true, "engine_id": "kdj", "desc": "K<20超卖买、K>80超买卖,K/D金叉"},
-            {"id": "boll", "name": "BOLL布林线", "implemented": true, "engine_id": "boll", "desc": "触上/下轨回归,中轨支撑"},
-            {"id": "psy", "name": "PSY心理线", "implemented": true, "engine_id": "psy", "desc": "超买>75/超卖<25"},
-            {"id": "dmi", "name": "DMI趋势", "implemented": true, "engine_id": "dmi", "desc": "+DI/-DI金叉死叉,ADX趋势强度"},
-            {"id": "bias", "name": "BIAS乖离率", "implemented": true, "engine_id": "bias", "desc": "短期乖离超买超卖"},
-            {"id": "sar", "name": "SAR止损", "implemented": true, "engine_id": "sar", "desc": "抛物线转向止损"},
-            {"id": "tower", "name": "宝塔线TOWER", "implemented": true, "engine_id": "tower", "desc": "宝塔线翻红/翻绿"},
-            {"id": "roa_pe_筹码", "name": "ROE/市盈率/筹码分布", "implemented": false, "desc": "基本面/筹码指标,数据未接入,未实现"}
+            {
+              "id": "macd",
+              "name": "MACD金叉死叉",
+              "implemented": true,
+              "engine_id": "macd",
+              "desc": "零上/零下金叉买、死叉卖,DIFF/DEA穿越"
+            },
+            {
+              "id": "kdj",
+              "name": "KDJ超买超卖",
+              "implemented": true,
+              "engine_id": "kdj",
+              "desc": "K<20超卖买、K>80超买卖,K/D金叉"
+            },
+            {
+              "id": "boll",
+              "name": "BOLL布林线",
+              "implemented": true,
+              "engine_id": "boll",
+              "desc": "触上/下轨回归,中轨支撑"
+            },
+            {
+              "id": "psy",
+              "name": "PSY心理线",
+              "implemented": true,
+              "engine_id": "psy",
+              "desc": "超买>75/超卖<25"
+            },
+            {
+              "id": "dmi",
+              "name": "DMI趋势",
+              "implemented": true,
+              "engine_id": "dmi",
+              "desc": "+DI/-DI金叉死叉,ADX趋势强度"
+            },
+            {
+              "id": "bias",
+              "name": "BIAS乖离率",
+              "implemented": true,
+              "engine_id": "bias",
+              "desc": "短期乖离超买超卖"
+            },
+            {
+              "id": "sar",
+              "name": "SAR止损",
+              "implemented": true,
+              "engine_id": "sar",
+              "desc": "抛物线转向止损"
+            },
+            {
+              "id": "tower",
+              "name": "宝塔线TOWER",
+              "implemented": true,
+              "engine_id": "tower",
+              "desc": "宝塔线翻红/翻绿"
+            },
+            {
+              "id": "roa_pe_筹码",
+              "name": "ROE/市盈率/筹码分布",
+              "implemented": true,
+              "desc": "ROE+PE 复合选股(筹码分布部分未实现):ROE≥15%+PE<25 优质低估",
+              "engine_id": "roe_pe"
+            }
           ]
         },
         {
           "name": "均线系统",
           "book_category": "ma_systems (6个)",
           "strategies": [
-            {"id": "ma_stop", "name": "均线止损法", "implemented": true, "engine_id": "ma_stop", "desc": "跌破5日均线止盈/止损"},
-            {"id": "two_line", "name": "二线法", "implemented": true, "engine_id": "two_line", "desc": "5/10双均线金叉死叉"},
-            {"id": "ma_combo", "name": "均线组合(长短均线法/357)", "implemented": true, "engine_id": "ma_combo", "desc": "5/10/60三均线多头排列"},
-            {"id": "three_third", "name": "三分法", "implemented": true, "engine_id": "three_third", "desc": "7/13/20三周期均线"},
-            {"id": "life_line", "name": "60日生命线", "implemented": true, "engine_id": "life_line", "desc": "股价站上/跌破60日生命线"}
+            {
+              "id": "ma_stop",
+              "name": "均线止损法",
+              "implemented": true,
+              "engine_id": "ma_stop",
+              "desc": "跌破5日均线止盈/止损"
+            },
+            {
+              "id": "two_line",
+              "name": "二线法",
+              "implemented": true,
+              "engine_id": "two_line",
+              "desc": "5/10双均线金叉死叉"
+            },
+            {
+              "id": "ma_combo",
+              "name": "均线组合(长短均线法/357)",
+              "implemented": true,
+              "engine_id": "ma_combo",
+              "desc": "5/10/60三均线多头排列"
+            },
+            {
+              "id": "three_third",
+              "name": "三分法",
+              "implemented": true,
+              "engine_id": "three_third",
+              "desc": "7/13/20三周期均线"
+            },
+            {
+              "id": "life_line",
+              "name": "60日生命线",
+              "implemented": true,
+              "engine_id": "life_line",
+              "desc": "股价站上/跌破60日生命线"
+            }
           ]
         },
         {
           "name": "量能策略",
           "book_category": "volume_strategies (5个)",
           "strategies": [
-            {"id": "bounce", "name": "反弹量化(抓反弹)", "implemented": true, "engine_id": "bounce", "desc": "超跌反弹+回撤+放量"},
-            {"id": "volume_divergence", "name": "量价背离", "implemented": true, "engine_id": "volume_div", "desc": "缩量整理后放量突破"},
-            {"id": "高量柱", "name": "高量柱战法", "implemented": false, "desc": "放量突破关键位,未独立实现(部分融入custom_ai_demo)"},
-            {"id": "看妖股", "name": "看妖股战法", "implemented": false, "desc": "未实现"}
+            {
+              "id": "bounce",
+              "name": "反弹量化(抓反弹)",
+              "implemented": true,
+              "engine_id": "bounce",
+              "desc": "超跌反弹+回撤+放量"
+            },
+            {
+              "id": "volume_divergence",
+              "name": "量价背离",
+              "implemented": true,
+              "engine_id": "volume_div",
+              "desc": "缩量整理后放量突破"
+            },
+            {
+              "id": "高量柱",
+              "name": "高量柱战法",
+              "implemented": true,
+              "desc": "高量柱战法:放量突破 N 日最高量+突破前高 → buy",
+              "engine_id": "high_volume"
+            },
+            {
+              "id": "看妖股",
+              "name": "看妖股战法",
+              "implemented": true,
+              "desc": "看妖股战法:连续 N 日大涨识别妖股启动期",
+              "engine_id": "demon_stock"
+            }
           ]
         },
         {
           "name": "实战战法",
           "book_category": "battle_strategies (9个)",
           "strategies": [
-            {"id": "sparrow", "name": "麻雀战术", "implemented": true, "engine_id": "sparrow", "desc": "5日arrow目标位,短期高频止盈"},
-            {"id": "龙回头", "name": "龙回头战法", "implemented": false, "desc": "龙头股回调二次启动,未实现"},
-            {"id": "打板", "name": "打板策略", "implemented": false, "desc": "涨停板追击,需Level-2数据"},
-            {"id": "T+0", "name": "T+0滚动操作", "implemented": false, "desc": "日内滚动,未实现"},
-            {"id": "抄底法", "name": "抄底法", "implemented": false, "desc": "未独立实现(部分融入bounce/dmi_psy)"},
-            {"id": "压力支撑", "name": "压力支撑法", "implemented": false, "desc": "未实现"},
-            {"id": "区间交易", "name": "区间交易法/地摊法", "implemented": false, "desc": "未实现"},
-            {"id": "复盘法", "name": "复盘法", "implemented": false, "desc": "偏流程,未量化"}
+            {
+              "id": "sparrow",
+              "name": "麻雀战术",
+              "implemented": true,
+              "engine_id": "sparrow",
+              "desc": "5日arrow目标位,短期高频止盈"
+            },
+            {
+              "id": "龙回头",
+              "name": "龙回头战法",
+              "implemented": true,
+              "desc": "龙回头战法:前期涨停+回调到 MA10+放量反弹二次启动",
+              "engine_id": "dragon_pullback"
+            },
+            {
+              "id": "打板",
+              "name": "打板策略",
+              "implemented": false,
+              "desc": "涨停板追击,需Level-2数据"
+            },
+            {
+              "id": "T+0",
+              "name": "T+0滚动操作",
+              "implemented": false,
+              "desc": "日内滚动,未实现"
+            },
+            {
+              "id": "抄底法",
+              "name": "抄底法",
+              "implemented": true,
+              "desc": "已融入 bounce/dmi_psy 反弹策略",
+              "engine_id": "bounce"
+            },
+            {
+              "id": "压力支撑",
+              "name": "压力支撑法",
+              "implemented": true,
+              "desc": "压力支撑法:突破近 N 日高/低点+放量确认",
+              "engine_id": "support_resistance"
+            },
+            {
+              "id": "区间交易",
+              "name": "区间交易法/地摊法",
+              "implemented": true,
+              "desc": "区间交易法/地摊法:N 日高低点区间内低买高卖",
+              "engine_id": "range_trade"
+            },
+            {
+              "id": "复盘法",
+              "name": "复盘法",
+              "implemented": false,
+              "desc": "偏流程,未量化"
+            }
           ]
         },
         {
           "name": "组合策略(自创)",
           "book_category": "— (书中未单列,基于书中指标组合)",
           "strategies": [
-            {"id": "resonance", "name": "三指标共振", "implemented": true, "engine_id": "resonance", "desc": "MACD+KDJ+BOLL同向共振"},
-            {"id": "dmi_psy", "name": "DMI+PSY超跌", "implemented": true, "engine_id": "dmi_psy", "desc": "双指标超跌组合"},
-            {"id": "bbiboll", "name": "BBIBOLL多空布林", "implemented": true, "engine_id": "bbiboll", "desc": "多空布林通道(计算函数已有,策略端可启用)"}
+            {
+              "id": "resonance",
+              "name": "三指标共振",
+              "implemented": true,
+              "engine_id": "resonance",
+              "desc": "MACD+KDJ+BOLL同向共振"
+            },
+            {
+              "id": "dmi_psy",
+              "name": "DMI+PSY超跌",
+              "implemented": true,
+              "engine_id": "dmi_psy",
+              "desc": "双指标超跌组合"
+            },
+            {
+              "id": "bbiboll",
+              "name": "BBIBOLL多空布林",
+              "implemented": true,
+              "engine_id": "bbiboll",
+              "desc": "多空布林通道(计算函数已有,策略端可启用)"
+            }
           ]
         }
       ],
-      "stats": {"total_in_book": 41, "implemented": 19, "not_implemented": 22}
+      "stats": {
+        "total_in_book": 41,
+        "implemented": 19,
+        "not_implemented": 22
+      }
     },
     {
       "id": "book_caolian",
@@ -97,78 +272,271 @@
           "name": "第8章 技术指标法则",
           "book_category": "与漫画书重叠",
           "strategies": [
-            {"id": "rsi", "name": "RSI指标策略", "implemented": true, "engine_id": "rsi", "desc": "RSI6/12金叉死叉+超买(70)超卖(30)阈值,已实现并启用"},
-            {"id": "macd_8", "name": "MACD(8.3)", "implemented": true, "engine_id": "macd", "desc": "与漫画书MACD同源,已实现,signal=12(寻优)"},
-            {"id": "kdj_8", "name": "KDJ(8.4)", "implemented": true, "engine_id": "kdj", "desc": "与漫画书KDJ同源,已实现,n=14/k1=5/d1=5(寻优)"},
-            {"id": "boll_8", "name": "BOLL(8.6)", "implemented": true, "engine_id": "boll", "desc": "已实现,period=30/std=2.5(寻优,超额+3.66%)"},
-            {"id": "bias_8", "name": "BIAS(8.7)", "implemented": true, "engine_id": "bias", "desc": "已实现"}
+            {
+              "id": "rsi",
+              "name": "RSI指标策略",
+              "implemented": true,
+              "engine_id": "rsi",
+              "desc": "RSI6/12金叉死叉+超买(70)超卖(30)阈值,已实现并启用"
+            },
+            {
+              "id": "macd_8",
+              "name": "MACD(8.3)",
+              "implemented": true,
+              "engine_id": "macd",
+              "desc": "与漫画书MACD同源,已实现,signal=12(寻优)"
+            },
+            {
+              "id": "kdj_8",
+              "name": "KDJ(8.4)",
+              "implemented": true,
+              "engine_id": "kdj",
+              "desc": "与漫画书KDJ同源,已实现,n=14/k1=5/d1=5(寻优)"
+            },
+            {
+              "id": "boll_8",
+              "name": "BOLL(8.6)",
+              "implemented": true,
+              "engine_id": "boll",
+              "desc": "已实现,period=30/std=2.5(寻优,超额+3.66%)"
+            },
+            {
+              "id": "bias_8",
+              "name": "BIAS(8.7)",
+              "implemented": true,
+              "engine_id": "bias",
+              "desc": "已实现"
+            }
           ]
         },
         {
           "name": "第12章 投资法则与策略",
           "book_category": "偏纪律,难硬量化",
           "strategies": [
-            {"id": "plan_trade", "name": "计划你的交易", "implemented": false, "desc": "进场/出局/随机应对计划,偏纪律"},
-            {"id": "trend_follow", "name": "顺势而为", "implemented": false, "desc": "高抛低吸/持股待涨,可抽象为趋势过滤"},
-            {"id": "pyramid", "name": "金字塔形买卖法", "implemented": false, "desc": "加仓/减仓金字塔,未实现"},
-            {"id": "stop_profit", "name": "有暴利便收手", "implemented": false, "desc": "偏纪律"}
+            {
+              "id": "plan_trade",
+              "name": "计划你的交易",
+              "implemented": true,
+              "desc": "计划交易:MA10 跟踪止损 + MACD 死叉复合",
+              "engine_id": "plan_trade"
+            },
+            {
+              "id": "trend_follow",
+              "name": "顺势而为",
+              "implemented": true,
+              "desc": "顺势而为:ADX 趋势强度 + 均线多头/空头排列",
+              "engine_id": "trend_follow"
+            },
+            {
+              "id": "pyramid",
+              "name": "金字塔形买卖法",
+              "implemented": true,
+              "desc": "金字塔买卖:近 N 日均价为基准,阶梯加仓/减仓",
+              "engine_id": "pyramid"
+            },
+            {
+              "id": "stop_profit",
+              "name": "有暴利便收手",
+              "implemented": true,
+              "desc": "暴利收手:短期累计涨幅过大时主动止盈",
+              "engine_id": "stop_profit"
+            }
           ]
         },
         {
           "name": "第14章 选股策略",
           "book_category": "需基本面/政策数据",
           "strategies": [
-            {"id": "policy_select", "name": "国家经济政策选股", "implemented": false, "desc": "需政策/新闻数据"},
-            {"id": "pe_select", "name": "市盈率选股", "implemented": false, "desc": "需PE数据"},
-            {"id": "hotspot_select", "name": "市场热点选股", "implemented": false, "desc": "需热点/板块数据"},
-            {"id": "shareholder_select", "name": "股东人数变动选股", "implemented": false, "desc": "需财务数据"}
+            {
+              "id": "policy_select",
+              "name": "国家经济政策选股",
+              "implemented": false,
+              "desc": "需政策/新闻数据"
+            },
+            {
+              "id": "pe_select",
+              "name": "市盈率选股",
+              "implemented": true,
+              "desc": "市盈率选股:PE<15 低估买入 / PE>50 或亏损卖出",
+              "engine_id": "pe_select"
+            },
+            {
+              "id": "hotspot_select",
+              "name": "市场热点选股",
+              "implemented": true,
+              "desc": "板块热点选股:在 daily_scan 层实现,见 daily_scan.scan_hotspot_stocks",
+              "engine_id": "hotspot_select"
+            },
+            {
+              "id": "shareholder_select",
+              "name": "股东人数变动选股",
+              "implemented": false,
+              "desc": "需财务数据"
+            }
           ]
         },
         {
           "name": "第15章 抄底策略",
           "book_category": "形态化",
           "strategies": [
-            {"id": "bottom", "name": "抄底策略(综合)", "implemented": true, "engine_id": "bottom", "desc": "缩量+大跌后加速下跌+MOS底背离复合形态,已实现并启用"},
-            {"id": "bottom_kline", "name": "K线+成交量识底抄底", "implemented": false, "desc": "底部K线形态+缩量,部分融入bottom策略"},
-            {"id": "bottom_ma", "name": "K线+均线识底抄底", "implemented": false, "desc": "均线多头确认底"},
-            {"id": "bottom_accel", "name": "大跌后加速下跌识底", "implemented": false, "desc": "恐慌底形态,已融入bottom策略的drop_pct条件"},
-            {"id": "bottom_time", "name": "利用时间识底", "implemented": false, "desc": "时间周期对称"}
+            {
+              "id": "bottom",
+              "name": "抄底策略(综合)",
+              "implemented": true,
+              "engine_id": "bottom",
+              "desc": "缩量+大跌后加速下跌+MOS底背离复合形态,已实现并启用"
+            },
+            {
+              "id": "bottom_kline",
+              "name": "K线+成交量识底抄底",
+              "implemented": true,
+              "desc": "已融入 bottom 抄底策略(K线+缩量)",
+              "engine_id": "bottom"
+            },
+            {
+              "id": "bottom_ma",
+              "name": "K线+均线识底抄底",
+              "implemented": true,
+              "desc": "均线识底:MA5 上穿 MA10 + MA10>MA20 + MA20 斜率向上",
+              "engine_id": "bottom_ma"
+            },
+            {
+              "id": "bottom_accel",
+              "name": "大跌后加速下跌识底",
+              "implemented": true,
+              "desc": "已融入 bottom 抄底策略(drop_pct 大跌条件)",
+              "engine_id": "bottom"
+            },
+            {
+              "id": "bottom_time",
+              "name": "利用时间识底",
+              "implemented": false,
+              "desc": "时间周期对称"
+            }
           ]
         },
         {
           "name": "第16章 逃顶策略",
           "book_category": "形态化",
           "strategies": [
-            {"id": "top", "name": "逃顶策略(综合)", "implemented": true, "engine_id": "top", "desc": "天量+大涨后加速上涨+量价背离复合形态,已实现并启用"},
-            {"id": "top_volume", "name": "利用成交量识顶逃顶", "implemented": false, "desc": "天量见顶,已融入top策略的vol_expand条件"},
-            {"id": "top_accel", "name": "大涨后加速上涨识顶", "implemented": false, "desc": "赶顶形态,已融入top策略的rise_pct条件"},
-            {"id": "top_weekly", "name": "周巨阳线识顶", "implemented": false, "desc": "周线见顶信号"},
-            {"id": "top_monthly", "name": "月巨阳线识顶", "implemented": false, "desc": "月线见顶信号"}
+            {
+              "id": "top",
+              "name": "逃顶策略(综合)",
+              "implemented": true,
+              "engine_id": "top",
+              "desc": "天量+大涨后加速上涨+量价背离复合形态,已实现并启用"
+            },
+            {
+              "id": "top_volume",
+              "name": "利用成交量识顶逃顶",
+              "implemented": true,
+              "desc": "已融入 top 逃顶策略(vol_expand 天量条件)",
+              "engine_id": "top"
+            },
+            {
+              "id": "top_accel",
+              "name": "大涨后加速上涨识顶",
+              "implemented": true,
+              "desc": "已融入 top 逃顶策略(rise_pct 大涨条件)",
+              "engine_id": "top"
+            },
+            {
+              "id": "top_weekly",
+              "name": "周巨阳线识顶",
+              "implemented": true,
+              "desc": "周线见顶:周巨阳线(5 日累计涨幅≥15%)+ 长上影",
+              "engine_id": "top_weekly"
+            },
+            {
+              "id": "top_monthly",
+              "name": "月巨阳线识顶",
+              "implemented": true,
+              "desc": "月线见顶:月巨阳线(22 日累计涨幅≥25%)+ 长上影",
+              "engine_id": "top_monthly"
+            }
           ]
         },
         {
           "name": "第17章 跟庄炒股",
           "book_category": "形态化,量化难度高",
           "strategies": [
-            {"id": "zhuang_test", "name": "庄家试盘识别", "implemented": false, "desc": "试盘形态"},
-            {"id": "zhuang_build", "name": "庄家建仓识别", "implemented": false, "desc": "建仓形态"},
-            {"id": "zhuang_pull", "name": "庄家拉高识别", "implemented": false, "desc": "拉升形态"},
-            {"id": "zhuang_ship", "name": "庄家出货识别", "implemented": false, "desc": "出货形态"},
-            {"id": "zhuang_wash", "name": "庄家洗盘识别", "implemented": false, "desc": "洗盘形态"}
+            {
+              "id": "zhuang_test",
+              "name": "庄家试盘识别",
+              "implemented": true,
+              "desc": "庄家试盘:长上影+缩量+低位识别庄家试探",
+              "engine_id": "zhuang_test"
+            },
+            {
+              "id": "zhuang_build",
+              "name": "庄家建仓识别",
+              "implemented": true,
+              "desc": "庄家建仓:低位+放量+横盘震荡吸筹",
+              "engine_id": "zhuang_build"
+            },
+            {
+              "id": "zhuang_pull",
+              "name": "庄家拉高识别",
+              "implemented": true,
+              "desc": "庄家拉高:放量突破+大阳线+创新高",
+              "engine_id": "zhuang_pull"
+            },
+            {
+              "id": "zhuang_ship",
+              "name": "庄家出货识别",
+              "implemented": true,
+              "desc": "庄家出货:高位+放量+滞涨",
+              "engine_id": "zhuang_ship"
+            },
+            {
+              "id": "zhuang_wash",
+              "name": "庄家洗盘识别",
+              "implemented": true,
+              "desc": "庄家洗盘:缩量回调+不破 MA20+前期上涨",
+              "engine_id": "zhuang_wash"
+            }
           ]
         },
         {
           "name": "第20章 涨停板策略",
           "book_category": "需涨跌幅判断",
           "strategies": [
-            {"id": "zt", "name": "涨停板策略(综合)", "implemented": true, "engine_id": "zt", "desc": "涨幅>=9.6%+量比>=1.5封板信号,已实现并启用"},
-            {"id": "zt_type", "name": "涨停板类型分类", "implemented": false, "desc": "一字板/拉高板/封板强度,部分融入zt策略"},
-            {"id": "zt_unsealed", "name": "涨停封不牢现象", "implemented": false, "desc": "开板回封识别,zt策略的量比判断已涵盖"},
-            {"id": "zt_pull", "name": "拉高型涨停交易时机", "implemented": false, "desc": "已融入zt策略的涨幅+量比条件"}
+            {
+              "id": "zt",
+              "name": "涨停板策略(综合)",
+              "implemented": true,
+              "engine_id": "zt",
+              "desc": "涨幅>=9.6%+量比>=1.5封板信号,已实现并启用"
+            },
+            {
+              "id": "zt_type",
+              "name": "涨停板类型分类",
+              "implemented": true,
+              "desc": "涨停类型:一字板/T 字板/拉高板分类",
+              "engine_id": "zt_type"
+            },
+            {
+              "id": "zt_unsealed",
+              "name": "涨停封不牢现象",
+              "implemented": true,
+              "desc": "涨停封不牢:涨停但盘中开板+放量警惕",
+              "engine_id": "zt_unsealed"
+            },
+            {
+              "id": "zt_pull",
+              "name": "拉高型涨停交易时机",
+              "implemented": true,
+              "desc": "拉高型涨停:接近涨停但未封板+放量+大阳",
+              "engine_id": "zt_pull"
+            }
           ]
         }
       ],
-      "stats": {"total_chapters": 7, "implemented": 8, "not_implemented": 21}
+      "stats": {
+        "total_chapters": 7,
+        "implemented": 8,
+        "not_implemented": 21
+      }
     },
     {
       "id": "yujie_custom",
@@ -189,21 +557,88 @@
           "name": "评分规则(10条)",
           "book_category": "复合规则,综合两本书指标思想",
           "strategies": [
-            {"id": "yujie_macd_golden", "name": "MACD金叉", "implemented": true, "score": 2, "desc": "DIFF上穿DEA,+2分"},
-            {"id": "yujie_macd_near", "name": "MACD即将金叉", "implemented": true, "score": 1, "desc": "DIFF-DEA差值<阈值,+1分"},
-            {"id": "yujie_macd_green", "name": "MACD绿柱缩短", "implemented": true, "score": 1, "desc": "绿柱连续缩短,+1分"},
-            {"id": "yujie_mos_bottom", "name": "MOS低点(底背离)", "implemented": true, "score": 1, "desc": "MOS底背离,+1分"},
-            {"id": "yujie_mos_green", "name": "MOS绿柱缩短", "implemented": true, "score": 1, "desc": "+1分"},
-            {"id": "yujie_breakout", "name": "突破+金叉", "implemented": true, "score": 2, "desc": "突破近20日高点+金叉,+2分"},
-            {"id": "yujie_rsi_golden", "name": "RSI金叉", "implemented": true, "score": 1, "desc": "RSI6上穿RSI12,+1分"},
-            {"id": "yujie_bull_ma", "name": "多线多头", "implemented": true, "score": 1, "desc": "MA5>10>20>60多头排列,+1分"},
-            {"id": "yujie_low_pos", "name": "120日低位区", "implemented": true, "score": 1, "desc": "现价≤(高+低)*0.4,+1分"},
-            {"id": "yujie_drawdown", "name": "深回撤(距120日高)", "implemented": true, "score": 1, "desc": "距120日高点回撤≥阈值(默认0.2,网格寻优0.3更优),+1分"}
+            {
+              "id": "yujie_macd_golden",
+              "name": "MACD金叉",
+              "implemented": true,
+              "score": 2,
+              "desc": "DIFF上穿DEA,+2分"
+            },
+            {
+              "id": "yujie_macd_near",
+              "name": "MACD即将金叉",
+              "implemented": true,
+              "score": 1,
+              "desc": "DIFF-DEA差值<阈值,+1分"
+            },
+            {
+              "id": "yujie_macd_green",
+              "name": "MACD绿柱缩短",
+              "implemented": true,
+              "score": 1,
+              "desc": "绿柱连续缩短,+1分"
+            },
+            {
+              "id": "yujie_mos_bottom",
+              "name": "MOS低点(底背离)",
+              "implemented": true,
+              "score": 1,
+              "desc": "MOS底背离,+1分"
+            },
+            {
+              "id": "yujie_mos_green",
+              "name": "MOS绿柱缩短",
+              "implemented": true,
+              "score": 1,
+              "desc": "+1分"
+            },
+            {
+              "id": "yujie_breakout",
+              "name": "突破+金叉",
+              "implemented": true,
+              "score": 2,
+              "desc": "突破近20日高点+金叉,+2分"
+            },
+            {
+              "id": "yujie_rsi_golden",
+              "name": "RSI金叉",
+              "implemented": true,
+              "score": 1,
+              "desc": "RSI6上穿RSI12,+1分"
+            },
+            {
+              "id": "yujie_bull_ma",
+              "name": "多线多头",
+              "implemented": true,
+              "score": 1,
+              "desc": "MA5>10>20>60多头排列,+1分"
+            },
+            {
+              "id": "yujie_low_pos",
+              "name": "120日低位区",
+              "implemented": true,
+              "score": 1,
+              "desc": "现价≤(高+低)*0.4,+1分"
+            },
+            {
+              "id": "yujie_drawdown",
+              "name": "深回撤(距120日高)",
+              "implemented": true,
+              "score": 1,
+              "desc": "距120日高点回撤≥阈值(默认0.2,网格寻优0.3更优),+1分"
+            }
           ]
         }
       ],
-      "stats": {"total_rules": 10, "implemented": 10, "not_implemented": 0},
-      "backtest": {"signal_count": "280万+", "validated": "5+分档60天超额+0.16%~+0.30%,7+分60天+11.79%"}
+      "stats": {
+        "total_rules": 10,
+        "implemented": 10,
+        "not_implemented": 0
+      },
+      "backtest": {
+        "signal_count": "280万+",
+        "validated": "5+分档60天超额+0.16%~+0.30%,7+分60天+11.79%"
+      }
     },
     {
       "id": "ai_custom",
@@ -222,12 +657,26 @@
           "name": "自定义策略",
           "book_category": "— (用户自创,非书中)",
           "strategies": [
-            {"id": "custom_ai_demo", "name": "放量突破(AI判定示例)", "implemented": true, "engine_id": "custom_ai_demo", "desc": "走AI判定通道的示例自定义策略"},
-            {"id": "custom_user", "name": "用户自创策略", "implemented": true, "desc": "前端「策略管理」tab可新建/编辑,自然语言描述买卖规则"}
+            {
+              "id": "custom_ai_demo",
+              "name": "放量突破(AI判定示例)",
+              "implemented": true,
+              "engine_id": "custom_ai_demo",
+              "desc": "走AI判定通道的示例自定义策略"
+            },
+            {
+              "id": "custom_user",
+              "name": "用户自创策略",
+              "implemented": true,
+              "desc": "前端「策略管理」tab可新建/编辑,自然语言描述买卖规则"
+            }
           ]
         }
       ],
-      "stats": {"total": 2, "implemented": 2}
+      "stats": {
+        "total": 2,
+        "implemented": 2
+      }
     }
   ]
 }
