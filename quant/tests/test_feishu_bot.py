@@ -19,6 +19,7 @@ from feishu_bot import (
     _log_tool_call,
     _normalize_date,
     _print_stats,
+    _rollback_to_weekday,
     _split_long_text,
     _stats_add_session,
     _truncate_history,
@@ -488,6 +489,70 @@ def test_session_lock_serializes():
         assert order[i].split("-")[0] == order[i + 1].split("-")[0]
 
 
+def test_pending_images_thread_local():
+    """不同线程的图片队列互相隔离(并发会话不串号)。"""
+    feishu_bot._pending_images.clear()
+    results = {}
+
+    def worker(val):
+        feishu_bot._pending_images.clear()
+        feishu_bot._pending_images.append(val)
+        results[val] = list(feishu_bot._pending_images)
+
+    t1 = threading.Thread(target=worker, args=("IMG_A",))
+    t2 = threading.Thread(target=worker, args=("IMG_B",))
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
+    assert results == {"IMG_A": ["IMG_A"], "IMG_B": ["IMG_B"]}
+    # 主线程队列不受影响
+    assert list(feishu_bot._pending_images) == []
+
+
+def test_current_session_id_thread_local():
+    """不同线程的 session_id 互相隔离。"""
+    feishu_bot._set_current_session_id("main-session")
+    results = {}
+
+    def worker(sid):
+        feishu_bot._set_current_session_id(sid)
+        results[sid] = feishu_bot._current_session_id()
+
+    t1 = threading.Thread(target=worker, args=("sessA",))
+    t2 = threading.Thread(target=worker, args=("sessB",))
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
+    assert results == {"sessA": "sessA", "sessB": "sessB"}
+    # 主线程 session 不变
+    assert feishu_bot._current_session_id() == "main-session"
+
+
+def test_prune_idle_session_locks():
+    """空闲锁应被清理,持有中的锁不受影响。"""
+    guard = feishu_bot._session_locks_guard
+    with guard:
+        orig = feishu_bot._session_locks
+        held = threading.Lock()
+        held.acquire()  # 模拟持有中
+        feishu_bot._session_locks = {
+            "held": held,
+            "idle1": threading.Lock(),
+            "idle2": threading.Lock(),
+        }
+        feishu_bot.MAX_SESSION_LOCKS = 1  # 触发清理到只剩 1 个
+        try:
+            feishu_bot._prune_idle_session_locks()
+            assert "held" in feishu_bot._session_locks  # 持有中的保留
+            assert len(feishu_bot._session_locks) == 1
+        finally:
+            feishu_bot.MAX_SESSION_LOCKS = 200
+            feishu_bot._session_locks = orig
+            held.release()
+
+
 # ============ 结构化工具调用日志(JSONL) ============
 
 
@@ -636,6 +701,28 @@ def test_compare_stocks_with_mock_finance(monkeypatch):
     assert "|" in r  # 表格
 
 
+def test_compare_stocks_string_total_mv(monkeypatch):
+    """total_mv 为 '-' 字符串时不应崩溃(回归 #2),应显示 '-'。"""
+    import stock_finance
+
+    def fake_fetch(code):
+        return {
+            "code": code,
+            "name": f"股{code}",
+            "pe_ttm": 20.0,
+            "pb": 5.0,
+            "total_mv": "-",  # 东财对部分股票返回 '-'
+            "roe": 15.0,
+            "net_margin": 30.0,
+            "report_name": "2026中报",
+        }
+    monkeypatch.setattr(stock_finance, "fetch_finance", fake_fetch)
+    r = handler_compare_stocks(["600519", "000858"])
+    assert "股600519" in r
+    assert "| - |" in r or "-" in r  # 市值显示 '-' 而非崩溃
+    assert "20.00" in r
+
+
 # ============ 板块分析 analyze_sector ============
 
 
@@ -761,12 +848,50 @@ def test_normalize_date_formats():
 
 
 def test_normalize_date_relative():
-    """相对日期应正确解析。"""
-    from datetime import datetime, timedelta
+    """相对日期应正确解析(自动回退周末)。"""
+    from datetime import datetime
     assert _normalize_date("今天") == datetime.now().strftime("%Y%m%d")
-    assert _normalize_date("昨日") == (datetime.now() - timedelta(days=1)).strftime("%Y%m%d")
-    assert _normalize_date("前天") == (datetime.now() - timedelta(days=2)).strftime("%Y%m%d")
-    assert _normalize_date("大前天") == (datetime.now() - timedelta(days=3)).strftime("%Y%m%d")
+    assert _normalize_date("昨日") == _rollback_to_weekday(1).strftime("%Y%m%d")
+    assert _normalize_date("前天") == _rollback_to_weekday(2).strftime("%Y%m%d")
+    assert _normalize_date("大前天") == _rollback_to_weekday(3).strftime("%Y%m%d")
+
+
+def _fake_now(year, month, day, hour=10):
+    """构造固定当前时间,用于测周末回退。"""
+    from datetime import datetime
+    return datetime(year, month, day, hour, 0, 0)
+
+
+class _MockDateTime:
+    """模拟 datetime 类,只实现 now() 供测试注入到 feishu_bot.datetime。"""
+    _fixed = None
+
+    @classmethod
+    def now(cls, *a, **k):
+        return cls._fixed
+
+
+def test_rollback_weekday_monday(monkeypatch):
+    """周一问昨天=周日,应回退到周五(最近交易日)。"""
+    _MockDateTime._fixed = _fake_now(2026, 8, 17)  # 2026-08-17 是周一
+    monkeypatch.setattr(feishu_bot, "datetime", _MockDateTime)
+    # 昨天=08-16 周日 → 回退到 08-14 周五
+    assert _rollback_to_weekday(1).strftime("%Y%m%d") == "20260814"
+
+
+def test_rollback_weekday_saturday(monkeypatch):
+    """周六问昨天=周五,不需回退。"""
+    _MockDateTime._fixed = _fake_now(2026, 8, 15)  # 2026-08-15 是周六
+    monkeypatch.setattr(feishu_bot, "datetime", _MockDateTime)
+    # 昨天=08-14 周五,直接返回
+    assert _rollback_to_weekday(1).strftime("%Y%m%d") == "20260814"
+
+
+def test_rollback_weekday_weekday(monkeypatch):
+    """普通工作日不影响。"""
+    _MockDateTime._fixed = _fake_now(2026, 8, 19)  # 2026-08-19 是周三
+    monkeypatch.setattr(feishu_bot, "datetime", _MockDateTime)
+    assert _rollback_to_weekday(1).strftime("%Y%m%d") == "20260818"
 
 
 def test_query_history_picks_invalid_date():
@@ -849,6 +974,21 @@ def test_stats_add_session():
     _stats_add_session("test_sess_B")
     after = len(feishu_bot._STATS["sessions"])
     assert after == before + 2  # A、B 两个新会话
+
+
+def test_stats_add_session_cap(monkeypatch):
+    """会话数达到上限后不再增长(防无界内存)。"""
+    with feishu_bot._STATS_LOCK:
+        orig = feishu_bot._STATS["sessions"]
+    feishu_bot._STATS["sessions"] = set()
+    try:
+        # 填满上限
+        n = feishu_bot.MAX_TRACKED_SESSIONS + 50
+        for i in range(n):
+            _stats_add_session(f"cap_sess_{i}")
+        assert len(feishu_bot._STATS["sessions"]) == feishu_bot.MAX_TRACKED_SESSIONS
+    finally:
+        feishu_bot._STATS["sessions"] = orig
 
 
 def test_log_tool_call_increments_stats(tmp_path, monkeypatch):

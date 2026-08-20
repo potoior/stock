@@ -104,6 +104,7 @@ _STATS: dict = {
     "sessions": set(),
 }
 _STATS_LOCK = threading.Lock()
+MAX_TRACKED_SESSIONS = 500  # 运行状态里统计到的唯一会话数上限,防无界增长
 
 
 def _incr_stats(key: str, delta: int = 1) -> None:
@@ -113,9 +114,14 @@ def _incr_stats(key: str, delta: int = 1) -> None:
 
 
 def _stats_add_session(session_id: str) -> None:
-    """记录会话 ID(去重统计)。"""
+    """记录会话 ID(去重统计,带上限防无界增长)。"""
     with _STATS_LOCK:
-        _STATS["sessions"].add(session_id)
+        s = _STATS["sessions"]
+        if session_id in s:
+            return
+        if len(s) >= MAX_TRACKED_SESSIONS:
+            return  # 已达上限,仅作为统计展示,饱和即可
+        s.add(session_id)
 
 
 def _print_stats() -> None:
@@ -160,11 +166,48 @@ CMD_PORTFOLIO = ("持仓", "portfolio", "仓位", "股票池")
 # A股代码正则(6位数字)
 RE_CODE = re.compile(r"\b(60[0-3]\d{3}|00[0-2]\d{3}|30[0-4]\d{3}|688\d{3}|8\d{5}|4\d{5})\b")
 
-# handler 调用过程中累积的图片(给 Agent 用,处理完一轮清空)
-_pending_images: list[bytes] = []
+# ---- 会话级 thread-local 状态 ----
+# 关键: 飞书 Bot 会并发处理不同 session 的消息(会话锁按 session_id 隔离,
+# 同 session 串行、不同 session 并行)。因此累积图片队列和当前 session_id
+# 必须是线程隔离的,否则并发下会串号/互相清空。
+_tl = threading.local()
 
-# 当前请求的 session_id(供 handler_watchlist 等需要用户隔离的 handler 用)
-_current_session_id: str = "cli"
+
+class _PendingImages:
+    """thread-local 图片队列,行为兼容 list(append/clear/len/bool/迭代)。"""
+
+    def _get(self) -> list:
+        if not hasattr(_tl, "images"):
+            _tl.images = []
+        return _tl.images
+
+    def append(self, val: bytes) -> None:
+        self._get().append(val)
+
+    def clear(self) -> None:
+        self._get().clear()
+
+    def __len__(self) -> int:
+        return len(self._get())
+
+    def __bool__(self) -> bool:
+        return bool(self._get())
+
+    def __iter__(self):
+        return iter(self._get())
+
+
+_pending_images = _PendingImages()
+
+
+def _current_session_id() -> str:
+    """读取当前线程的 session_id(默认 'cli')。"""
+    return getattr(_tl, "session_id", "cli")
+
+
+def _set_current_session_id(session_id: str) -> None:
+    """设置当前线程的 session_id。"""
+    _tl.session_id = session_id
 
 # 跨轮对话历史持久化(按 session_id 存储,sqlite)
 # 保留最近 MAX_HISTORY_TURNS 轮(1 轮 = user + assistant 两条消息)
@@ -806,7 +849,7 @@ def handler_compare_stocks(codes: list) -> str:
             code,
             f"{d['pe_ttm']:.2f}" if isinstance(d.get("pe_ttm"), (int, float)) else "-",
             f"{d['pb']:.2f}" if isinstance(d.get("pb"), (int, float)) else "-",
-            f"{d['total_mv']/1e8:.0f}亿" if d.get("total_mv") else "-",
+            f"{d['total_mv']/1e8:.0f}亿" if isinstance(d.get("total_mv"), (int, float)) else "-",
             f"{d['roe']:.2f}%" if isinstance(d.get("roe"), (int, float)) else "-",
             f"{d['net_margin']:.2f}%" if isinstance(d.get("net_margin"), (int, float)) else "-",
             d.get("report_name", "-"),
@@ -860,7 +903,6 @@ def _fetch_sector_index() -> dict[str, str]:
     if _SECTOR_INDEX_FAIL_TS and (time.time() - _SECTOR_INDEX_FAIL_TS) < 300:
         return {}
     import urllib.request
-    out = {}
     try:
         for t in (2, 3):  # 2=概念板块, 3=行业板块
             for page in range(1, 10):  # 单类最多 9 页 900 个,足够覆盖
@@ -877,14 +919,15 @@ def _fetch_sector_index() -> dict[str, str]:
                     name = r.get("f14")
                     code = r.get("f12")
                     if name and code and isinstance(name, str):
-                        out[name] = code
+                        _SECTOR_INDEX_CACHE[name] = code
                 if len(diff) < 100:
                     break
-        _SECTOR_INDEX_CACHE.update(out)
-        log.info("东财板块索引加载 %d 个(概念+行业)", len(out))
+        log.info("东财板块索引加载 %d 个(概念+行业)", len(_SECTOR_INDEX_CACHE))
     except Exception as e:
         _SECTOR_INDEX_FAIL_TS = time.time()
-        log.warning("东财板块列表获取失败: %s", e)
+        # 已拉到的部分数据保留在 _SECTOR_INDEX_CACHE 中,后续查询仍可用
+        log.warning("东财板块列表获取部分失败,已缓存 %d 个: %s",
+                    len(_SECTOR_INDEX_CACHE), e)
     return _SECTOR_INDEX_CACHE
 
 
@@ -988,17 +1031,18 @@ def _format_sector_compare(sector_name: str, members: list) -> str:
 def _normalize_date(date_str: str) -> str:
     """规范化日期输入为 YYYYMMDD。
     支持: '20260819' / '2026-08-19' / '2026/08/19' / '昨天' / '前天' / '大前天'
+    相对日期(昨天/前天)自动回退到最近交易日(跳过周六日),避免落在非交易日误报无数据。
     """
     if not date_str:
         return datetime.now().strftime("%Y%m%d")
     s = date_str.strip()
     # 相对日期
     if s in ("昨天", "昨日", "yesterday"):
-        return (datetime.now() - timedelta(days=1)).strftime("%Y%m%d")
+        return _rollback_to_weekday(1).strftime("%Y%m%d")
     if s in ("前天",):
-        return (datetime.now() - timedelta(days=2)).strftime("%Y%m%d")
+        return _rollback_to_weekday(2).strftime("%Y%m%d")
     if s in ("大前天",):
-        return (datetime.now() - timedelta(days=3)).strftime("%Y%m%d")
+        return _rollback_to_weekday(3).strftime("%Y%m%d")
     if s in ("今天", "今日", "today"):
         return datetime.now().strftime("%Y%m%d")
     # 数字日期
@@ -1006,6 +1050,18 @@ def _normalize_date(date_str: str) -> str:
     if s.isdigit() and len(s) == 8:
         return s
     return ""  # 无效
+
+
+def _rollback_to_weekday(days_back: int) -> datetime:
+    """从今天往前推 N 个自然日,若落在周末则继续回退到周五。
+
+    交易日历无法完整获知,只处理最常见的周末回退。
+    weekday(): Mon=0 ... Sun=6,周六=5周日=6。
+    """
+    d = datetime.now() - timedelta(days=days_back)
+    while d.weekday() >= 5:  # 周六(5)/周日(6)
+        d -= timedelta(days=1)
+    return d
 
 
 def handler_query_history_picks(date: str) -> str:
@@ -2050,7 +2106,7 @@ TOOL_HANDLERS = {
     "manage_watchlist": lambda args: handler_watchlist(
         args.get("action", "list"),
         args.get("codes", []),
-        session_id=_current_session_id,
+        session_id=_current_session_id(),
     ),
     # 策略管理 skill
     "list_strategies": lambda args: handler_list_strategies(),
@@ -2146,6 +2202,21 @@ def _truncate_tool_result(text: str, max_chars: int = TOOL_RESULT_MAX_CHARS) -> 
 # 防止用户连发消息时多个 Agent 并发跑、history 互相覆盖。
 _session_locks: dict[str, threading.Lock] = {}
 _session_locks_guard = threading.Lock()
+MAX_SESSION_LOCKS = 200  # 上限,防长期运行内存无界增长
+
+
+def _prune_idle_session_locks() -> None:
+    """移除空闲的会话锁(仅删当前未持有的),防 _session_locks 无界增长。
+
+    必须在持有 _session_locks_guard 时调用。acquire(非阻塞)成功即证明该锁空闲,
+    可安全删除;删除后若有线程再取该 session,会自动重建新锁。
+    """
+    for sid, lock in list(_session_locks.items()):
+        if len(_session_locks) <= MAX_SESSION_LOCKS:
+            break
+        if lock.acquire(blocking=False):
+            lock.release()
+            del _session_locks[sid]
 
 
 def _get_session_lock(session_id: str) -> threading.Lock:
@@ -2153,10 +2224,11 @@ def _get_session_lock(session_id: str) -> threading.Lock:
     with _session_locks_guard:
         lock = _session_locks.get(session_id)
         if lock is None:
+            if len(_session_locks) >= MAX_SESSION_LOCKS:
+                _prune_idle_session_locks()
             lock = threading.Lock()
             _session_locks[session_id] = lock
         return lock
-
 
 SYSTEM_PROMPT = """你是 A 股量化分析助手(集成于飞书群聊),拥有以下工具:
 
@@ -2391,9 +2463,8 @@ class FeishuAgent:
 
         # 每轮对话前清空图片队列
         _pending_images.clear()
-        # 设置当前 session_id(供 watchlist handler 用)
-        global _current_session_id
-        _current_session_id = session_id
+        # 设置当前 session_id(供 watchlist handler 用,thread-local 隔离并发会话)
+        _set_current_session_id(session_id)
 
         messages = [{"role": "system", "content": SYSTEM_PROMPT}]
         if history:
@@ -2437,6 +2508,7 @@ class FeishuAgent:
                 if r is None:
                     _incr_stats("llm_calls", 1)
                     _incr_stats("llm_failures", 1)
+                    _incr_stats("llm_total_ms", int((time.time() - llm_start) * 1000))
                     return (
                         "⚠️ AI 暂时无响应,请稍后重试(网络抖动,已重试2次)",
                         new_history, list(_pending_images),
@@ -2444,6 +2516,7 @@ class FeishuAgent:
                 if r.status_code != 200:
                     _incr_stats("llm_calls", 1)
                     _incr_stats("llm_failures", 1)
+                    _incr_stats("llm_total_ms", int((time.time() - llm_start) * 1000))
                     return (
                         f"⚠️ AI 服务异常(HTTP {r.status_code}),请稍后重试",
                         new_history, list(_pending_images),
@@ -2455,6 +2528,7 @@ class FeishuAgent:
                 log.error("Agent LLM 调用失败: %s", e)
                 _incr_stats("llm_calls", 1)
                 _incr_stats("llm_failures", 1)
+                _incr_stats("llm_total_ms", int((time.time() - llm_start) * 1000))
                 return (
                     "⚠️ AI 调用异常,请稍后重试(已记录日志)",
                     new_history, list(_pending_images),
