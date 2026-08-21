@@ -1591,6 +1591,34 @@ TOOLS = [
             }
         }
     },
+    # ---------- 板块资金流 ----------
+    {
+        "type": "function",
+        "function": {
+            "name": "get_sector_flow",
+            "description": "查行业/概念板块主力资金流排名(按主力净流入降序)。用户问'哪个板块资金流入最多/行业资金流/概念板块资金/主力净流入板块'时调用。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "sector_type": {"type": "string", "enum": ["industry", "concept"],
+                                    "description": "板块类型: industry=行业板块(有色金属/电子/通信...), concept=概念板块(融资融券/5G/MSCI...)。默认 industry", "default": "industry"},
+                    "top_n": {"type": "integer", "description": "返回前 N 个板块,默认 10", "default": 10}
+                }
+            }
+        }
+    },
+    # ---------- 市场情绪速览 ----------
+    {
+        "type": "function",
+        "function": {
+            "name": "get_market_sentiment",
+            "description": "市场情绪速览:5大指数涨跌 + 行业板块资金流前5 + 概念板块资金流前5。用户问'市场情绪/资金面/今天什么板块强/市场速览'时调用。比 get_index 多了板块资金流维度。",
+            "parameters": {
+                "type": "object",
+                "properties": {}
+            }
+        }
+    },
 ]
 
 
@@ -2426,6 +2454,29 @@ def handler_get_index(name: str = "") -> str:
         return f"❌ 查询指数行情出错: {e}"
 
 
+def handler_get_sector_flow(sector_type: str = "industry", top_n: int = 10) -> str:
+    """查询行业/概念板块主力资金流排名。"""
+    try:
+        from stock_market_extras import fetch_sector_flow, fmt_sector_flow
+
+        rows = fetch_sector_flow(sector_type, top_n)
+        label = "行业板块" if sector_type == "industry" else "概念板块"
+        return fmt_sector_flow(rows, label)
+    except Exception as e:
+        return f"❌ 查询板块资金流出错: {e}"
+
+
+def handler_get_market_sentiment() -> str:
+    """市场情绪速览:5大指数 + 行业板块资金流 Top5 + 概念板块 Top5。"""
+    try:
+        from stock_market_extras import fetch_market_sentiment, fmt_market_sentiment
+
+        data = fetch_market_sentiment()
+        return fmt_market_sentiment(data)
+    except Exception as e:
+        return f"❌ 查询市场情绪出错: {e}"
+
+
 def handler_scan_with_yujie(top_n: int = 20, min_score: float = 5.0, limit: int = 0) -> str:
     """全市场玉姐评分实时扫描(用 daily 表已缓存数据,不联网,耗时 1-3 分钟)。
 
@@ -2570,6 +2621,11 @@ TOOL_HANDLERS = {
         float(args.get("min_score", 5.0)),
         int(args.get("limit", 0)),
     ),
+    "get_sector_flow": lambda args: handler_get_sector_flow(
+        args.get("sector_type", "industry"),
+        int(args.get("top_n", 10)),
+    ),
+    "get_market_sentiment": lambda args: handler_get_market_sentiment(),
 }
 
 MAX_AGENT_STEPS = 6  # 最多 6 步推理(避免无限循环)
@@ -2744,6 +2800,13 @@ SYSTEM_PROMPT = """你是 A 股量化分析助手(集成于飞书群聊),拥有�
 - get_index(name?): 查指数行情(上证/深成/创业板/科创50/北证50)
   · 不传 name=全部主要指数
   · 示例: "上证指数" / "大盘怎样" / "创业板" / "科创50"
+- get_sector_flow(sector_type?, top_n?): 行业/概念板块主力资金流排名
+  · sector_type: industry=行业板块(默认), concept=概念板块
+  · 用户问"哪个板块资金流入最多/行业资金流/概念资金"时调用
+  · 示例: "今天哪个板块资金流入最多" / "概念板块资金流"
+- get_market_sentiment(): 市场情绪速览(5大指数 + 行业/概念板块资金流 Top5)
+  · 比 get_index 多了板块资金流维度,看整体市场资金面
+  · 用户问"市场情绪/资金面/今天什么板块强/市场速览"时调用
 
 工作流程:
 1. 根据用户问题决定调用哪个工具(可多次调用、组合调用)

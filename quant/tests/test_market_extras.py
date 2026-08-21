@@ -408,7 +408,8 @@ def test_handlers_registered_in_tools():
     import feishu_bot
     tool_names = {t["function"]["name"] for t in feishu_bot.TOOLS}
     for sid in ("get_lhb", "get_north_flow", "get_main_flow",
-                "get_concept_sectors", "get_index", "scan_with_yujie"):
+                "get_concept_sectors", "get_index", "scan_with_yujie",
+                "get_sector_flow", "get_market_sentiment"):
         assert sid in tool_names, f"{sid} 未在 TOOLS 列表中"
 
 
@@ -418,8 +419,108 @@ def test_scan_with_yujie_in_slow_tools():
     assert "scan_with_yujie" in feishu_bot.SLOW_TOOLS
 
 
-def test_tool_count_27():
-    """工具总数应为 27(21 旧 + 5 市场 + 1 玉姐扫描)。"""
+def test_tool_count_29():
+    """工具总数应为 29(26 旧 + 1 玉姐扫描 + 2 板块/情绪)。"""
     import feishu_bot
-    assert len(feishu_bot.TOOLS) == 27
-    assert len(feishu_bot.TOOL_HANDLERS) == 27
+    assert len(feishu_bot.TOOLS) == 29
+    assert len(feishu_bot.TOOL_HANDLERS) == 29
+
+
+# ---------------- 板块资金流 / 市场情绪 ----------------
+
+
+def test_fetch_sector_flow_industry(monkeypatch):
+    """行业板块资金流: mock push2 clist 返回 2 个板块。"""
+    jsonp = {"data": {"diff": [
+        {"f12": "BK0478", "f14": "有色金属", "f2": 4123.45, "f3": 2.59,
+         "f62": 8828891648, "f184": 6.09, "f66": 5e9, "f72": 3e9, "f75": -1e9, "f78": -7e9},
+        {"f12": "BK0732", "f14": "电子", "f2": 3567.89, "f3": 0.73,
+         "f62": 8552960000, "f184": 1.75, "f66": 4e9, "f72": 2e9, "f75": -1e9, "f78": -5e9},
+    ]}}
+    with patch("urllib.request.urlopen", return_value=_mock_resp(jsonp)):
+        rows = sme.fetch_sector_flow("industry", top_n=10)
+    assert len(rows) == 2
+    assert rows[0]["name"] == "有色金属"
+    assert rows[0]["pct"] == 2.59
+    assert rows[0]["main_net"] == 8828891648
+    assert rows[0]["super_large_net"] == 5e9
+
+
+def test_fetch_sector_flow_unknown_type():
+    """未知板块类型应返 error。"""
+    rows = sme.fetch_sector_flow("unknown")
+    assert isinstance(rows, list)
+    assert "error" in rows[0]
+
+
+def test_fmt_sector_flow_basic():
+    """板块资金流格式化。"""
+    rows = [
+        {"name": "有色金属", "pct": 2.59, "main_net": 8828891648, "main_pct": 6.09},
+        {"name": "电子", "pct": 0.73, "main_net": 8552960000, "main_pct": 1.75},
+    ]
+    text = sme.fmt_sector_flow(rows, "行业板块")
+    assert "行业板块" in text
+    assert "有色金属" in text
+    assert "+88.29亿" in text  # 8828891648 / 1e8 = 88.29
+    assert "2.59%" in text
+
+
+def test_fmt_sector_flow_empty():
+    """空数据格式化。"""
+    text = sme.fmt_sector_flow([], "板块")
+    assert "无" in text
+
+
+def test_fetch_market_sentiment(monkeypatch):
+    """市场情绪: mock fetch_index + fetch_sector_flow。"""
+    # mock fetch_index 返回 2 个指数
+    fake_idx = [
+        {"name": "上证指数", "code": "000001", "price": 3905.2, "pct": 0.04, "change": 1.48,
+         "amount": 883423480098.6},
+        {"name": "深证成指", "code": "399001", "price": 14094.17, "pct": 0.87, "change": 121.39,
+         "amount": 995840925246.3},
+    ]
+    fake_industry = [{"name": "有色", "pct": 2.59, "main_net": 8.8e9}]
+    fake_concept = [{"name": "5G", "pct": 1.13, "main_net": 1.4e10}]
+    monkeypatch.setattr(sme, "fetch_index", lambda: fake_idx)
+    monkeypatch.setattr(sme, "fetch_sector_flow", lambda st, top_n=10:
+                        fake_industry if st == "industry" else fake_concept)
+    data = sme.fetch_market_sentiment()
+    assert len(data["indices"]) == 2
+    assert data["indices"][0]["name"] == "上证指数"
+    assert data["indices"][0]["amount_yi"] == 8834  # 883423480098.6 / 1e8 = 8834
+    assert data["top_industries"] == fake_industry
+    assert data["top_concepts"] == fake_concept
+
+
+def test_fmt_market_sentiment_basic():
+    """市场情绪格式化:含指数+行业+概念。"""
+    data = {
+        "indices": [
+            {"name": "上证指数", "pct": 0.04, "amount_yi": 8834},
+            {"name": "创业板指", "pct": 1.43, "amount_yi": 4945},
+        ],
+        "top_industries": [{"name": "有色", "pct": 2.59, "main_net": 8.8e9}],
+        "top_concepts": [{"name": "5G", "pct": 1.13, "main_net": 1.4e10}],
+    }
+    text = sme.fmt_market_sentiment(data)
+    assert "市场情绪" in text
+    assert "上证指数" in text
+    assert "+0.04%" in text
+    assert "8834亿" in text
+    assert "有色" in text
+    assert "5G" in text
+    assert "+88.00亿" in text  # 8.8e9 / 1e8 = 88
+
+
+def test_handler_get_sector_flow_registered():
+    """handler_get_sector_flow 应在 TOOL_HANDLERS 注册。"""
+    import feishu_bot
+    assert "get_sector_flow" in feishu_bot.TOOL_HANDLERS
+
+
+def test_handler_get_market_sentiment_registered():
+    """handler_get_market_sentiment 应在 TOOL_HANDLERS 注册。"""
+    import feishu_bot
+    assert "get_market_sentiment" in feishu_bot.TOOL_HANDLERS

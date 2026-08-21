@@ -267,6 +267,76 @@ INDEX_MAP = {
 }
 
 
+# ---------------- 板块资金流 ----------------
+
+# 板块类型 fs 参数:
+#   m:90+t:2  行业板块
+#   m:90+t:3  概念板块
+SECTOR_FS = {
+    "industry": "m:90+t:2",
+    "concept": "m:90+t:3",
+}
+
+
+def fetch_sector_flow(sector_type: str = "industry", top_n: int = 10) -> list[dict]:
+    """获取行业/概念板块主力资金流排名(按主力净流入降序)。
+
+    Args:
+        sector_type: "industry"=行业板块, "concept"=概念板块
+        top_n: 返回前 N 个板块
+
+    Returns: [{code, name, pct, main_net, main_pct, super_large_net, large_net}, ...]
+             金额单位均为元
+    """
+    fs = SECTOR_FS.get(sector_type)
+    if not fs:
+        return [{"error": f"未知板块类型: {sector_type},支持: industry / concept"}]
+    url = (
+        f"http://push2.eastmoney.com/api/qt/clist/get?pn=1&pz={top_n}&po=1&np=1"
+        f"&fltt=2&invt=2&fid=f62&fs={fs}"
+        f"&fields=f12,f14,f2,f3,f62,f184,f66,f69,f72,f75,f78"
+    )
+    data = _get_json(url, referer="https://data.eastmoney.com/")
+    if not data or not data.get("data") or not data["data"].get("diff"):
+        return []
+    out = []
+    for r in data["data"]["diff"]:
+        out.append({
+            "code": r.get("f12", ""),
+            "name": r.get("f14", ""),
+            "pct": r.get("f3"),       # 板块涨跌幅 %
+            "main_net": r.get("f62"),    # 主力净流入(元)
+            "main_pct": r.get("f184"),   # 主力净流入占比 %
+            "super_large_net": r.get("f66"),  # 超大单净流入
+            "large_net": r.get("f72"),       # 大单净流入
+            "medium_net": r.get("f75"),      # 中单净流入
+            "small_net": r.get("f78"),       # 小单净流入
+        })
+    return out
+
+
+def fetch_market_sentiment() -> dict:
+    """市场情绪指标:5大指数涨跌 + 行业板块资金流前 5 + 概念板块前 5。
+
+    Returns: {
+        indices: [{name, pct, change}],  # 5 大指数
+        top_industries: [...],  # 行业板块资金流前 5
+        top_concepts: [...],    # 概念板块资金流前 5
+    }
+    """
+    indices = fetch_index() or []
+    idx_brief = [
+        {"name": d.get("name"), "pct": d.get("pct"), "change": d.get("change"),
+         "amount_yi": round(d["amount"] / 1e8, 0) if d.get("amount") else None}
+        for d in indices if isinstance(d, dict) and "error" not in d
+    ]
+    return {
+        "indices": idx_brief,
+        "top_industries": fetch_sector_flow("industry", top_n=5),
+        "top_concepts": fetch_sector_flow("concept", top_n=5),
+    }
+
+
 def fetch_index(name=None):
     """获取指数实时行情。
 
@@ -418,7 +488,6 @@ def fmt_index(data):
             f"{'+' if pct >= 0 else ''}{pct}% ({'+' if chg >= 0 else ''}{chg:.2f})"
         )
         lines.append(head)
-        # 详细行:今开/最高/最低/昨收 + 成交额 + 振幅/量比
         ohlc_parts = []
         if d.get("open") is not None:
             ohlc_parts.append(f"今开 {d['open']}")
@@ -440,6 +509,67 @@ def fmt_index(data):
     return "\n".join(lines)
 
 
+def fmt_sector_flow(rows, sector_label="板块"):
+    """板块资金流格式化(行业/概念通用)。"""
+    if not rows:
+        return f"近期无{sector_label}资金流数据"
+    if isinstance(rows, list) and rows and "error" in rows[0]:
+        return f"❌ {rows[0]['error']}"
+    lines = [f"💰 **{sector_label}主力资金流排名**(按净流入降序)", ""]
+    lines.append("| 板块 | 涨幅 | 主力净流入 | 主力占比 |")
+    lines.append("|---|---|---|---|")
+    for r in rows:
+        pct = r.get("pct") or 0
+        mn = r.get("main_net") or 0
+        mp = r.get("main_pct") or 0
+        # 主力净流入:亿元,保留 2 位
+        mn_yi = mn / 1e8 if abs(mn) > 1e8 else mn / 1e4  # <1亿用万
+        mn_str = f"{mn_yi:+.2f}亿" if abs(mn) > 1e8 else f"{mn_yi:+.0f}万"
+        icon = "🔴" if pct >= 0 else "🟢"
+        lines.append(
+            f"| {icon}{r['name']} | {pct:+.2f}% | {mn_str} | {mp:+.2f}% |"
+        )
+    return "\n".join(lines)
+
+
+def fmt_market_sentiment(data):
+    """市场情绪格式化:指数 + 行业板块 + 概念板块。"""
+    if not data:
+        return "❌ 市场情绪数据为空"
+    lines = ["🌡️ **市场情绪速览**", ""]
+    # 1. 5 大指数
+    idx = data.get("indices") or []
+    if idx:
+        lines.append("**主要指数**:")
+        for d in idx:
+            icon = "🔴" if (d.get("pct") or 0) >= 0 else "🟢"
+            pct = d.get("pct") or 0
+            amt = d.get("amount_yi")
+            amt_str = f" 成交{amt:.0f}亿" if amt else ""
+            lines.append(f"  {icon} {d['name']} {pct:+.2f}%{amt_str}")
+    # 2. 行业板块资金流前 5
+    top_ind = data.get("top_industries") or []
+    if top_ind:
+        lines.append("")
+        lines.append("**行业板块资金流 Top5**:")
+        for r in top_ind[:5]:
+            mn = r.get("main_net") or 0
+            mn_yi = mn / 1e8
+            icon = "🔴" if (r.get("pct") or 0) >= 0 else "🟢"
+            lines.append(f"  {icon} {r['name']} {(r.get('pct') or 0):+.2f}% 主力{mn_yi:+.2f}亿")
+    # 3. 概念板块资金流前 5
+    top_con = data.get("top_concepts") or []
+    if top_con:
+        lines.append("")
+        lines.append("**概念板块资金流 Top5**:")
+        for r in top_con[:5]:
+            mn = r.get("main_net") or 0
+            mn_yi = mn / 1e8
+            icon = "🔴" if (r.get("pct") or 0) >= 0 else "🟢"
+            lines.append(f"  {icon} {r['name']} {(r.get('pct') or 0):+.2f}% 主力{mn_yi:+.2f}亿")
+    return "\n".join(lines)
+
+
 if __name__ == "__main__":
     import sys
     cmd = sys.argv[1] if len(sys.argv) > 1 else "all"
@@ -456,5 +586,10 @@ if __name__ == "__main__":
     elif cmd == "index":
         name = sys.argv[2] if len(sys.argv) > 2 else None
         print(fmt_index(fetch_index(name)))
+    elif cmd == "sector_flow":
+        st = sys.argv[2] if len(sys.argv) > 2 else "industry"
+        print(fmt_sector_flow(fetch_sector_flow(st, top_n=10), "行业板块" if st == "industry" else "概念板块"))
+    elif cmd == "sentiment":
+        print(fmt_market_sentiment(fetch_market_sentiment()))
     else:
-        print("用法: python stock_market_extras.py [lhb|north|flow|concept|index] [args]")
+        print("用法: python stock_market_extras.py [lhb|north|flow|concept|index|sector_flow|sentiment] [args]")
