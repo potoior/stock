@@ -57,29 +57,72 @@ def test_cache_put_get(tmp_path, monkeypatch):
     """缓存写入后能读出,过期后返 None。"""
     db = tmp_path / "test.db"
     monkeypatch.setattr(sf, "DB_PATH", db)
-    sf._cache_put("600519", {"code": "600519", "name": "茅台", "ts": int(time.time())})
-    out = sf._cache_get("600519")
-    assert out is not None
-    assert out["code"] == "600519"
-    assert out["name"] == "茅台"
+    sf._cache_put("600519", {"code": "600519", "name": "茅台"}, None)
+    rt, rep = sf._cache_get("600519")
+    assert rt is not None
+    assert rt["code"] == "600519"
+    assert rt["name"] == "茅台"
+    assert rep is None  # 未写 rep
+
+
+def test_cache_put_both_layers(tmp_path, monkeypatch):
+    """rt + rep 分层缓存,各自独立 TTL。"""
+    db = tmp_path / "test.db"
+    monkeypatch.setattr(sf, "DB_PATH", db)
+    sf._cache_put("600519", {"pe": 18}, {"roe": 16})
+    rt, rep = sf._cache_get("600519")
+    assert rt == {"pe": 18}
+    assert rep == {"roe": 16}
 
 
 def test_cache_get_miss(tmp_path, monkeypatch):
-    """缓存不存在返 None。"""
+    """缓存不存在返 (None, None)。"""
     db = tmp_path / "test.db"
     monkeypatch.setattr(sf, "DB_PATH", db)
-    assert sf._cache_get("000000") is None
+    rt, rep = sf._cache_get("000000")
+    assert rt is None
+    assert rep is None
 
 
 def test_cache_get_expired(tmp_path, monkeypatch):
-    """过期缓存返 None。"""
+    """rt 缓存过期(1 天),rep 缓存未过期(30 天)。"""
     db = tmp_path / "test.db"
     monkeypatch.setattr(sf, "DB_PATH", db)
-    # 写一条 TTL 设短
-    monkeypatch.setattr(sf, "CACHE_TTL", 1)
-    sf._cache_put("600519", {"code": "600519"})
-    time.sleep(1.5)
-    assert sf._cache_get("600519") is None
+    # 写入:rt 用过去时间戳(已过期),rep 用新时间戳(未过期)
+    sf._cache_put("600519", {"pe": 18}, {"roe": 16})
+    # 手动改 rt_ts 为 2 天前
+    import sqlite3
+    conn = sqlite3.connect(str(db))
+    conn.execute("UPDATE stock_finance SET rt_ts = ? WHERE code = ?", (int(time.time()) - 86400 * 2, "600519"))
+    conn.commit()
+    conn.close()
+    rt, rep = sf._cache_get("600519")
+    assert rt is None  # rt 过期
+    assert rep is not None  # rep 未过期
+    assert rep["roe"] == 16
+
+
+def test_cache_rt_expired_rep_fresh_partial_fetch(tmp_path, monkeypatch):
+    """rt 过期 rep 未过期:只重拉 rt,不重拉 rep(节省 HTTP)。"""
+    db = tmp_path / "test.db"
+    monkeypatch.setattr(sf, "DB_PATH", db)
+    # 写入 rep 缓存
+    sf._cache_put("600519", None, {"roe": 16, "report_name": "2026中报"})
+    # 让 rt 过期:不写 rt(_cache_put 只写 rep 时 rt_ts 是 None)
+    fetch_calls = []
+    def fake_rt(c):
+        fetch_calls.append("rt")
+        return {"pe": 20, "name": "茅台"}
+    def fake_rep(c):
+        fetch_calls.append("rep")
+        raise AssertionError("rep 未过期不应重拉")
+    monkeypatch.setattr(sf, "_fetch_realtime_finance", fake_rt)
+    monkeypatch.setattr(sf, "_fetch_report_finance", fake_rep)
+
+    r = sf.fetch_finance("600519")
+    assert fetch_calls == ["rt"]  # 只拉了 rt
+    assert r["pe"] == 20
+    assert r["roe"] == 16  # rep 从缓存
 
 
 # ============ fmt_finance 格式化 ============
@@ -139,11 +182,11 @@ def test_fmt_finance_missing_fields():
 
 
 def test_fetch_finance_uses_cache_first(tmp_path, monkeypatch):
-    """缓存命中时不应调网络。"""
+    """两层缓存都命中时不应调网络。"""
     db = tmp_path / "test.db"
     monkeypatch.setattr(sf, "DB_PATH", db)
-    # 预填缓存
-    sf._cache_put("600519", {"code": "600519", "name": "茅台", "ts": int(time.time())})
+    # 预填两层缓存
+    sf._cache_put("600519", {"code": "600519", "name": "茅台"}, {"roe": 16})
 
     def no_call(*a, **kw):
         raise AssertionError("不应调网络")
@@ -152,6 +195,7 @@ def test_fetch_finance_uses_cache_first(tmp_path, monkeypatch):
 
     r = sf.fetch_finance("600519")
     assert r["name"] == "茅台"
+    assert r["roe"] == 16
 
 
 def test_fetch_finance_merges_and_caches(tmp_path, monkeypatch):
@@ -169,10 +213,12 @@ def test_fetch_finance_merges_and_caches(tmp_path, monkeypatch):
     assert r["pe_dynamic"] == 18.36
     assert r["roe"] == 16.75
     assert r["report_name"] == "2026中报"
-    # 缓存已写入
-    cached = sf._cache_get("600519")
-    assert cached is not None
-    assert cached["pe_dynamic"] == 18.36
+    # 两层缓存都已写入
+    cached_rt, cached_rep = sf._cache_get("600519")
+    assert cached_rt is not None
+    assert cached_rt["pe_dynamic"] == 18.36
+    assert cached_rep is not None
+    assert cached_rep["roe"] == 16.75
 
 
 def test_fetch_finance_all_failed(tmp_path, monkeypatch):

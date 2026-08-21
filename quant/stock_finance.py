@@ -18,7 +18,8 @@ log = logging.getLogger("stock_finance")
 
 ENGINE_HOME = Path(__file__).parent
 DB_PATH = ENGINE_HOME / "stock_cache.db"
-CACHE_TTL = 86400  # 1 天
+CACHE_TTL = 86400  # 1 天(实时估值:PE/PB/市值每日变)
+REPORT_CACHE_TTL = 86400 * 30  # 30 天(财报数据:季度才变,ROE/毛利率等)
 
 
 def _eastmoney_secid(code: str) -> str:
@@ -197,37 +198,74 @@ def fetch_shareholder(code: str) -> dict:
     return data
 
 
-def _cache_get(code: str) -> dict | None:
-    """从 sqlite 读缓存,过期返 None。"""
+def _ensure_table():
+    """确保 stock_finance 缓存表存在(分层缓存:实时 + 财报)。"""
+    conn = sqlite3.connect(str(DB_PATH), timeout=5)
+    # 检查是否需要升级旧表(只有 code/data_json/ts 三列的旧版)
+    cols = conn.execute("PRAGMA table_info(stock_finance)").fetchall() if conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='stock_finance'"
+    ).fetchone() else []
+    if cols and any(c[1] == "data_json" for c in cols):
+        # 旧表,删除重建(数据量小,重新拉即可)
+        conn.execute("DROP TABLE stock_finance")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS stock_finance (
+            code TEXT PRIMARY KEY,
+            rt_json TEXT,
+            rt_ts INTEGER,
+            rep_json TEXT,
+            rep_ts INTEGER
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+
+def _cache_get(code: str) -> tuple[dict | None, dict | None]:
+    """从 sqlite 读分层缓存,返回 (rt_data, rep_data),过期返 None。
+
+    - rt(实时估值 PE/PB/市值):TTL=1 天
+    - rep(财报数据 ROE/毛利率):TTL=30 天
+    """
     try:
+        _ensure_table()
         conn = sqlite3.connect(str(DB_PATH), timeout=5)
         cur = conn.execute(
-            "SELECT data_json, ts FROM stock_finance WHERE code=?",
+            "SELECT rt_json, rt_ts, rep_json, rep_ts FROM stock_finance WHERE code=?",
             (code,),
         )
         row = cur.fetchone()
         conn.close()
-        if row and row[1] and int(time.time()) - row[1] < CACHE_TTL:
-            return json.loads(row[0])
+        if not row:
+            return None, None
+        rt_json, rt_ts, rep_json, rep_ts = row
+        now = int(time.time())
+        rt = json.loads(rt_json) if (rt_json and rt_ts and now - rt_ts < CACHE_TTL) else None
+        rep = json.loads(rep_json) if (rep_json and rep_ts and now - rep_ts < REPORT_CACHE_TTL) else None
+        return rt, rep
     except Exception:
         pass
-    return None
+    return None, None
 
 
-def _cache_put(code: str, data: dict) -> None:
-    """写缓存。"""
+def _cache_put(code: str, rt: dict | None, rep: dict | None) -> None:
+    """写分层缓存。rt/rep 任一为 None 时保留旧值(用 COALESCE)。"""
     try:
+        _ensure_table()
         conn = sqlite3.connect(str(DB_PATH), timeout=5)
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS stock_finance (
-                code TEXT PRIMARY KEY,
-                data_json TEXT,
-                ts INTEGER
-            )
-        """)
+        now = int(time.time())
+        rt_js = json.dumps(rt, ensure_ascii=False) if rt else None
+        rep_js = json.dumps(rep, ensure_ascii=False) if rep else None
+        # 用 COALESCE 保留旧值:新值为 NULL 时用旧值(避免覆盖未刷新的那层)
         conn.execute(
-            "INSERT OR REPLACE INTO stock_finance(code, data_json, ts) VALUES(?,?,?)",
-            (code, json.dumps(data, ensure_ascii=False), int(time.time())),
+            """INSERT INTO stock_finance(code, rt_json, rt_ts, rep_json, rep_ts)
+               VALUES(?, ?, ?, ?, ?)
+               ON CONFLICT(code) DO UPDATE SET
+                   rt_json = COALESCE(excluded.rt_json, stock_finance.rt_json),
+                   rt_ts = COALESCE(excluded.rt_ts, stock_finance.rt_ts),
+                   rep_json = COALESCE(excluded.rep_json, stock_finance.rep_json),
+                   rep_ts = COALESCE(excluded.rep_ts, stock_finance.rep_ts)""",
+            (code, rt_js, now if rt else None, rep_js, now if rep else None),
         )
         conn.commit()
         conn.close()
@@ -236,7 +274,11 @@ def _cache_put(code: str, data: dict) -> None:
 
 
 def fetch_finance(code: str) -> dict:
-    """获取股票财务数据(实时 + 财报组合),sqlite 缓存 1 天。
+    """获取股票财务数据(实时 + 财报组合),分层缓存。
+
+    缓存策略:
+    - 实时估值(PE/PB/市值/股本):1 天 TTL(每日变)
+    - 财报数据(ROE/毛利率/EPS/营收):30 天 TTL(季度才变)
 
     Args:
         code: 6 位 A 股代码
@@ -254,17 +296,18 @@ def fetch_finance(code: str) -> dict:
     if not code or not code.isdigit() or len(code) != 6:
         return {"error": f"代码必须是 6 位数字,实际 '{code}'"}
 
-    cached = _cache_get(code)
-    if cached:
-        return cached
-
-    rt = _fetch_realtime_finance(code)
-    rep = _fetch_report_finance(code)
+    # 分层读缓存:rt(实时) + rep(财报)
+    cached_rt, cached_rep = _cache_get(code)
+    # 只拉过期的那层(减少不必要的 HTTP 请求)
+    rt = cached_rt if cached_rt is not None else _fetch_realtime_finance(code)
+    rep = cached_rep if cached_rep is not None else _fetch_report_finance(code)
     if not rt and not rep:
         return {"error": f"获取 {code} 财务数据失败(可能代码错或接口异常)"}
 
-    out = {**rt, **rep, "code": code, "ts": int(time.time())}
-    _cache_put(code, out)
+    out = {**(rt or {}), **(rep or {}), "code": code, "ts": int(time.time())}
+    # 只把刷新过的那层写回缓存(另一层用 COALESCE 保留旧值)
+    _cache_put(code, rt if cached_rt is None else None,
+               rep if cached_rep is None else None)
     return out
 
 
