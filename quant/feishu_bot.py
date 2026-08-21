@@ -1477,6 +1477,75 @@ TOOLS = [
             }
         }
     },
+    # ---------- 市场数据(新) ----------
+    {
+        "type": "function",
+        "function": {
+            "name": "get_lhb",
+            "description": "查询龙虎榜数据(当日上榜个股 + 机构/游资席位净买卖)。用户问'龙虎榜/上榜个股/今日哪些股票上榜'时调用。支持指定日期。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "date": {"type": "string", "description": "日期(可选),如 '20260820' / '2026-08-20' / '昨天',不传=最新"},
+                    "top_n": {"type": "integer", "description": "返回条数,默认 20", "default": 20}
+                }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_north_flow",
+            "description": "查询北向资金(沪深股通)净流入。用户问'北向资金/外资流入/沪深股通/北向今天怎样'时调用。返回近 N 日沪股通+深股通+合计净流入。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "days": {"type": "integer", "description": "近 N 日,默认 5", "default": 5}
+                }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_main_flow",
+            "description": "查询个股主力资金流(超大单/大单/中单/小单净流入)。用户问'X主力资金/X资金流/X资金流入/X主力动向'时调用。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "code": {"type": "string", "description": "6位股票代码或股票名,如 600519 / 茅台"}
+                },
+                "required": ["code"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_concept_sectors",
+            "description": "概念板块反查:给定股票反查它属于哪些行业/概念板块。用户问'X属于什么板块/X是哪个板块的/X有哪些概念'时调用。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "code": {"type": "string", "description": "6位股票代码或股票名,如 600519 / 茅台"}
+                },
+                "required": ["code"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_index",
+            "description": "查询指数行情(上证/深成/创业板/科创50/北证50)。用户问'上证/大盘指数/创业板/科创50/北证50/沪深300'时调用。不传 name 返回全部主要指数。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "指数名(可选),如 '上证'/'深成'/'创业板'/'科创50'/'北证50'/'沪深300'。不传=全部主要指数", "default": ""}
+                }
+            }
+        }
+    },
 ]
 
 
@@ -2230,6 +2299,69 @@ def handler_get_stock_news(code: str, num: int = 15) -> str:
         return f"❌ 查询新闻出错: {e}"
 
 
+def handler_get_lhb(date: str = "", top_n: int = 20) -> str:
+    """查询龙虎榜数据(东财龙虎榜接口)。"""
+    try:
+        from stock_market_extras import fetch_lhb, fmt_lhb
+
+        rows = fetch_lhb(date_str=date if date else None, top_n=int(top_n))
+        return fmt_lhb(rows)
+    except Exception as e:
+        return f"❌ 查询龙虎榜出错: {e}"
+
+
+def handler_get_north_flow(days: int = 5) -> str:
+    """查询北向资金(沪深股通)近 N 日净流入。"""
+    try:
+        from stock_market_extras import fetch_north_flow, fmt_north_flow
+
+        rows = fetch_north_flow(days=int(days))
+        return fmt_north_flow(rows)
+    except Exception as e:
+        return f"❌ 查询北向资金出错: {e}"
+
+
+def handler_get_main_flow(code: str) -> str:
+    """查询个股主力资金流(超大单/大单/中单/小单净流入)。"""
+    try:
+        import stock_names as sn
+        from stock_market_extras import fetch_main_flow, fmt_main_flow
+
+        resolved = sn.resolve_code(code) if code else None
+        if not resolved:
+            return f"❌ 无法识别股票: {code}"
+        d = fetch_main_flow(resolved)
+        return fmt_main_flow(d)
+    except Exception as e:
+        return f"❌ 查询主力资金流出错: {e}"
+
+
+def handler_get_concept_sectors(code: str) -> str:
+    """概念板块反查:给定股票反查它属于哪些板块。"""
+    try:
+        import stock_names as sn
+        from stock_market_extras import fetch_concept_sectors, fmt_concept_sectors
+
+        resolved = sn.resolve_code(code) if code else None
+        if not resolved:
+            return f"❌ 无法识别股票: {code}"
+        sectors = fetch_concept_sectors(resolved)
+        return fmt_concept_sectors(sectors)
+    except Exception as e:
+        return f"❌ 查询概念板块出错: {e}"
+
+
+def handler_get_index(name: str = "") -> str:
+    """查询指数行情(上证/深成/创业板/科创50/北证50)。"""
+    try:
+        from stock_market_extras import fetch_index, fmt_index
+
+        data = fetch_index(name if name else None)
+        return fmt_index(data)
+    except Exception as e:
+        return f"❌ 查询指数行情出错: {e}"
+
+
 # 工具名 → 处理函数映射
 TOOL_HANDLERS = {
     "analyze_stock": lambda args: handler_analyze(args.get("code", "")),
@@ -2284,6 +2416,14 @@ TOOL_HANDLERS = {
     "get_stock_news": lambda args: handler_get_stock_news(
         args.get("code", ""), int(args.get("num", 15))
     ),
+    # 市场数据 skill(新)
+    "get_lhb": lambda args: handler_get_lhb(
+        args.get("date", ""), int(args.get("top_n", 20))
+    ),
+    "get_north_flow": lambda args: handler_get_north_flow(int(args.get("days", 5))),
+    "get_main_flow": lambda args: handler_get_main_flow(args.get("code", "")),
+    "get_concept_sectors": lambda args: handler_get_concept_sectors(args.get("code", "")),
+    "get_index": lambda args: handler_get_index(args.get("name", "")),
 }
 
 MAX_AGENT_STEPS = 6  # 最多 6 步推理(避免无限循环)
@@ -2439,6 +2579,19 @@ SYSTEM_PROMPT = """你是 A 股量化分析助手(集成于飞书群聊),拥有�
   · code 支持 6 位代码或股票名(如 301189 / 茅台)
   · strict 过滤: 只保留 title/summary 明确提到股票名或代码的新闻,过滤无关列表新闻
   · 示例: "301189 有什么新闻" / "茅台最近消息" / "跟奥尼电子相关的新闻"
+
+【市场数据类(实时)】
+- get_lhb(date?, top_n?): 查龙虎榜(当日上榜个股+上榜原因+净买卖额+备注)
+  · 示例: "今天龙虎榜" / "昨天龙虎榜" / "20260820龙虎榜"
+- get_north_flow(days?): 查北向资金(沪股通+深股通+合计净流入)
+  · 示例: "北向资金" / "外资今天怎样" / "沪深股通流入"
+- get_main_flow(code): 查个股主力资金流(超大单/大单/中单/小单净流入,亿)
+  · 示例: "茅台主力资金" / "600519资金流" / "宁德时代资金流向"
+- get_concept_sectors(code): 概念板块反查(给定股票反查它属于哪些板块)
+  · 示例: "茅台属于什么板块" / "宁德时代有哪些概念"
+- get_index(name?): 查指数行情(上证/深成/创业板/科创50/北证50)
+  · 不传 name=全部主要指数
+  · 示例: "上证指数" / "大盘怎样" / "创业板" / "科创50"
 
 工作流程:
 1. 根据用户问题决定调用哪个工具(可多次调用、组合调用)

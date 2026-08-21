@@ -519,6 +519,40 @@
       }
     },
     {
+      "id": "kline_pattern",
+      "name": "K线形态",
+      "type": "builtin",
+      "enabled": true,
+      "params": {}
+    },
+    {
+      "id": "macd_top_divergence",
+      "name": "MACD顶背离",
+      "type": "builtin",
+      "enabled": true,
+      "params": {"n": 60}
+    },
+    {
+      "id": "rsi_top_divergence",
+      "name": "RSI顶背离",
+      "type": "builtin",
+      "enabled": true,
+      "params": {"n": 60}
+    },
+    {
+      "id": "gap",
+      "name": "缺口识别",
+      "type": "builtin",
+      "enabled": true,
+      "params": {
+        "gap_pct": 1.0,
+        "vol_ratio": 1.5,
+        "n": 20,
+        "exhaustion_lookback": 5,
+        "exhaustion_cum_pct": 20
+      }
+    },
+    {
       "id": "custom_ai_demo",
       "name": "放量突破(示例,AI判定)",
       "type": "custom",

@@ -521,6 +521,11 @@ DEFAULT_STRATEGY_PARAMS = {
     # 操练大全14章 选股(剩余)
     "shareholder_select": {"concentrate": -5, "disperse": 10},
     "policy_select": {"num": 10, "min_positive": 2, "min_negative": 2},
+    # 经典 K 线形态 + 顶背离 + 缺口
+    "kline_pattern": {},
+    "macd_top_divergence": {"n": 60},
+    "rsi_top_divergence": {"n": 60},
+    "gap": {"gap_pct": 1.0, "vol_ratio": 1.5, "n": 20, "exhaustion_lookback": 5, "exhaustion_cum_pct": 20},
 }
 
 
@@ -2077,6 +2082,260 @@ def strategy_policy_select(ctx, params):
     return "hold", f"近{len(news)}条新闻:利好{pos_hits}/利空{neg_hits}+价在分位{pos:.1%},无明显政策面信号"
 
 
+# ---------------- 经典 K 线形态 + 顶背离 + 缺口(补齐) ----------------
+
+
+def _kline_body(df, i):
+    """返回 (实体大小, 上下影长度, 是否阳线) 给定 K 线 index。"""
+    o, c, h, lo = df["open"].iloc[i], df["close"].iloc[i], df["high"].iloc[i], df["low"].iloc[i]
+    body = abs(c - o)
+    is_bull = c > o
+    upper_shadow = h - max(o, c)
+    lower_shadow = min(o, c) - lo
+    return body, upper_shadow, lower_shadow, is_bull
+
+
+def strategy_kline_pattern(ctx, params):
+    """K线形态识别(经典日本蜡烛图):识别多种经典反转/中继形态。
+
+    覆盖形态:
+      - 早晨之星 / 黄昏之星(3 K 线反转)
+      - 锤头 / 流星(单 K 长下影/上影)
+      - 看涨吞没 / 看跌吞没(2 K 线反包)
+      - 十字星(开≈收)
+      - 红三兵 / 黑三兵(3 连阳/阴)
+      - 孕线(今日实体 << 昨日实体)
+
+    规则:
+      - 识别当前形态,看涨形态 + 价在低位区(60日分位<=0.4)→ buy
+      - 看跌形态 + 价在高位区(60日分位>=0.6)→ sell
+      - 中性形态(十字星/孕线) + 低位 → 倾向 buy
+      - 无明显形态 → hold
+    """
+    i = ctx["i"]
+    df = ctx["df"]
+    close = ctx["close"]
+    if i < 3:
+        return "hold", "数据不足"
+    body, upper, lower, is_bull = _kline_body(df, i)
+    body_prev, _, _, is_bull_prev = _kline_body(df, i - 1)
+    body_p2, _, _, is_bull_p2 = _kline_body(df, i - 2)
+    avg_body = (body_prev + body_p2) / 2 if (body_prev + body_p2) > 0 else 0.01
+    # 识别形态
+    pattern = None
+    signal_dir = None  # 'bull' / 'bear' / 'neutral'
+    # 十字星(开≈收,实体极小)
+    if body < avg_body * 0.3:
+        pattern = "十字星"
+        signal_dir = "neutral"
+    # 孕线(今日实体 < 昨日 50%)
+    elif body_prev > 0 and body < body_prev * 0.5:
+        pattern = "孕线"
+        signal_dir = "neutral"
+    # 看涨吞没(今日大阳包昨日阴)
+    elif is_bull and not is_bull_prev and body > body_prev and \
+            df["close"].iloc[i] >= df["open"].iloc[i - 1] and df["open"].iloc[i] <= df["close"].iloc[i - 1]:
+        pattern = "看涨吞没"
+        signal_dir = "bull"
+    # 看跌吞没
+    elif not is_bull and is_bull_prev and body > body_prev and \
+            df["open"].iloc[i] >= df["close"].iloc[i - 1] and df["close"].iloc[i] <= df["open"].iloc[i - 1]:
+        pattern = "看跌吞没"
+        signal_dir = "bear"
+    # 锤头(小实体在上,长下影 >= 2× 实体)
+    elif is_bull and lower >= body * 2 and upper < body:
+        pattern = "锤头"
+        signal_dir = "bull"
+    # 流星(小实体在下,长上影 >= 2× 实体)
+    elif not is_bull and upper >= body * 2 and lower < body:
+        pattern = "流星"
+        signal_dir = "bear"
+    # 早晨之星(3 K:大阴 + 跳空小实体 + 大阳收回 50% 以上)
+    elif not is_bull_p2 and body_p2 > avg_body and body_prev < body_p2 * 0.5 and \
+            is_bull and body > body_prev and \
+            df["close"].iloc[i] > (df["open"].iloc[i - 2] + df["close"].iloc[i - 2]) / 2:
+        pattern = "早晨之星"
+        signal_dir = "bull"
+    # 黄昏之星
+    elif is_bull_p2 and body_p2 > avg_body and body_prev < body_p2 * 0.5 and \
+            not is_bull and body > body_prev and \
+            df["close"].iloc[i] < (df["open"].iloc[i - 2] + df["close"].iloc[i - 2]) / 2:
+        pattern = "黄昏之星"
+        signal_dir = "bear"
+    # 红三兵
+    elif is_bull and is_bull_prev and is_bull_p2 and \
+            df["close"].iloc[i] > df["close"].iloc[i - 1] > df["close"].iloc[i - 2]:
+        pattern = "红三兵"
+        signal_dir = "bull"
+    # 黑三兵
+    elif not is_bull and not is_bull_prev and not is_bull_p2 and \
+            df["close"].iloc[i] < df["close"].iloc[i - 1] < df["close"].iloc[i - 2]:
+        pattern = "黑三兵"
+        signal_dir = "bear"
+    if pattern is None:
+        return "hold", "无明显 K 线形态"
+    # 结合价位分位判断
+    if i < 60:
+        return "hold", f"识别到 {pattern},但数据不足判断价位"
+    pos = _percentile_pos(close, i, 60, 0.4)
+    if signal_dir == "bull" and pos <= 0.4:
+        return "buy", f"K线形态 {pattern}(看涨)+ 价在低位(分位{pos:.1%}),低吸"
+    if signal_dir == "bear" and pos >= 0.6:
+        return "sell", f"K线形态 {pattern}(看跌)+ 价在高位(分位{pos:.1%}),减仓"
+    if signal_dir == "neutral" and pos <= 0.4:
+        return "buy", f"K线形态 {pattern}(中性)+ 价在低位(分位{pos:.1%}),倾向低吸"
+    if signal_dir == "neutral" and pos >= 0.6:
+        return "sell", f"K线形态 {pattern}(中性)+ 价在高位(分位{pos:.1%}),倾向减仓"
+    return "hold", f"K线形态 {pattern}({signal_dir}),价在分位{pos:.1%},等位置确认"
+
+
+def _find_top_divergence(close, indicator, n=60, lookback=5):
+    """通用顶背离识别:找近 n 日指标的最近两个高点,判断是否背离。
+
+    顶背离 = 价格创新高 + 指标高点下降
+    Args:
+        close: 收盘价 Series
+        indicator: 指标 Series(DIF / RSI 等)
+        n: 回看窗口
+        lookback: 当前高点相对最近高点的容忍天数
+    Returns: (是否背离, 当前价, 前高价, 当前指标值, 前高指标值)
+    """
+    if len(close) < n:
+        return False, None, None, None, None
+    window_close = close.iloc[-n:]
+    window_ind = indicator.iloc[-n:]
+    # 找局部高点:在窗口内找指标最大值的位置
+    # 简化:找指标最高的两个不连续点(间距>=5日)
+    ind_arr = window_ind.values
+    close_arr = window_close.values
+    # 找指标最大值位置
+    if len(ind_arr) < 10:
+        return False, None, None, None, None
+    # 第一个高点:窗口内指标最大
+    idx1 = int(np.argmax(ind_arr))
+    # 在 idx1 之前找第二个高点
+    if idx1 < 5:
+        return False, None, None, None, None
+    idx0 = int(np.argmax(ind_arr[:idx1 - 5]))
+    # 顶背离:price[idx1] > price[idx0] 但 indicator[idx1] < indicator[idx0]
+    if close_arr[idx1] > close_arr[idx0] and ind_arr[idx1] < ind_arr[idx0]:
+        return True, float(close_arr[idx1]), float(close_arr[idx0]), float(ind_arr[idx1]), float(ind_arr[idx0])
+    return False, float(close_arr[idx1]), float(close_arr[idx0]), float(ind_arr[idx1]), float(ind_arr[idx0])
+
+
+def strategy_macd_top_divergence(ctx, params):
+    """MACD 顶背离识别(经典技术分析):价格新高但 MACD DIF 未新高。
+
+    规则:
+      - 找近 N 日(默认 60)DIF 的最近两个高点
+      - 价格新高 + DIF 高点下降 → 顶背离 → sell(高位风险)
+      - 价格新高 + DIF 也新高 → 趋势健康 → hold
+    """
+    n = int(params.get("n", 60))
+    i = ctx["i"]
+    if i < n:
+        return "hold", "数据不足"
+    diff = ctx["macd_diff"]
+    close = ctx["close"]
+    div, p1, p0, d1, d0 = _find_top_divergence(close, diff, n=n)
+    if p1 is None:
+        return "hold", "无足够高点对比"
+    if div:
+        return "sell", f"MACD顶背离:价{p1:.2f}>{p0:.2f}但DIF{d1:.2f}<{d0:.2f},高位风险"
+    return "hold", f"无顶背离:价{p1:.2f}/DIF{d1:.2f}(前高{p0:.2f}/DIF{d0:.2f}),趋势健康"
+
+
+def strategy_rsi_top_divergence(ctx, params):
+    """RSI 顶背离识别:价格新高但 RSI 未新高。
+
+    规则:
+      - 找近 N 日(默认 60)RSI 的最近两个高点
+      - 价格新高 + RSI 高点下降 → 顶背离 → sell(超买衰竭)
+      - 价格新高 + RSI 也新高 → 趋势健康 → hold
+    """
+    n = int(params.get("n", 60))
+    i = ctx["i"]
+    if i < n:
+        return "hold", "数据不足"
+    rsi = ctx.get("rsi6")
+    if rsi is None:
+        return "hold", "RSI 数据缺失"
+    close = ctx["close"]
+    div, p1, p0, r1, r0 = _find_top_divergence(close, rsi, n=n)
+    if p1 is None:
+        return "hold", "无足够高点对比"
+    if div:
+        return "sell", f"RSI顶背离:价{p1:.2f}>{p0:.2f}但RSI{r1:.1f}<{r0:.1f},超买衰竭"
+    return "hold", f"无RSI顶背离:价{p1:.2f}/RSI{r1:.1f}(前高{p0:.2f}/RSI{r0:.1f}),趋势健康"
+
+
+def strategy_gap(ctx, params):
+    """缺口识别策略:跳空缺口的类型与交易含义。
+
+    缺口类型:
+      - 突破缺口:跳空 >= gap_pct(默认 1%)+ 量比 >= vol_ratio(默认 1.5)+ 突破近 N 日高/低点
+      - 中继缺口:趋势中段跳空,不回补(在 N 日区间外但未突破)
+      - 衰竭缺口:跳空后 5 日内回补 + 量比放大 + 趋势末段(累计涨幅大)
+      - 普通缺口:跳空 < 1%,后续会回补
+
+    规则:
+      - 突破缺口 + 向上 → buy(突破行情启动)
+      - 突破缺口 + 向下 → sell(破位下跌)
+      - 衰竭缺口 + 高位 → sell(趋势末段)
+      - 衰竭缺口 + 低位 → buy(跌势末段)
+      - 普通缺口 → hold
+    """
+    gap_pct = float(params.get("gap_pct", 1.0))
+    vol_ratio_min = float(params.get("vol_ratio", 1.5))
+    n = int(params.get("n", 20))
+    exhaustion_lookback = int(params.get("exhaustion_lookback", 5))
+    exhaustion_cum_pct = float(params.get("exhaustion_cum_pct", 20))
+    i = ctx["i"]
+    df = ctx["df"]
+    if i < n + 1:
+        return "hold", "数据不足"
+    today_open = float(df["open"].iloc[i])
+    prev_close = float(df["close"].iloc[i - 1])
+    if prev_close <= 0:
+        return "hold", "数据异常"
+    # 跳空幅度
+    gap = (today_open - prev_close) / prev_close * 100
+    if abs(gap) < 0.1:
+        return "hold", f"无跳空(跳空{gap:+.2f}%)"
+    avg_vol = df["volume"].iloc[max(0, i - 20):i].mean()
+    vol_ratio = float(df["volume"].iloc[i]) / avg_vol if avg_vol > 0 else 0
+    # 近 N 日高/低点
+    recent_high = float(df["high"].iloc[i - n:i].max())
+    recent_low = float(df["low"].iloc[i - n:i].min())
+    # 突破缺口:跳空>=1% + 放量 + 突破区间
+    if abs(gap) >= gap_pct and vol_ratio >= vol_ratio_min:
+        if gap > 0 and today_open > recent_high:
+            return "buy", f"向上突破缺口:跳空+{gap:.2f}%+量比{vol_ratio:.1f}+突破{n}日高点{recent_high:.2f},启动行情"
+        if gap < 0 and today_open < recent_low:
+            return "sell", f"向下突破缺口:跳空{gap:.2f}%+量比{vol_ratio:.1f}+跌破{n}日低点{recent_low:.2f},破位下跌"
+    # 衰竭缺口:跳空 + 5 日内回补 + 累计涨幅/跌幅大
+    if abs(gap) >= gap_pct * 0.5:
+        # 5 日内是否回补(收盘价回到 prev_close 之下/上)
+        if i >= exhaustion_lookback:
+            # 累计涨幅(近 20 日)
+            cum = (df["close"].iloc[i] - df["close"].iloc[max(0, i - 20)]) / df["close"].iloc[max(0, i - 20)] * 100
+            for j in range(i + 1, min(i + 1 + exhaustion_lookback, len(df))):
+                if gap > 0 and df["close"].iloc[j] < prev_close:
+                    # 向上跳空被回补 + 高位 → sell
+                    if cum >= exhaustion_cum_pct:
+                        return "sell", f"向上衰竭缺口:跳空+{gap:.2f}%+5日内回补+累计涨{cum:.1f}%,趋势末段"
+                    break
+                if gap < 0 and df["close"].iloc[j] > prev_close:
+                    if cum <= -exhaustion_cum_pct:
+                        return "buy", f"向下衰竭缺口:跳空{gap:.2f}%+5日内回补+累计跌{cum:.1f}%,跌势末段"
+                    break
+    # 中继缺口:跳空 + 不回补 + 不突破(在区间内)
+    if abs(gap) >= gap_pct * 0.5:
+        return "hold", f"中继缺口:跳空{gap:+.2f}%+量比{vol_ratio:.1f},未突破区间,趋势中段"
+    # 普通缺口
+    return "hold", f"普通缺口:跳空{gap:+.2f}%+量比{vol_ratio:.1f},后续或回补"
+
+
 # ---------------- 自定义可视化规则策略 ----------------
 
 CONDITION_METRIC_META = {
@@ -2554,6 +2813,11 @@ def analyze(code: str, use_ai: bool = True) -> dict:
         # 操练大全14章 选股(剩余)
         ("shareholder_select", "股东人数选股", strategy_shareholder_select),
         ("policy_select", "政策选股", strategy_policy_select),
+        # 经典 K 线形态 + 顶背离 + 缺口
+        ("kline_pattern", "K线形态", strategy_kline_pattern),
+        ("macd_top_divergence", "MACD顶背离", strategy_macd_top_divergence),
+        ("rsi_top_divergence", "RSI顶背离", strategy_rsi_top_divergence),
+        ("gap", "缺口识别", strategy_gap),
     ]
 
     strategies_cfg = get_strategies()
@@ -2699,6 +2963,7 @@ def scan_with_strategy(
         "pe_select", "roe_pe",
         "daban", "fupan", "bottom_time",
         "shareholder_select", "policy_select",
+        "kline_pattern", "macd_top_divergence", "rsi_top_divergence", "gap",
     }
     if strategy_id not in builtin_ids:
         return {"error": f"未知策略 id: {strategy_id},必须是内置策略之一"}

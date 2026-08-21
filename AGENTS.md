@@ -9,19 +9,20 @@ A 股量化分析系统,集成飞书群聊 Bot(Function Calling ReAct Agent),覆
 - 45 内置策略信号引擎(MACD/KDJ/BOLL/RSI/玉姐 10 条规则 + 操练大全12/14/15/16/17/20章 + 漫画书量能/实战战法等)
 - 玉姐精选全市场扫描(多因子评分排行)
 - 回测 + 参数网格寻优
-- 飞书 Bot Agent(21 个 skill,跨轮记忆,自选股,财务数据,板块分析,历史复盘,策略选股,个股新闻)
+- 飞书 Bot Agent(26 个 skill,跨轮记忆,自选股,财务数据,板块分析,历史复盘,策略选股,个股新闻,龙虎榜,北向资金,主力资金流,板块反查,指数行情)
 - 策略大全(4 来源 73 策略:漫画书 29 + 操练大全 32 + 玉姐 10 + AI 2,已实现 72 个)
 
 ## 目录结构
 
 ```
 quant/
-├── feishu_bot.py          # 飞书长连接 Agent(~3040 行,21 skill)
+├── feishu_bot.py          # 飞书长连接 Agent(~3200 行,26 skill)
 ├── feishu_image.py        # matplotlib 图表(K 线/玉姐/回测/市场)
 ├── feishu.py              # 飞书 webhook 推送(日报/告警)
 ├── stock_names.py         # 股票名称解析(腾讯 smartbox + sqlite 缓存)
-├── stock_finance.py       # 财务数据(东方财富双接口,PE/PB/ROE/市值/EPS,sqlite 缓存 1 天)
-├── strategy_engine.py     # 50 策略信号引擎(23 原有 + 22 新增 + 5 补齐:操练大全12/14/15/16/17/20章 + 漫画书量能/实战战法)
+├── stock_finance.py       # 财务数据(东方财富双接口,PE/PB/ROE/市值/EPS,sqlite 缓存 1 天)+ 股东人数(datacenter)
+├── stock_market_extras.py # 市场扩展数据(龙虎榜/北向资金/主力资金流/概念板块反查/指数行情)
+├── strategy_engine.py     # 54 策略信号引擎(23 原有 + 22 新增 + 5 补齐 + 4 经典形态:K线/顶背离/缺口)
 ├── backtest_builtin.py    # 回测引擎(workers=1,非线程安全)
 ├── yujie_scan.py          # 玉姐精选评分(10 条规则)
 ├── daily_scan.py          # 每日 09:00 全市场扫描 + 飞书日报(systemd timer)
@@ -92,7 +93,7 @@ journalctl --user -u daily-scan -f
 
 ### Agent 设计
 - **Function Calling ReAct**: LLM 自主决策调工具,失败降级到 `route()` 关键词路由
-- **21 个 skill**: 4 数据查询 + 5 策略查询 + 3 策略操作 + 3 回测寻优选股 + 1 自选股 + 1 财务 + 3 批量(对比/板块/历史复盘) + 1 个股新闻
+- **26 个 skill**: 4 数据查询 + 5 策略查询 + 3 策略操作 + 3 回测寻优选股 + 1 自选股 + 1 财务 + 3 批量(对比/板块/历史复盘) + 1 个股新闻 + 5 市场数据(龙虎榜/北向/主力资金流/板块反查/指数)
   - 数据查询: `analyze_stock` / `get_market_status` / `get_yujie_picks` / `get_portfolio`
   - 策略查询: `list_strategies` / `get_strategy_library` / `get_yujie_detail` / `analyze_with_strategy` / `analyze_with_yujie`
   - 策略操作: `toggle_strategy` / `set_strategy_params` / `enable_library_strategy`
@@ -101,6 +102,7 @@ journalctl --user -u daily-scan -f
   - 财务: `get_finance`(单股 PE/PB/市值/ROE/毛利率/净利率/EPS/营收/净利润)
   - 批量: `compare_stocks`(多股对比) / `analyze_sector`(板块成分股) / `query_history_picks`(历史玉姐复盘)
   - 新闻: `get_stock_news`(个股新闻,东财搜索接口,strict 过滤无关列表新闻)
+  - 市场数据: `get_lhb`(龙虎榜) / `get_north_flow`(北向资金) / `get_main_flow`(主力资金流) / `get_concept_sectors`(板块反查) / `get_index`(指数行情)
 - **跨轮记忆**: `session_id = f"{chat_id}:{sender}"`,sqlite `agent_history.db`,最近 6 轮
   - assistant >500 字裁到 200 字 + 截断标记
   - >7 天自动过期(`_purge_old_history` 启动时清理)
@@ -138,7 +140,7 @@ journalctl --user -u daily-scan -f
 - 已融入其他策略的标 `implemented=True` + `engine_id` 指向其融入策略(如 bottom_kline → bottom)
 - `cross_ref` 跨来源查同一策略在哪些书里出现
 
-### 内置策略列表(strategy_engine.py,50 个)
+### 内置策略列表(strategy_engine.py,54 个)
 - 原有 23: macd/kdj/ma_stop/boll/dmi/psy/bias/sar/bbiboll/tower/ma_combo/two_line/life_line/three_third/sparrow/bounce/volume_div/resonance/dmi_psy/rsi/bottom/top/zt
 - 12章 投资法则(4): trend_follow(顺势)/pyramid(金字塔)/stop_profit(暴利收手)/plan_trade(计划交易)
 - 漫画书 量能/实战战法(5): high_volume(高量柱)/demon_stock(看妖股)/dragon_pullback(龙回头)/support_resistance(压力支撑)/range_trade(区间交易)
@@ -148,6 +150,7 @@ journalctl --user -u daily-scan -f
 - 17章 跟庄(5): zhuang_test(试盘)/zhuang_build(建仓)/zhuang_pull(拉高)/zhuang_ship(出货)/zhuang_wash(洗盘)
 - 20章 涨停细分(3): zt_type(类型)/zt_unsealed(封不牢)/zt_pull(拉高型)
 - 14章 基本面(4): pe_select(市盈率)/roe_pe(ROE+PE 复合)/shareholder_select(股东人数变动,东财datacenter)/policy_select(政策选股,新闻关键词)
+- 经典 K 线形态(4): kline_pattern(早晨/黄昏之星/锤头/流星/吞没/十字星/红三兵/黑三兵/孕线)/macd_top_divergence(MACD顶背离)/rsi_top_divergence(RSI顶背离)/gap(缺口识别)
 - 板块热点 hotspot_select 在 daily_scan.scan_hotspot_stocks 实现(市场层面,非单股策略)
 - 需联网的策略(shareholder_select/policy_select)不可用于 scan_with_strategy 全市场扫描,只能 analyze 个股
 
