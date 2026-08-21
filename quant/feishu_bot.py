@@ -2041,38 +2041,36 @@ def handler_analyze_with_yujie(code: str) -> str:
                 miss_rules.append(r)
         total_possible = sum(r["score"] for r in rules)
 
-        # 5. 组装输出
+        # 5. 组装输出(精简版,防超 600 字截断)
         lines = [
             f"📊 {code} {name} {emoji} {price:.2f} ({pct:+.2f}%)",
             f"🎯 **玉姐评分: {score:g} 分** / 满分 {total_possible:g} 分",
         ]
 
         if hit_rules:
-            lines.append(f"\n✅ **命中规则**({len(hit_rules)}条,共{sum(r['score'] for r in hit_rules):g}分)")
+            lines.append(f"\n✅ **命中规则**({len(hit_rules)}条,{sum(r['score'] for r in hit_rules):g}分)")
             for r in hit_rules:
-                lines.append(f"- {r['name']} (+{r['score']}): {r['desc']}")
+                lines.append(f"- {r['name']} +{r['score']}")
 
         if miss_rules:
-            lines.append(f"\n⚪ **未命中规则**({len(miss_rules)}条)")
-            for r in miss_rules:
-                lines.append(f"- {r['name']} (+{r['score']}): {r['desc']}")
+            # 未命中规则只列名,不展开 desc,避免超 600 字
+            miss_names = "、".join(r["name"] for r in miss_rules)
+            lines.append(f"\n⚪ **未命中**({len(miss_rules)}条): {miss_names}")
 
         # 6. 评分解读
         if score >= 7:
-            comment = f"🚀 **强势**({score:g}分),玉姐精选 7+ 分档历史 60 天超额 +11.79%"
+            comment = f"🚀 **强势**({score:g}分),历史 60 天超额 +11.79%"
         elif score >= 5:
             comment = f"📊 **中等偏强**({score:g}分),玉姐精选通常 5+ 分入选"
         elif score >= 3:
-            comment = f"⚠️ **偏弱**({score:g}分),低于玉姐精选 5 分入选门槛"
+            comment = f"⚠️ **偏弱**({score:g}分),低于 5 分入选门槛"
         else:
             comment = f"❌ **弱**({score:g}分),暂不符合玉姐精选标准"
         lines.append(f"\n💡 {comment}")
 
-        lines.append(
-            "\n⚠️ 风险提示:玉姐评分为技术面多因子打分,不构成投资建议,请结合基本面与市场情绪综合判断。"
-        )
         if _pending_images:
             lines.append("\n[已附玉姐专属图: K线+评分标注]")
+        lines.append("\n⚠️ 技术面评分,不构成投资建议")
         return "\n".join(lines)
     except Exception as e:
         return f"❌ 玉姐分析 {code} 出错: {e}"
@@ -2291,11 +2289,11 @@ def handler_scan_with_strategy(
                 f"今日无股票触发 {strategy_id} 买入信号"
             )
 
-        # 批量补股票名(用 stock_names 解析)
+        # 批量补股票名(用 stock_names 缓存,IN 查询)
         try:
             import stock_names as sn
             codes = [h["code"] for h in hits]
-            name_map = sn.resolve_codes(codes) if hasattr(sn, "resolve_codes") else {}
+            name_map = sn.lookup_names(codes) if hasattr(sn, "lookup_names") else {}
             for h in hits:
                 h["name"] = name_map.get(h["code"], "") or h.get("name", "")
         except Exception:
@@ -2476,11 +2474,11 @@ def handler_scan_with_yujie(top_n: int = 20, min_score: float = 5.0, limit: int 
                 f"当前无股票达到 {min_score:g} 分门槛,市场偏弱。可降低门槛(如 3 分)再试。"
             )
 
-        # 批量补股票名
+        # 批量补股票名(用 stock_names 缓存,IN 查询)
         try:
             import stock_names as sn
             codes = [h["code"] for h in hits]
-            name_map = sn.resolve_codes(codes) if hasattr(sn, "resolve_codes") else {}
+            name_map = sn.lookup_names(codes) if hasattr(sn, "lookup_names") else {}
             for h in hits:
                 h["name"] = name_map.get(h["code"], "")
         except Exception:
@@ -3188,9 +3186,18 @@ class FeishuBotClient:
 
         用关键词匹配,避免额外 LLM 调用。
         """
-        slow_keywords = ("回测", "测试", "寻优", "调参", "网格", "最优参数", "backtest", "grid",
-                         "扫描整个市场", "全市场扫描", "全市场玉姐", "重新扫", "scan_with_yujie")
-        return any(kw in text.lower() for kw in slow_keywords)
+        slow_keywords = (
+            # 回测/寻优
+            "回测", "测试", "寻优", "调参", "网格", "最优参数", "backtest", "grid",
+            # 全市场扫描
+            "扫描整个市场", "全市场扫描", "全市场玉姐", "重新扫", "scan_with_yujie",
+            # 多股对比/板块分析(各发多次 HTTP,~10s)
+            "对比", "vs", "和.*哪个", "板块", "成分",
+            # 新闻/资金流(实时抓取,有延迟)
+            "新闻", "消息", "资金流", "龙虎榜", "北向",
+        )
+        text_lower = text.lower()
+        return any(kw in text_lower for kw in slow_keywords)
 
     def _reply_text(self, chat_id: str, text: str):
         """发送文本消息到 chat_id。超长自动分段(按段落边界拆分)。"""

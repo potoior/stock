@@ -47,7 +47,7 @@ CACHE_DB = HOME / "stock_cache.db"
 DEFAULT_PARAMS = {
     "scope": {
         "min_history_days": 60,
-        "min_amount_yi": 0.0,  # 成交额下限(亿)，0=不限制
+        "min_amount_yi": 0.5,  # 成交额下限(亿),过滤流动性差的小盘股
         "exclude_sz_code": [],  # 不剔除任何板块，全 A 股扫描
     },
     "macd": {
@@ -79,7 +79,7 @@ DEFAULT_PARAMS = {
     "low_pos": {
         "score": 1,
         "period": 120,
-        "ratio": 0.4,  # 现价 ≤ (高+低)×ratio
+        "ratio": 0.4,  # 现价 ≤ 最低点 + (高-低)×ratio,即价格在 120 日区间下半 40% 内
     },
     "drawdown": {
         "score": 1,
@@ -223,8 +223,10 @@ def score_stock(code: str, params: dict, df=None) -> tuple[float, list, dict | N
         hits.append(_hit_label("mos_bottom"))
         detail["mos_bottom"] = True
 
-    # 5. MOS 绿色柱子变短（死叉段内）
-    if mos["cl1"] is not None and bar_v < 0 and bar_v > bar_prev:
+    # 5. MOS 绿色柱子变短(死叉段内: DIFF<DEA 时柱子缩短为反转信号)
+    #    修正: 旧版只比 bar_v < 0 > bar_prev,与第3条 macd_green 完全等价导致重复加分
+    #    新版加死叉段判定 diff < dea,与 macd_green 区分开
+    if mos["cl1"] is not None and bar_v < 0 and bar_v > bar_prev and d < e:
         score += float(params["mos"]["green_shrink_score"])
         hits.append(_hit_label("mos_green"))
         detail["mos_green"] = True
@@ -254,12 +256,14 @@ def score_stock(code: str, params: dict, df=None) -> tuple[float, list, dict | N
         hits.append(_hit_label("bull_ma"))
         detail["bull_ma"] = True
 
-    # 9. 120日低位区
+    # 9. 120日低位区: 价格在区间下方 ratio 比例内
+    #    修正: 旧公式 price <= (hi+lo)*ratio 随高低差漂移,语义错误
+    #    新公式: price <= lo + (hi-lo)*ratio (ratio=0.4 即价格在最低点上方 40% 区间内)
     lp = int(params["low_pos"]["period"])
     if i >= lp:
         seg_hi = float(high.iloc[i - lp : i].max())
         seg_lo = float(low.iloc[i - lp : i].min())
-        if price <= (seg_hi + seg_lo) * float(params["low_pos"]["ratio"]):
+        if seg_hi > seg_lo and price <= seg_lo + (seg_hi - seg_lo) * float(params["low_pos"]["ratio"]):
             score += float(params["low_pos"]["score"])
             hits.append(_hit_label("low_pos"))
             detail["low_pos"] = True

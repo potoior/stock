@@ -172,6 +172,33 @@ def _load_all_cached_names() -> dict[str, str]:
     return out
 
 
+def lookup_names(codes: list[str]) -> dict[str, str]:
+    """批量查 code → name 映射(只读 sqlite 缓存,不联网)。
+
+    供扫描结果展示用:已知一堆代码,需要批量补名称。
+    缓存未命中的 code 不出现在返回 dict 中(调用方自行用空串兜底)。
+    """
+    if not codes:
+        return {}
+    _ensure_table()
+    out: dict[str, str] = {}
+    try:
+        conn = sqlite3.connect(str(DB_PATH), timeout=5)
+        # 用 IN(...) 一次性查全部,避免 N+1
+        placeholders = ",".join("?" * len(codes))
+        rows = conn.execute(
+            f"SELECT code, name FROM stock_names WHERE code IN ({placeholders}) AND name != ''",
+            codes,
+        ).fetchall()
+        conn.close()
+        for code, name in rows:
+            if name:
+                out[code] = name
+    except Exception:
+        pass
+    return out
+
+
 def resolve_codes(text: str) -> list[str]:
     """从一段文本中提取所有股票代码或名称,返回去重后的代码列表。
 

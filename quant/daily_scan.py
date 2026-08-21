@@ -17,6 +17,7 @@
 
 import argparse
 import json
+import logging
 import time
 import urllib.request
 from datetime import datetime
@@ -27,6 +28,7 @@ from news_digest import fetch_news
 REPORTS = Path(__file__).parent / "reports"
 HQ_URL = "http://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/Market_Center.getHQNodeData"
 UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36"
+log = logging.getLogger("quant.daily")
 
 
 def fetch_market_page(page=1, num=100, sort="amount", asc=0):
@@ -40,17 +42,31 @@ def norm_code(symbol):
     return symbol[2:] if symbol[:2].lower() in ("sh", "sz", "bj") else symbol
 
 
-def fetch_market_all(limit=0):
-    """抓取全市场 A 股实时行情，返回标准化字典列表。"""
+def fetch_market_all(limit=0, max_pages=80):
+    """抓取全市场 A 股实时行情,返回标准化字典列表。
+
+    每页失败重试 2 次(间隔 1s),仍失败才跳过该页继续下一页,
+    避免单页网络抖动丢掉后面所有页。
+    """
     rows = []
     page = 1
-    while True:
-        try:
-            batch = fetch_market_page(page=page, num=100, sort="amount", asc=0)
-        except Exception:
-            break
+    while page <= max_pages:
+        batch = None
+        last_err = None
+        for _ in range(2):  # 重试 2 次
+            try:
+                batch = fetch_market_page(page=page, num=100, sort="amount", asc=0)
+                break
+            except Exception as e:
+                last_err = e
+                time.sleep(1.0)
+        if batch is None:
+            # 该页 2 次都失败:跳过继续下一页(避免一页坏掉丢全部)
+            log.warning("fetch_market_page page=%d 重试 2 次仍失败: %s,跳过", page, last_err)
+            page += 1
+            continue
         if not batch:
-            break
+            break  # 真正的尾页(空数据)才退出
         rows.extend(batch)
         if limit and len(rows) >= limit:
             rows = rows[:limit]
