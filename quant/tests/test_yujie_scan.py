@@ -124,11 +124,32 @@ def test_load_picks_roundtrip(monkeypatch, tmp_path):
 # ---------------- scan_all_cached 全市场扫描 ----------------
 
 
+def _make_bulk_df(codes, n=120, seed=42):
+    """构造批量拉取的 DataFrame(模拟新版 scan_all_cached 的 bulk_df)。"""
+    import numpy as np
+    import pandas as pd
+    frames = []
+    for code in codes:
+        rng = np.random.default_rng(seed)
+        close = 10 + np.cumsum(rng.normal(0, 0.2, n))
+        frames.append(pd.DataFrame({
+            "code": [code] * n,
+            "date": [f"20260{i:03d}" for i in range(n)],
+            "open": close, "close": close,
+            "high": close * 1.02, "low": close * 0.98,
+            "volume": [1000000.0] * n,
+        }))
+    df = pd.concat(frames, ignore_index=True)
+    # 模拟新版 to_datetime:用 errors='coerce' 容错(测试 date 不是真实日期)
+    df["date"] = pd.to_datetime(df["date"], format="%Y%m%d", errors="coerce")
+    return df
+
+
 def test_scan_all_cached_with_limit(monkeypatch):
     """scan_all_cached 用 limit=10 应只扫 10 只,返回结构正确。"""
     import yujie_scan
-    # mock sqlite 返回 10 只假股票
-    fake_rows = [(f"60000{i}", 120, "20260820") for i in range(10)]
+    # mock sqlite GROUP BY 返回 10 只假股票(code, last_date)
+    fake_rows = [(f"60000{i}", "20260820") for i in range(10)]
 
     def fake_connect(*args, **kwargs):
         conn = MagicMock()
@@ -136,21 +157,10 @@ def test_scan_all_cached_with_limit(monkeypatch):
         conn.close = lambda: None
         return conn
 
-    # mock pd.read_sql 返回简单 df
+    # mock pd.read_sql 批量返回(新版用 IN(...) 一次拉全部 candidates)
     def fake_read_sql(query, conn, params=None):
-        code = params[0] if params else ""
-        n = 120
-        import numpy as np
-        import pandas as pd
-        rng = np.random.default_rng(42)
-        close = 10 + np.cumsum(rng.normal(0, 0.2, n))
-        return pd.DataFrame({
-            "code": [code] * n,
-            "date": [f"20260{i:03d}" for i in range(n)],
-            "open": close, "close": close,
-            "high": close * 1.02, "low": close * 0.98,
-            "volume": [1000000.0] * n,
-        })
+        codes = params if params else []
+        return _make_bulk_df(codes)
 
     monkeypatch.setattr("sqlite3.connect", fake_connect)
     monkeypatch.setattr("pandas.read_sql", fake_read_sql)
@@ -166,7 +176,7 @@ def test_scan_all_cached_with_limit(monkeypatch):
 def test_scan_all_cached_hits_structure(monkeypatch):
     """hits 中每条应有 code/score/hits/price 字段。"""
     import yujie_scan
-    fake_rows = [("600519", 120, "20260820")]
+    fake_rows = [("600519", "20260820")]
 
     def fake_connect(*args, **kwargs):
         conn = MagicMock()
@@ -175,19 +185,8 @@ def test_scan_all_cached_hits_structure(monkeypatch):
         return conn
 
     def fake_read_sql(query, conn, params=None):
-        code = params[0] if params else "600519"
-        import numpy as np
-        import pandas as pd
-        n = 120
-        rng = np.random.default_rng(42)
-        close = 10 + np.cumsum(rng.normal(0, 0.2, n))
-        return pd.DataFrame({
-            "code": [code] * n,
-            "date": [f"20260{i:03d}" for i in range(n)],
-            "open": close, "close": close,
-            "high": close * 1.02, "low": close * 0.98,
-            "volume": [1000000.0] * n,
-        })
+        codes = params if params else ["600519"]
+        return _make_bulk_df(codes)
 
     monkeypatch.setattr("sqlite3.connect", fake_connect)
     monkeypatch.setattr("pandas.read_sql", fake_read_sql)
@@ -202,7 +201,7 @@ def test_scan_all_cached_hits_structure(monkeypatch):
 def test_scan_all_cached_progress_callback(monkeypatch):
     """progress_callback 应被调用。"""
     import yujie_scan
-    fake_rows = [(f"60000{i}", 120, "20260820") for i in range(10)]
+    fake_rows = [(f"60000{i}", "20260820") for i in range(10)]
     call_log = []
 
     def fake_connect(*args, **kwargs):
@@ -212,19 +211,8 @@ def test_scan_all_cached_progress_callback(monkeypatch):
         return conn
 
     def fake_read_sql(query, conn, params=None):
-        code = params[0] if params else ""
-        import numpy as np
-        import pandas as pd
-        n = 120
-        rng = np.random.default_rng(42)
-        close = 10 + np.cumsum(rng.normal(0, 0.2, n))
-        return pd.DataFrame({
-            "code": [code] * n,
-            "date": [f"20260{i:03d}" for i in range(n)],
-            "open": close, "close": close,
-            "high": close * 1.02, "low": close * 0.98,
-            "volume": [1000000.0] * n,
-        })
+        codes = params if params else []
+        return _make_bulk_df(codes)
 
     monkeypatch.setattr("sqlite3.connect", fake_connect)
     monkeypatch.setattr("pandas.read_sql", fake_read_sql)

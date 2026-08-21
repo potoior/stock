@@ -29,6 +29,8 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 
+import pandas as pd
+
 from daily_scan import fetch_market_all, norm_code
 from strategy_engine import (
     CONFIG_PATH,
@@ -454,51 +456,58 @@ def scan_all_cached(
     t0 = _time.time()
     params = get_params()
 
-    # 1. 从 daily 表取所有有缓存的股票(同 scan_with_strategy 思路)
+    # 1. 从 daily 表取所有有缓存的股票(同 scan_with_strategy 优化思路)
+    # 优化: 不用 N+1 sqlite(每只单独 connect + read_sql),改为先拿 candidates 再批量拉
     from strategy_engine import CACHE_DB
     conn = sqlite3.connect(str(CACHE_DB), timeout=30)
     try:
+        # 1a. 用 GROUP BY 拿 candidates(冷启动 25s,热缓存 0.3s,可接受)
         rows = conn.execute(
-            "SELECT code, COUNT(*) as n, MAX(date) as last FROM daily GROUP BY code"
+            "SELECT code, MAX(date) as last FROM daily GROUP BY code"
         ).fetchall()
+        # 1b. 过滤:最新日期近 7 日内(避免陈旧缓存)
+        today = datetime.now().strftime("%Y%m%d")
+        cutoff_today = str(int(today) - 7) if today.isdigit() else today
+        # 兼容 (code, last) 和 (code, n, last) 两种 row 格式
+        candidates = []
+        for row in rows:
+            code = row[0]
+            last = row[-1]
+            if last and last >= cutoff_today:
+                candidates.append(code)
+        if limit and limit < len(candidates):
+            candidates = candidates[:limit]
+
+        # 1c. 一次性批量拉取 candidates 的全部历史数据(避免 N+1)
+        # 用 IN(...) 限制只拉所需股票,320 天 × N 只
+        if not candidates:
+            conn.close()
+            return {"scanned": 0, "hits_count": 0, "hits": [], "elapsed_sec": 0.0}
+        placeholders = ",".join("?" * len(candidates))
+        bulk_df = pd.read_sql(
+            f"SELECT code, date, open, close, high, low, volume FROM daily WHERE code IN ({placeholders})",
+            conn,
+            params=candidates,
+        )
+        bulk_df["date"] = pd.to_datetime(bulk_df["date"], format="%Y%m%d", errors="coerce")
     finally:
         conn.close()
 
-    # 过滤:数据 >= 60 日 + 最新日期近 7 日内
-    today = datetime.now().strftime("%Y%m%d")
-    cutoff = str(int(today) - 7) if today.isdigit() else today
-    candidates = []
-    for code, n_days, last in rows:
-        if n_days < 60:
-            continue
-        if last < cutoff:
-            continue
-        candidates.append(code)
-    if limit and limit < len(candidates):
-        candidates = candidates[:limit]
+    # 按 code 分组(每个 code 一个 df,供 worker 直接取)
+    grouped = {code: g.sort_values("date").reset_index(drop=True)
+               for code, g in bulk_df.groupby("code", sort=False)}
 
     total = len(candidates)
-
-    # 2. 多线程评分(直接读 sqlite,跳过 get_daily_data 联网,加速全市场扫描)
-    import pandas as pd
-
-    from strategy_engine import CACHE_DB
 
     results = []
     scanned = [0]
     lock = threading.Lock()
-    # 每个 worker 用独立 sqlite 连接(线程安全)
+
     def _worker(code):
         try:
-            conn = sqlite3.connect(str(CACHE_DB), timeout=30)
-            df = pd.read_sql(
-                "SELECT * FROM daily WHERE code=? ORDER BY date", conn, params=(code,)
-            )
-            conn.close()
-            if len(df) < 60:
+            df = grouped.get(code)
+            if df is None or len(df) < 60:
                 return "", 0, [], None
-            df["date"] = pd.to_datetime(df["date"], format="%Y%m%d")
-            df = df.sort_values("date").reset_index(drop=True)
             sc, hits, detail = score_stock(code, params, df=df)
         except Exception:
             sc, hits, detail = 0, [], None

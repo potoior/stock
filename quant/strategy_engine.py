@@ -2917,6 +2917,51 @@ def analyze(code: str, use_ai: bool = True) -> dict:
     }
 
 
+# 策略 → 依赖的 ctx 指标字段(只列从 ctx 取的,策略函数内部自调 compute_xxx 的不算)
+# 用于 scan_with_strategy 按需计算,避免每股算全套 10+ 指标只用 1 个的浪费
+_STRATEGY_DEPS: dict[str, tuple[str, ...]] = {
+    "bottom_ma": ("ma10", "ma20", "ma5", "ma60"),
+    "bottom_time": ("ma60",),
+    "dragon_pullback": ("ma10",),
+    "macd_top_divergence": ("macd_diff",),
+    "plan_trade": ("ma10", "macd_dea", "macd_diff"),
+    "resonance": ("boll_m", "ma5"),
+    "rsi_top_divergence": ("rsi6",),
+    "trend_follow": ("adx", "ma10", "ma20", "ma5"),
+    "tower": ("tower",),
+    "zhuang_wash": ("ma20",),
+    # 其余 44 策略只用 df/close/i,无额外依赖
+}
+
+
+def _compute_indicator(df, ind: str):
+    """按指标名按需计算单个指标,返回 (value or None)。
+    用于 scan_with_strategy 按 _STRATEGY_DEPS 只算需要的。
+    """
+    close = df["close"]
+    if ind in ("ma5", "ma10", "ma20", "ma60", "ma7", "ma13"):
+        n = int(ind[2:])
+        return close.rolling(n).mean()
+    if ind == "macd_diff":
+        d, _, _ = compute_macd(df)
+        return d
+    if ind == "macd_dea":
+        _, e, _ = compute_macd(df)
+        return e
+    if ind == "boll_m":
+        _, m, _ = compute_boll(df)
+        return m
+    if ind == "rsi6":
+        r6, _ = compute_rsi(df)
+        return r6
+    if ind == "adx":
+        _, _, a = compute_dmi(df)
+        return a
+    if ind == "tower":
+        return compute_tower(df)
+    return None
+
+
 def scan_with_strategy(
     strategy_id: str,
     top_n: int = 20,
@@ -2979,29 +3024,32 @@ def scan_with_strategy(
         }
 
     # 2. 从 daily 表取所有股票的最新数据(不主动 fetch,避免 4700 次联网)
+    # 优化: 不用全表 GROUP BY(450 万行 ~25s),改为只取最新日期的 code 列表(~5000 行 <0.1s)
+    # 数据长度过滤交给策略函数自己处理(< 60 天的 macd/kdj 会返回 hold)
+    from datetime import datetime as _dt
+    from datetime import timedelta as _td
     conn = sqlite3.connect(str(CACHE_DB), timeout=30)
     try:
-        # 取所有有缓存的股票代码
+        latest_date = conn.execute("SELECT MAX(date) FROM daily").fetchone()[0]
+        if not latest_date:
+            conn.close()
+            return {"error": "daily 表为空,请先运行 daily_scan 抓取数据"}
+        # 取最新日期前 7 天内有数据的 code(放宽到 7 天避免停牌股被漏掉)
+        # daily 表 date 是 YYYYMMDD 字符串,手动算 7 天前(测试 mock 可能返回非 str,兼容)
+        if isinstance(latest_date, str):
+            cutoff = (_dt.strptime(latest_date, "%Y%m%d") - _td(days=7)).strftime("%Y%m%d")
+        else:
+            cutoff = latest_date  # mock 场景,直接用
         rows = conn.execute(
-            "SELECT code, COUNT(*) as n, MAX(date) as last FROM daily GROUP BY code"
+            "SELECT DISTINCT code FROM daily WHERE date >= ?",
+            (cutoff,),
         ).fetchall()
     finally:
         conn.close()
 
-    # 过滤:数据 >= 60 日 + 最新日期近 5 日内(避免拉到陈旧缓存)
-    from datetime import datetime as _dt
-    today = _dt.now().strftime("%Y%m%d")
-    # 简单日期比较:把 today 减 5 天,这里用 int 减 5(忽略月末)
-    # 实际用最近 5 个交易日即可,宽松用 today - 7
-    cutoff = str(int(today) - 7) if today.isdigit() else today
-
-    candidates = []
-    for code, n, last in rows:
-        if n < 60:
-            continue
-        if last < cutoff:
-            continue  # 数据超过 7 天未更新,跳过
-        candidates.append(code)
+    # 过滤:无(数据长度过滤交给策略函数,避免 N+1 查 COUNT)
+    # 兼容旧版 (code, n, last) 三元组(测试 mock)和新版 (code,) 单元组
+    candidates = [row[0] for row in rows]
     if limit and limit < len(candidates):
         candidates = candidates[:limit]
 
@@ -3035,37 +3083,16 @@ def scan_with_strategy(
 
             # 跳过 ST/退市(用股票名,但这里没有 name 字段,跳过)
 
-            # 构造 ctx(只算需要的指标,用 analyze 同款)
-            macd_diff, macd_dea, _ = compute_macd(df)
-            k, d, j, _ = compute_kdj(df)
-            boll_u, boll_m, boll_l = compute_boll(df)
-            psy = compute_psy(df)
-            bias1, bias2, bias3 = compute_bias(df)
-            pdi, mdi, adx = compute_dmi(df)
-            sar, _trend = compute_sar(df)
-            bbiboll_u, bbiboll_m, bbiboll_l = compute_bbiboll(df)
-            tower = compute_tower(df)
-            rsi6, rsi12 = compute_rsi(df)
-            df["ma5"] = close.rolling(5).mean()
-            df["ma10"] = close.rolling(10).mean()
-            df["ma20"] = close.rolling(20).mean()
-            df["ma60"] = close.rolling(60).mean()
-            df["ma7"] = close.rolling(7).mean()
-            df["ma13"] = close.rolling(13).mean()
-
+            # 构造 ctx:只算当前策略依赖的指标(其余策略函数内部自调 compute_xxx)
+            # 优化:不再预算全套 10+ 指标,4700 股 × 10+ 指标的浪费消除
             ctx = {
                 "i": i, "price": price, "df": df, "close": close, "code": code,
                 "realtime": None,
-                "macd_diff": macd_diff, "macd_dea": macd_dea, "macd_bar": _,
-                "k": k, "d": d, "j": j,
-                "boll_u": boll_u, "boll_m": boll_m, "boll_l": boll_l,
-                "psy": psy, "bias1": bias1, "bias2": bias2, "bias3": bias3,
-                "pdi": pdi, "mdi": mdi, "adx": adx, "sar": sar,
-                "bbiboll_u": bbiboll_u, "bbiboll_m": bbiboll_m, "bbiboll_l": bbiboll_l,
-                "tower": tower, "rsi6": rsi6, "rsi12": rsi12,
-                "ma5": df["ma5"], "ma10": df["ma10"], "ma20": df["ma20"], "ma60": df["ma60"],
-                "ma7": df["ma7"], "ma13": df["ma13"],
             }
+            deps = _STRATEGY_DEPS.get(strategy_id, ())
+            for ind in deps:
+                ctx[ind] = _compute_indicator(df, ind)
+
             sg, reason = fn(ctx, params)
             if sg != "buy":
                 continue
