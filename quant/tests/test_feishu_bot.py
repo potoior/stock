@@ -1173,3 +1173,51 @@ def test_print_stats_with_data(capsys):
 
 
 
+
+
+# ---------------- 消息去重 _is_duplicate_message ----------------
+
+
+def test_is_duplicate_message_first_time_false():
+    """第一次见到的 msg_id 应返回 False(未处理过)。"""
+    import feishu_bot
+    # 清空状态
+    feishu_bot._seen_message_ids.clear()
+    assert feishu_bot._is_duplicate_message("om_test_001") is False
+
+
+def test_is_duplicate_message_second_time_true():
+    """同一 msg_id 第二次应返回 True(已处理过)。"""
+    import feishu_bot
+    feishu_bot._seen_message_ids.clear()
+    feishu_bot._is_duplicate_message("om_test_002")
+    assert feishu_bot._is_duplicate_message("om_test_002") is True
+
+
+def test_is_duplicate_message_different_ids():
+    """不同 msg_id 都应返回 False。"""
+    import feishu_bot
+    feishu_bot._seen_message_ids.clear()
+    assert feishu_bot._is_duplicate_message("om_a") is False
+    assert feishu_bot._is_duplicate_message("om_b") is False
+    assert feishu_bot._is_duplicate_message("om_c") is False
+    assert feishu_bot._is_duplicate_message("om_a") is True  # 重复
+
+
+def test_is_duplicate_message_lru_eviction():
+    """超过 SEEN_MSG_MAX 应淘汰最老的。"""
+    import feishu_bot
+    feishu_bot._seen_message_ids.clear()
+    # 填满到上限
+    for i in range(feishu_bot.SEEN_MSG_MAX):
+        feishu_bot._is_duplicate_message(f"om_{i:04d}")
+    # 加一个新 id,应触发淘汰
+    feishu_bot._is_duplicate_message("om_new")
+    # 最老的 om_0000 应被淘汰,再插入应返回 False
+    assert feishu_bot._is_duplicate_message("om_0000") is False
+
+
+def test_is_duplicate_message_empty_id():
+    """空 msg_id 应返回 False(不去重,允许处理)。"""
+    import feishu_bot
+    assert feishu_bot._is_duplicate_message("") is False

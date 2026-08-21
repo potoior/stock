@@ -3036,6 +3036,35 @@ def _split_long_text(text: str, max_len: int = 3800) -> list[str]:
     return chunks
 
 
+# 消息去重:飞书长连接可能推送同一消息多次(ws 重连/服务端重复推送),
+# 用 message_id 做 LRU 缓存,避免同一问题回复两次。
+_seen_message_ids: dict[str, float] = {}
+_seen_msg_lock = threading.Lock()
+SEEN_MSG_MAX = 500  # 最多保留 500 条,约 1 天活跃量
+SEEN_MSG_TTL = 3600 * 4  # 4 小时过期
+
+
+def _is_duplicate_message(msg_id: str) -> bool:
+    """检查消息是否已处理过,未处理则记录返回 False,已处理返回 True。"""
+    import time as _t
+    now = _t.time()
+    with _seen_msg_lock:
+        # 过期清理
+        if len(_seen_message_ids) > SEEN_MSG_MAX:
+            cutoff = now - SEEN_MSG_TTL
+            for k in list(_seen_message_ids.keys()):
+                if _seen_message_ids[k] < cutoff:
+                    del _seen_message_ids[k]
+        if msg_id in _seen_message_ids:
+            return True
+        _seen_message_ids[msg_id] = now
+        # 超 LRU 上限,删最老的
+        if len(_seen_message_ids) > SEEN_MSG_MAX:
+            oldest = min(_seen_message_ids, key=_seen_message_ids.get)
+            del _seen_message_ids[oldest]
+        return False
+
+
 class FeishuBotClient:
     """飞书长连接机器人客户端。"""
 
@@ -3111,6 +3140,13 @@ class FeishuBotClient:
             msg_type = msg.message_type
             content_str = msg.content
             sender = data.event.sender.sender_id.open_id
+
+            # 消息去重:飞书长连接可能推送同一消息多次(ws 重连/服务端重复推送),
+            # 用 message_id 做幂等,避免同一问题回复两次。
+            msg_id = msg.message_id or ""
+            if msg_id and _is_duplicate_message(msg_id):
+                log.info("跳过重复消息 msg_id=%s", msg_id)
+                return
 
             # 仅处理文本消息
             if msg_type != "text":
