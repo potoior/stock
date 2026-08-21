@@ -463,6 +463,62 @@
       }
     },
     {
+      "id": "daban",
+      "name": "打板策略",
+      "type": "builtin",
+      "enabled": true,
+      "params": {
+        "zt_pct": 9.6,
+        "min_vol_ratio": 1.5,
+        "consec": 2,
+        "n": 10
+      }
+    },
+    {
+      "id": "fupan",
+      "name": "复盘法",
+      "type": "builtin",
+      "enabled": true,
+      "params": {
+        "n": 30,
+        "zt_pct": 9.6,
+        "support_pct": 5,
+        "resistance_pct": 5,
+        "rise_threshold": 20
+      }
+    },
+    {
+      "id": "bottom_time",
+      "name": "时间识底",
+      "type": "builtin",
+      "enabled": true,
+      "params": {
+        "n": 120,
+        "tolerance": 2
+      }
+    },
+    {
+      "id": "shareholder_select",
+      "name": "股东人数选股",
+      "type": "builtin",
+      "enabled": true,
+      "params": {
+        "concentrate": -5,
+        "disperse": 10
+      }
+    },
+    {
+      "id": "policy_select",
+      "name": "政策选股",
+      "type": "builtin",
+      "enabled": true,
+      "params": {
+        "num": 10,
+        "min_positive": 2,
+        "min_negative": 2
+      }
+    },
+    {
       "id": "custom_ai_demo",
       "name": "放量突破(示例,AI判定)",
       "type": "custom",

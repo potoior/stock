@@ -10,7 +10,7 @@ A 股量化分析系统,集成飞书群聊 Bot(Function Calling ReAct Agent),覆
 - 玉姐精选全市场扫描(多因子评分排行)
 - 回测 + 参数网格寻优
 - 飞书 Bot Agent(21 个 skill,跨轮记忆,自选股,财务数据,板块分析,历史复盘,策略选股,个股新闻)
-- 策略大全(4 来源 73 策略:漫画书 29 + 操练大全 32 + 玉姐 10 + AI 2,已实现 67 个)
+- 策略大全(4 来源 73 策略:漫画书 29 + 操练大全 32 + 玉姐 10 + AI 2,已实现 72 个)
 
 ## 目录结构
 
@@ -21,7 +21,7 @@ quant/
 ├── feishu.py              # 飞书 webhook 推送(日报/告警)
 ├── stock_names.py         # 股票名称解析(腾讯 smartbox + sqlite 缓存)
 ├── stock_finance.py       # 财务数据(东方财富双接口,PE/PB/ROE/市值/EPS,sqlite 缓存 1 天)
-├── strategy_engine.py     # 45 策略信号引擎(23 原有 + 22 新增:操练大全12/14/15/16/17/20章 + 漫画书量能/实战战法)
+├── strategy_engine.py     # 50 策略信号引擎(23 原有 + 22 新增 + 5 补齐:操练大全12/14/15/16/17/20章 + 漫画书量能/实战战法)
 ├── backtest_builtin.py    # 回测引擎(workers=1,非线程安全)
 ├── yujie_scan.py          # 玉姐精选评分(10 条规则)
 ├── daily_scan.py          # 每日 09:00 全市场扫描 + 飞书日报(systemd timer)
@@ -133,21 +133,23 @@ journalctl --user -u daily-scan -f
 
 ### 策略大全(strategy_library.json)
 - 4 来源: `book_cartoon`(漫画书 29) + `book_caolian`(操练大全 32) + `yujie_custom`(玉姐 10) + `ai_custom`(AI 2)
-- 73 策略中 67 已实现,6 保留未实现(打板/T+0/复盘法/policy_select/shareholder_select/bottom_time,需 Level-2/分钟/政策/股东人数/玄学数据)
+- 73 策略中 72 已实现,1 保留未实现(T+0,需分钟数据,无法用日 K 线实现)
 - 每个策略有 `id` / `name` / `category` / `implemented`(是否在引擎里实现) / `engine_id`(关联策略引擎中的实现 id)
 - 已融入其他策略的标 `implemented=True` + `engine_id` 指向其融入策略(如 bottom_kline → bottom)
 - `cross_ref` 跨来源查同一策略在哪些书里出现
 
-### 内置策略列表(strategy_engine.py,45 个)
+### 内置策略列表(strategy_engine.py,50 个)
 - 原有 23: macd/kdj/ma_stop/boll/dmi/psy/bias/sar/bbiboll/tower/ma_combo/two_line/life_line/three_third/sparrow/bounce/volume_div/resonance/dmi_psy/rsi/bottom/top/zt
 - 12章 投资法则(4): trend_follow(顺势)/pyramid(金字塔)/stop_profit(暴利收手)/plan_trade(计划交易)
 - 漫画书 量能/实战战法(5): high_volume(高量柱)/demon_stock(看妖股)/dragon_pullback(龙回头)/support_resistance(压力支撑)/range_trade(区间交易)
-- 15章 抄底(1): bottom_ma(均线识底)
+- 漫画书 实战战法 补齐(2): daban(打板,日K线简化版)/fupan(复盘法,量化版)
+- 15章 抄底(2): bottom_ma(均线识底)/bottom_time(时间识底,斐波那契时间窗)
 - 16章 逃顶(2): top_weekly(周线见顶)/top_monthly(月线见顶)
 - 17章 跟庄(5): zhuang_test(试盘)/zhuang_build(建仓)/zhuang_pull(拉高)/zhuang_ship(出货)/zhuang_wash(洗盘)
 - 20章 涨停细分(3): zt_type(类型)/zt_unsealed(封不牢)/zt_pull(拉高型)
-- 14章 基本面(2): pe_select(市盈率)/roe_pe(ROE+PE 复合)
+- 14章 基本面(4): pe_select(市盈率)/roe_pe(ROE+PE 复合)/shareholder_select(股东人数变动,东财datacenter)/policy_select(政策选股,新闻关键词)
 - 板块热点 hotspot_select 在 daily_scan.scan_hotspot_stocks 实现(市场层面,非单股策略)
+- 需联网的策略(shareholder_select/policy_select)不可用于 scan_with_strategy 全市场扫描,只能 analyze 个股
 
 ### 股票名识别(stock_names.py)
 - 6 位代码直接返回
@@ -159,6 +161,7 @@ journalctl --user -u daily-scan -f
 - 东方财富双接口:push2 实时估值(PE/PB/市值)+ F10 财报(ROE/毛利率/净利率/EPS)
 - sqlite 缓存 1 天(PE/市值每日变,财报不变)
 - 字段: pe_ttm/pb/total_mv/float_mv/roe/gross_margin/net_margin/eps/revenue/net_profit/revenue_yoy/profit_yoy
+- 股东人数变动: datacenter `RPT_F10_EH_HOLDERNUM` 接口(fetch_shareholder,不缓存),返回最近 2 期对比(change_pct/hold_focus)
 
 ## 已知问题
 

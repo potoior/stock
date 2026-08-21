@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "updated": "2026-08-18",
+  "updated": "2026-08-21",
   "description": "本系统所有量化策略的来源分类。共4个来源:两本纸质书 + 一套自创复合评分 + AI/自定义规则通道。",
   "sources": [
     {
@@ -182,8 +182,9 @@
             {
               "id": "打板",
               "name": "打板策略",
-              "implemented": false,
-              "desc": "涨停板追击,需Level-2数据"
+              "implemented": true,
+              "desc": "日K线简化版:涨停+量比+连板数",
+              "engine_id": "daban"
             },
             {
               "id": "T+0",
@@ -215,8 +216,9 @@
             {
               "id": "复盘法",
               "name": "复盘法",
-              "implemented": false,
-              "desc": "偏流程,未量化"
+              "implemented": true,
+              "desc": "量化版:近N日K线特征综合判断",
+              "engine_id": "fupan"
             }
           ]
         },
@@ -350,8 +352,9 @@
             {
               "id": "policy_select",
               "name": "国家经济政策选股",
-              "implemented": false,
-              "desc": "需政策/新闻数据"
+              "implemented": true,
+              "desc": "新闻关键词匹配版(利好/利空计数+价位分位)",
+              "engine_id": "policy_select"
             },
             {
               "id": "pe_select",
@@ -370,8 +373,9 @@
             {
               "id": "shareholder_select",
               "name": "股东人数变动选股",
-              "implemented": false,
-              "desc": "需财务数据"
+              "implemented": true,
+              "desc": "东财 datacenter 股东人数变动",
+              "engine_id": "shareholder_select"
             }
           ]
         },
@@ -410,8 +414,9 @@
             {
               "id": "bottom_time",
               "name": "利用时间识底",
-              "implemented": false,
-              "desc": "时间周期对称"
+              "implemented": true,
+              "desc": "斐波那契时间窗(8/13/21/34/55/89日)",
+              "engine_id": "bottom_time"
             }
           ]
         },

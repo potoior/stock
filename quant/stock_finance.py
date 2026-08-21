@@ -128,6 +128,75 @@ def _fetch_report_finance(code: str) -> dict:
         return {}
 
 
+def _fetch_shareholder_count(code: str) -> dict:
+    """从东财 datacenter 接口取股东人数变动数据(最近 2 期对比)。
+
+    接口: datacenter-web.eastmoney.com/api/data/v1/get
+           ?reportName=RPT_F10_EH_HOLDERNUM&filter=(SECUCODE="600519.SH")
+    返回最近 2 期股东人数,用于判断筹码集中/分散趋势。
+
+    字段:
+    - holder_num: 最新一期股东人数
+    - holder_num_prev: 上一期股东人数
+    - change_pct: 变化率(%),负数=集中,正数=分散
+    - end_date: 最新一期报告期
+    - hold_focus: 筹码集中度描述(如"非常分散")
+    """
+    secucode = _eastmoney_secucode(code)
+    url = (
+        f"https://datacenter-web.eastmoney.com/api/data/v1/get"
+        f"?reportName=RPT_F10_EH_HOLDERNUM&columns=ALL"
+        f"&filter=(SECUCODE=%22{secucode}%22)"
+        f"&pageNumber=1&pageSize=2&sortColumns=END_DATE&sortTypes=-1"
+    )
+    req = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": "Mozilla/5.0",
+            "Referer": "https://data.eastmoney.com/",
+        },
+    )
+    try:
+        resp = urllib.request.urlopen(req, timeout=10)
+        data = json.loads(resp.read().decode("utf-8"))
+        rows = (data.get("result") or {}).get("data") or []
+        if not rows:
+            return {}
+        latest = rows[0]
+        prev = rows[1] if len(rows) > 1 else {}
+        holder_num = latest.get("HOLDER_TOTAL_NUM")
+        holder_num_prev = prev.get("HOLDER_TOTAL_NUM")
+        # 优先用接口的 TOTAL_NUM_RATIO(已计算好的变化率),否则自算
+        change_pct = latest.get("TOTAL_NUM_RATIO")
+        if change_pct is None and holder_num and holder_num_prev:
+            change_pct = (holder_num - holder_num_prev) / holder_num_prev * 100
+        return {
+            "holder_num": holder_num,
+            "holder_num_prev": holder_num_prev,
+            "change_pct": round(float(change_pct), 2) if change_pct is not None else None,
+            "end_date": (latest.get("END_DATE") or "")[:10],
+            "prev_end_date": (prev.get("END_DATE") or "")[:10],
+            "hold_focus": latest.get("HOLD_FOCUS", ""),
+        }
+    except Exception as e:
+        log.warning("股东人数数据获取失败 %s: %s", code, e)
+        return {}
+
+
+def fetch_shareholder(code: str) -> dict:
+    """获取股东人数变动数据(无缓存,实时调用)。
+
+    Returns: {holder_num, holder_num_prev, change_pct, end_date} 或 {error: ...}
+    """
+    code = (code or "").strip()
+    if not code or not code.isdigit() or len(code) != 6:
+        return {"error": f"代码必须是 6 位数字,实际 '{code}'"}
+    data = _fetch_shareholder_count(code)
+    if not data:
+        return {"error": f"获取 {code} 股东人数失败(可能未披露或接口异常)"}
+    return data
+
+
 def _cache_get(code: str) -> dict | None:
     """从 sqlite 读缓存,过期返 None。"""
     try:

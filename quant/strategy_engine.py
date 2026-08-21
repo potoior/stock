@@ -513,6 +513,14 @@ DEFAULT_STRATEGY_PARAMS = {
     # 操练大全14章 基本面
     "pe_select": {"low_pe": 15, "high_pe": 50},
     "roe_pe": {"roe_min": 15, "pe_max": 25, "roe_bad": 5, "pe_high": 50},
+    # 漫画书 实战战法(剩余)
+    "daban": {"zt_pct": 9.6, "min_vol_ratio": 1.5, "consec": 2, "n": 10},
+    "fupan": {"n": 30, "zt_pct": 9.6, "support_pct": 5, "resistance_pct": 5, "rise_threshold": 20},
+    # 操练大全15章 抄底(剩余)
+    "bottom_time": {"n": 120, "tolerance": 2},
+    # 操练大全14章 选股(剩余)
+    "shareholder_select": {"concentrate": -5, "disperse": 10},
+    "policy_select": {"num": 10, "min_positive": 2, "min_negative": 2},
 }
 
 
@@ -1833,6 +1841,242 @@ def strategy_roe_pe(ctx, params):
     return "hold", f"ROE={roe:.1f}%/PE={pe:.1f},未达优质低估阈值"
 
 
+# ---------------- 漫画书 实战战法(剩余) ----------------
+
+
+def strategy_daban(ctx, params):
+    """打板策略(漫画书实战战法):日K线简化版,连板追击。
+
+    与 zt 区别:zt 只看当日封板,daban 要求连板,更强势。
+
+    买入条件(同时满足):
+      - 当日涨幅 >= zt_pct(默认 9.6%)
+      - 当日量比 >= min_vol_ratio(默认 1.5)
+      - 近 N 日(默认 10)连板数 >= consec(默认 2)
+    """
+    zt_pct = float(params.get("zt_pct", 9.6))
+    min_vol_ratio = float(params.get("min_vol_ratio", 1.5))
+    consec = int(params.get("consec", 2))
+    n = int(params.get("n", 10))
+    i = ctx["i"]
+    df = ctx["df"]
+    close = df["close"]
+    if i < n + 1:
+        return "hold", "数据不足"
+    pct = (close.iloc[i] - close.iloc[i - 1]) / close.iloc[i - 1] * 100
+    avg_vol = df["volume"].iloc[max(0, i - 20):i].mean()
+    vol_ratio = df["volume"].iloc[i] / avg_vol if avg_vol > 0 else 0
+    # 连板数(从今日往前数,中断即停)
+    zt_count = 0
+    for j in range(i, max(i - n, 0), -1):
+        if j < 1:
+            break
+        p = (close.iloc[j] - close.iloc[j - 1]) / close.iloc[j - 1] * 100
+        if p >= zt_pct - 0.1:
+            zt_count += 1
+        else:
+            break
+    if pct >= zt_pct and vol_ratio >= min_vol_ratio and zt_count >= consec:
+        return "buy", f"打板:今+{pct:.1f}%+量比{vol_ratio:.1f}+连板{zt_count}日,强势追击"
+    if pct >= zt_pct and zt_count >= consec:
+        return "hold", f"涨停+{pct:.1f}%连板{zt_count}日,但量比{vol_ratio:.1f}不足"
+    return "hold", f"无打板信号(今+{pct:.1f}%,连板{zt_count}日,量比{vol_ratio:.1f})"
+
+
+def strategy_fupan(ctx, params):
+    """复盘法(漫画书实战战法):量化版,统计近 N 日 K 线特征综合判断。
+
+    规则:
+      - 统计近 N 日(默认 30)涨跌停次数、累计涨幅、关键支撑压力位
+      - buy: 近期有涨停 + 当前在支撑位(近 N 日低点±support_pct%) + 缩量回调(量比<1)
+      - sell: 近期累计涨幅>=rise_threshold + 当前在压力位(近 N 日高点±resistance_pct%) + 放量滞涨(量比>=1.5 且 当日|涨跌|<2%)
+      - 否则 hold
+    """
+    n = int(params.get("n", 30))
+    zt_pct = float(params.get("zt_pct", 9.6))
+    support_pct = float(params.get("support_pct", 5))
+    resistance_pct = float(params.get("resistance_pct", 5))
+    rise_threshold = float(params.get("rise_threshold", 20))
+    i = ctx["i"]
+    df = ctx["df"]
+    close = df["close"]
+    vol = df["volume"]
+    if i < n + 1:
+        return "hold", "数据不足"
+    recent_close = close.iloc[i - n:i + 1]
+    recent_vol = vol.iloc[i - n:i + 1]
+    recent_high = float(recent_close.max())
+    recent_low = float(recent_close.min())
+    # 涨停次数
+    zt_count = 0
+    for j in range(i, max(i - n, 0), -1):
+        if j < 1:
+            break
+        p = (close.iloc[j] - close.iloc[j - 1]) / close.iloc[j - 1] * 100
+        if p >= zt_pct - 0.1:
+            zt_count += 1
+    cum_pct = (close.iloc[i] - close.iloc[i - n]) / close.iloc[i - n] * 100
+    price = ctx["price"]
+    near_low = abs(price - recent_low) / recent_low * 100 <= support_pct
+    near_high = abs(price - recent_high) / recent_high * 100 <= resistance_pct
+    avg_vol = float(recent_vol.iloc[:-1].mean())
+    vol_ratio = float(recent_vol.iloc[-1]) / avg_vol if avg_vol > 0 else 0
+    today_pct = (close.iloc[i] - close.iloc[i - 1]) / close.iloc[i - 1] * 100
+    if zt_count >= 1 and near_low and vol_ratio < 1:
+        return "buy", f"复盘:近{n}日{zt_count}次涨停+支撑位{recent_low:.2f}附近+缩量(量比{vol_ratio:.1f}),低吸"
+    if cum_pct >= rise_threshold and near_high and vol_ratio >= 1.5 and abs(today_pct) < 2:
+        return "sell", f"复盘:近{n}日累计+{cum_pct:.1f}%+压力位{recent_high:.2f}附近+放量滞涨(量比{vol_ratio:.1f}),减仓"
+    return "hold", f"复盘:近{n}日{zt_count}次涨停+累计{cum_pct:+.1f}%+量比{vol_ratio:.1f},无信号"
+
+
+# ---------------- 操练大全15章 抄底(剩余) ----------------
+
+
+def strategy_bottom_time(ctx, params):
+    """利用时间识底(操练大全15章):斐波那契时间窗。
+
+    规则:
+      - 找近 N 日(默认 120)最低点位置
+      - 从最低点算起,经过斐波那契时间窗 8/13/21/34/55/89 日
+      - 当前距时间窗 ±tolerance(默认 2)日 + 价在低位区(<=MA60) → buy(时间共振)
+      - 当前距时间窗 ±tolerance 日 + 价在高位区(>=MA60×1.1) → sell
+    """
+    n = int(params.get("n", 120))
+    tolerance = int(params.get("tolerance", 2))
+    i = ctx["i"]
+    df = ctx["df"]
+    close = df["close"]
+    if i < n:
+        return "hold", "数据不足"
+    recent = close.iloc[i - n + 1:i + 1]
+    low_idx = int(recent.idxmin())
+    low_offset = i - low_idx
+    fib_windows = [8, 13, 21, 34, 55, 89]
+    near_window = None
+    for w in fib_windows:
+        if abs(low_offset - w) <= tolerance:
+            near_window = w
+            break
+    if near_window is None:
+        return "hold", f"距最低点{low_offset}日,不在斐波那契窗(8/13/21/34/55/89±{tolerance})"
+    ma60 = ctx["ma60"]
+    if pd.isna(ma60.iloc[i]):
+        return "hold", "MA60 数据不足"
+    price = ctx["price"]
+    ma60_val = float(ma60.iloc[i])
+    if price <= ma60_val:
+        return "buy", f"时间窗:距最低点{low_offset}日≈斐波那契{near_window}日+价{price:.2f}<=MA60({ma60_val:.2f}),时间共振低吸"
+    if price >= ma60_val * 1.1:
+        return "sell", f"时间窗:距最低点{low_offset}日≈斐波那契{near_window}日+价{price:.2f}>MA60×1.1({ma60_val * 1.1:.2f}),时间共振高抛"
+    return "hold", f"时间窗:距最低点{low_offset}日≈斐波那契{near_window}日,价{price:.2f}在MA60附近,观望"
+
+
+# ---------------- 操练大全14章 选股(剩余) ----------------
+
+
+def strategy_shareholder_select(ctx, params):
+    """股东人数变动选股(操练大全14章):筹码集中/分散趋势。
+
+    规则:
+      - 调东财 datacenter 接口取最近 2 期股东人数
+      - change_pct <= concentrate(默认 -5) + 价在低位区(60日分位<=0.3) → buy(筹码集中)
+      - change_pct >= disperse(默认 10) + 价在高位区(60日分位>=0.7) → sell(筹码分散)
+      - 数据不可得 → hold
+    """
+    concentrate = float(params.get("concentrate", -5))
+    disperse = float(params.get("disperse", 10))
+    code = ctx.get("code", "")
+    if not code:
+        return "hold", "无股票代码"
+    try:
+        import stock_finance as sf
+
+        data = sf.fetch_shareholder(code)
+    except Exception:
+        return "hold", "股东人数数据不可得"
+    if "error" in data or data.get("change_pct") is None:
+        return "hold", "股东人数数据不可得"
+    change_pct = float(data["change_pct"])
+    hold_focus = data.get("hold_focus", "")
+    i = ctx["i"]
+    close = ctx["close"]
+    if i < 60:
+        return "hold", "数据不足"
+    pos = _percentile_pos(close, i, 60, 0.3)  # 0~1
+    if change_pct <= concentrate and pos <= 0.3:
+        return "buy", f"股东数{change_pct:+.1f}%<= {concentrate}%(集中,{hold_focus})+价在低位(分位{pos:.1%}),低吸"
+    if change_pct >= disperse and pos >= 0.7:
+        return "sell", f"股东数{change_pct:+.1f}%>= {disperse}%(分散,{hold_focus})+价在高位(分位{pos:.1%}),减仓"
+    return "hold", f"股东数{change_pct:+.1f}%({hold_focus})+价在分位{pos:.1%},无信号"
+
+
+# 政策利好/利空关键词(用于 policy_select 关键词匹配,避免依赖 LLM)
+_POLICY_POSITIVE_KEYWORDS = (
+    "支持", "扶持", "利好", "政策", "补贴", "获批", "中标", "增持", "回购",
+    "增长", "超预期", "突破", "创新高", "盈利", "分红", "纳入", "试点",
+    "战略", "规划", "投资", "签约", "合作", "订单", "量产", "上线",
+)
+_POLICY_NEGATIVE_KEYWORDS = (
+    "处罚", "违规", "减持", "退市", "亏损", "下滑", "质疑", "调查", "警示",
+    "停牌", "风险", "爆雷", "诉讼", "仲裁", "质押", "违约", "下调",
+    "警示函", "监管", "立案", "问询", "被列",
+)
+
+
+def strategy_policy_select(ctx, params):
+    """国家经济政策选股(操练大全14章):新闻关键词匹配版。
+
+    规则:
+      - 调 news_digest.fetch_stock_news 取该股近 N 条新闻(默认 10)
+      - 统计利好/利空关键词命中次数
+      - pos_hits >= min_positive(默认 2) + 价在低位区 → buy
+      - neg_hits >= min_negative(默认 2) + 价在高位区 → sell
+      - 无新闻或命中不足 → hold
+    """
+    num = int(params.get("num", 10))
+    min_positive = int(params.get("min_positive", 2))
+    min_negative = int(params.get("min_negative", 2))
+    code = ctx.get("code", "")
+    if not code:
+        return "hold", "无股票代码"
+    try:
+        import news_digest
+
+        news = news_digest.fetch_stock_news(code, num=num, strict=True)
+    except Exception:
+        return "hold", "新闻数据不可得"
+    if not news:
+        return "hold", "无相关新闻"
+    pos_hits = 0
+    neg_hits = 0
+    pos_titles = []
+    neg_titles = []
+    for n_item in news:
+        text = (n_item.get("title", "") + " " + n_item.get("summary", "")).lower()
+        for kw in _POLICY_POSITIVE_KEYWORDS:
+            if kw in text:
+                pos_hits += 1
+                pos_titles.append(n_item.get("title", "")[:30])
+                break
+        for kw in _POLICY_NEGATIVE_KEYWORDS:
+            if kw in text:
+                neg_hits += 1
+                neg_titles.append(n_item.get("title", "")[:30])
+                break
+    i = ctx["i"]
+    close = ctx["close"]
+    if i < 60:
+        return "hold", "数据不足"
+    pos = _percentile_pos(close, i, 60, 0.3)
+    if pos_hits >= min_positive and pos <= 0.3:
+        sample = pos_titles[0] if pos_titles else ""
+        return "buy", f"政策利好:近{len(news)}条新闻{pos_hits}条利好+价在低位(分位{pos:.1%}),例:{sample}"
+    if neg_hits >= min_negative and pos >= 0.7:
+        sample = neg_titles[0] if neg_titles else ""
+        return "sell", f"政策利空:近{len(news)}条新闻{neg_hits}条利空+价在高位(分位{pos:.1%}),例:{sample}"
+    return "hold", f"近{len(news)}条新闻:利好{pos_hits}/利空{neg_hits}+价在分位{pos:.1%},无明显政策面信号"
+
+
 # ---------------- 自定义可视化规则策略 ----------------
 
 CONDITION_METRIC_META = {
@@ -2302,6 +2546,14 @@ def analyze(code: str, use_ai: bool = True) -> dict:
         # 操练大全14章 基本面
         ("pe_select", "市盈率选股", strategy_pe_select),
         ("roe_pe", "ROE+PE选股", strategy_roe_pe),
+        # 漫画书 实战战法(剩余)
+        ("daban", "打板策略", strategy_daban),
+        ("fupan", "复盘法", strategy_fupan),
+        # 操练大全15章 抄底(剩余)
+        ("bottom_time", "时间识底", strategy_bottom_time),
+        # 操练大全14章 选股(剩余)
+        ("shareholder_select", "股东人数选股", strategy_shareholder_select),
+        ("policy_select", "政策选股", strategy_policy_select),
     ]
 
     strategies_cfg = get_strategies()
@@ -2445,9 +2697,19 @@ def scan_with_strategy(
         "zhuang_test", "zhuang_build", "zhuang_pull", "zhuang_ship", "zhuang_wash",
         "zt_type", "zt_unsealed", "zt_pull",
         "pe_select", "roe_pe",
+        "daban", "fupan", "bottom_time",
+        "shareholder_select", "policy_select",
     }
     if strategy_id not in builtin_ids:
         return {"error": f"未知策略 id: {strategy_id},必须是内置策略之一"}
+
+    # 需要联网的策略不适合全市场扫描(每只都要联网,4700 只会跑数小时)
+    NO_SCAN_STRATEGIES = {"shareholder_select", "policy_select"}
+    if strategy_id in NO_SCAN_STRATEGIES:
+        return {
+            "error": f"策略 {strategy_id} 需要联网获取外部数据(股东人数/新闻),"
+            "不适合全市场扫描,请用 analyze_with_strategy 分析个股"
+        }
 
     # 2. 从 daily 表取所有股票的最新数据(不主动 fetch,避免 4700 次联网)
     conn = sqlite3.connect(str(CACHE_DB), timeout=30)

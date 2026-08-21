@@ -586,7 +586,7 @@ def test_roe_pe_missing_data_hold(monkeypatch):
 
 
 def test_library_implemented_count():
-    """策略大全应有 67 个已实现(73 总 - 6 未实现)。"""
+    """策略大全应有 72 个已实现(73 总 - 1 未实现 T+0)。"""
     import json
     from pathlib import Path
     lib_path = Path(se.__file__).parent / "strategy_library.json"
@@ -599,7 +599,7 @@ def test_library_implemented_count():
                 if st.get("implemented"):
                     impl += 1
     assert total == 73, f"策略总数应为 73,实际 {total}"
-    assert impl == 67, f"已实现应为 67,实际 {impl}"
+    assert impl == 72, f"已实现应为 72,实际 {impl}"
 
 
 def test_library_new_strategies_have_engine_id():
@@ -665,12 +665,12 @@ def test_library_merged_strategies_have_engine_id():
 
 
 def test_library_unimplemented_count():
-    """保留未实现的 6 个:打板/T+0/复盘法/policy_select/shareholder_select/bottom_time。"""
+    """保留未实现的 1 个:T+0(需分钟数据,无法量化)。"""
     import json
     from pathlib import Path
     lib_path = Path(se.__file__).parent / "strategy_library.json"
     lib = json.loads(lib_path.read_text(encoding="utf-8"))
-    expected_unimpl = {"打板", "T+0", "复盘法", "policy_select", "shareholder_select", "bottom_time"}
+    expected_unimpl = {"T+0"}
     actual_unimpl = set()
     for src in lib.get("sources", []):
         for cat in src.get("categories", []):
