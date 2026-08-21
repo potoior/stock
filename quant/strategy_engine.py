@@ -2401,6 +2401,171 @@ def analyze(code: str, use_ai: bool = True) -> dict:
     }
 
 
+def scan_with_strategy(
+    strategy_id: str,
+    top_n: int = 20,
+    min_amount_yi: float = 0.5,
+    limit: int = 0,
+) -> dict:
+    """全市场扫描指定策略,返回触发 buy 信号的股票列表。
+
+    轻量版:跳过 fetch_realtime,只跑指定单策略(非 analyze 的全部 45 个),
+    适合"哪些股票今天触发了 X 策略买入信号"的选股场景。
+
+    Args:
+        strategy_id: 策略 id(必须是 BUILTIN 列表中的内置策略)
+        top_n: 返回前 N 只(按涨幅降序),默认 20
+        min_amount_yi: 最小成交额(亿)过滤,默认 0.5 亿,过滤小盘股流动性差
+        limit: 限制扫描股票数(调试用),0=全市场
+
+    Returns: {"strategy": sid, "scanned": n, "hits": [...], "elapsed_sec": float}
+             hits: [{code, name, price, pct, signal, reason, amount_yi}, ...]
+
+    实现要点:
+      - 只用 daily 表已缓存的股票(不主动 fetch,避免联网慢)
+      - 跳过 ST/退市股
+      - 单线程跑(策略函数非线程安全,参考 backtest_builtin workers=1)
+      - 数据不足(< 60 日)跳过
+    """
+    import sqlite3
+    import time as _time
+
+    t0 = _time.time()
+
+    # 1. 验证策略 id 在 BUILTIN 列表
+    builtin_ids = {
+        "macd", "kdj", "ma_stop", "boll", "dmi", "psy", "bias", "sar",
+        "bbiboll", "tower", "ma_combo", "two_line", "life_line", "three_third",
+        "sparrow", "bounce", "volume_div", "resonance", "dmi_psy", "rsi",
+        "bottom", "top", "zt",
+        "trend_follow", "pyramid", "stop_profit", "plan_trade",
+        "high_volume", "demon_stock", "dragon_pullback",
+        "support_resistance", "range_trade",
+        "bottom_ma", "top_weekly", "top_monthly",
+        "zhuang_test", "zhuang_build", "zhuang_pull", "zhuang_ship", "zhuang_wash",
+        "zt_type", "zt_unsealed", "zt_pull",
+        "pe_select", "roe_pe",
+    }
+    if strategy_id not in builtin_ids:
+        return {"error": f"未知策略 id: {strategy_id},必须是内置策略之一"}
+
+    # 2. 从 daily 表取所有股票的最新数据(不主动 fetch,避免 4700 次联网)
+    conn = sqlite3.connect(str(CACHE_DB), timeout=30)
+    try:
+        # 取所有有缓存的股票代码
+        rows = conn.execute(
+            "SELECT code, COUNT(*) as n, MAX(date) as last FROM daily GROUP BY code"
+        ).fetchall()
+    finally:
+        conn.close()
+
+    # 过滤:数据 >= 60 日 + 最新日期近 5 日内(避免拉到陈旧缓存)
+    from datetime import datetime as _dt
+    today = _dt.now().strftime("%Y%m%d")
+    # 简单日期比较:把 today 减 5 天,这里用 int 减 5(忽略月末)
+    # 实际用最近 5 个交易日即可,宽松用 today - 7
+    cutoff = str(int(today) - 7) if today.isdigit() else today
+
+    candidates = []
+    for code, n, last in rows:
+        if n < 60:
+            continue
+        if last < cutoff:
+            continue  # 数据超过 7 天未更新,跳过
+        candidates.append(code)
+    if limit and limit < len(candidates):
+        candidates = candidates[:limit]
+
+    # 3. 单线程跑指定策略(策略函数非线程安全)
+    fn_name = f"strategy_{strategy_id}"
+    fn = globals().get(fn_name)
+    if fn is None:
+        return {"error": f"策略函数 {fn_name} 不存在"}
+
+    params = {**DEFAULT_STRATEGY_PARAMS.get(strategy_id, {})}
+    hits = []
+    scanned = 0
+    for code in candidates:
+        scanned += 1
+        try:
+            df = get_daily_data(code, days=320)
+            if len(df) < 60:
+                continue
+            close = df["close"]
+            i = len(df) - 1
+            price = float(close.iloc[i])
+
+            # 跳过 ST/退市(用股票名,但这里没有 name 字段,跳过)
+
+            # 构造 ctx(只算需要的指标,用 analyze 同款)
+            macd_diff, macd_dea, _ = compute_macd(df)
+            k, d, j, _ = compute_kdj(df)
+            boll_u, boll_m, boll_l = compute_boll(df)
+            psy = compute_psy(df)
+            bias1, bias2, bias3 = compute_bias(df)
+            pdi, mdi, adx = compute_dmi(df)
+            sar, _trend = compute_sar(df)
+            bbiboll_u, bbiboll_m, bbiboll_l = compute_bbiboll(df)
+            tower = compute_tower(df)
+            rsi6, rsi12 = compute_rsi(df)
+            df["ma5"] = close.rolling(5).mean()
+            df["ma10"] = close.rolling(10).mean()
+            df["ma20"] = close.rolling(20).mean()
+            df["ma60"] = close.rolling(60).mean()
+            df["ma7"] = close.rolling(7).mean()
+            df["ma13"] = close.rolling(13).mean()
+
+            ctx = {
+                "i": i, "price": price, "df": df, "close": close, "code": code,
+                "realtime": None,
+                "macd_diff": macd_diff, "macd_dea": macd_dea, "macd_bar": _,
+                "k": k, "d": d, "j": j,
+                "boll_u": boll_u, "boll_m": boll_m, "boll_l": boll_l,
+                "psy": psy, "bias1": bias1, "bias2": bias2, "bias3": bias3,
+                "pdi": pdi, "mdi": mdi, "adx": adx, "sar": sar,
+                "bbiboll_u": bbiboll_u, "bbiboll_m": bbiboll_m, "bbiboll_l": bbiboll_l,
+                "tower": tower, "rsi6": rsi6, "rsi12": rsi12,
+                "ma5": df["ma5"], "ma10": df["ma10"], "ma20": df["ma20"], "ma60": df["ma60"],
+                "ma7": df["ma7"], "ma13": df["ma13"],
+            }
+            sg, reason = fn(ctx, params)
+            if sg != "buy":
+                continue
+
+            # 算成交额 + 涨幅(用最新一日)
+            last_row = df.iloc[i]
+            prev_close = float(close.iloc[i - 1]) if i >= 1 else price
+            pct = (price - prev_close) / prev_close * 100 if prev_close > 0 else 0
+            # 成交额 = 均价 × 成交量(粗估,无成交额字段时用成交量×收盘)
+            amount_yi = float(last_row["volume"] * price) / 1e8 if "volume" in df.columns else 0
+            if amount_yi < min_amount_yi:
+                continue
+
+            hits.append({
+                "code": code,
+                "name": "",  # 无 name 字段,留空,Bot 端可补
+                "price": round(price, 2),
+                "pct": round(pct, 2),
+                "signal": sg,
+                "reason": reason,
+                "amount_yi": round(amount_yi, 2),
+            })
+        except Exception:
+            continue
+
+    # 4. 按涨幅降序取 top_n
+    hits.sort(key=lambda x: x["pct"], reverse=True)
+    hits = hits[:top_n]
+
+    return {
+        "strategy": strategy_id,
+        "scanned": scanned,
+        "hits_count": len(hits),
+        "hits": hits,
+        "elapsed_sec": round(_time.time() - t0, 1),
+    }
+
+
 if __name__ == "__main__":
     import sys
 

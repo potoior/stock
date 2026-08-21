@@ -9,14 +9,14 @@ A 股量化分析系统,集成飞书群聊 Bot(Function Calling ReAct Agent),覆
 - 45 内置策略信号引擎(MACD/KDJ/BOLL/RSI/玉姐 10 条规则 + 操练大全12/14/15/16/17/20章 + 漫画书量能/实战战法等)
 - 玉姐精选全市场扫描(多因子评分排行)
 - 回测 + 参数网格寻优
-- 飞书 Bot Agent(19 个 skill,跨轮记忆,自选股,财务数据,板块分析,历史复盘)
+- 飞书 Bot Agent(21 个 skill,跨轮记忆,自选股,财务数据,板块分析,历史复盘,策略选股,个股新闻)
 - 策略大全(4 来源 73 策略:漫画书 29 + 操练大全 32 + 玉姐 10 + AI 2,已实现 67 个)
 
 ## 目录结构
 
 ```
 quant/
-├── feishu_bot.py          # 飞书长连接 Agent(~2620 行,19 skill)
+├── feishu_bot.py          # 飞书长连接 Agent(~3040 行,21 skill)
 ├── feishu_image.py        # matplotlib 图表(K 线/玉姐/回测/市场)
 ├── feishu.py              # 飞书 webhook 推送(日报/告警)
 ├── stock_names.py         # 股票名称解析(腾讯 smartbox + sqlite 缓存)
@@ -92,14 +92,15 @@ journalctl --user -u daily-scan -f
 
 ### Agent 设计
 - **Function Calling ReAct**: LLM 自主决策调工具,失败降级到 `route()` 关键词路由
-- **19 个 skill**: 4 数据查询 + 5 策略查询 + 3 策略操作 + 2 回测寻优 + 1 自选股 + 1 财务 + 3 批量(对比/板块/历史复盘)
+- **21 个 skill**: 4 数据查询 + 5 策略查询 + 3 策略操作 + 3 回测寻优选股 + 1 自选股 + 1 财务 + 3 批量(对比/板块/历史复盘) + 1 个股新闻
   - 数据查询: `analyze_stock` / `get_market_status` / `get_yujie_picks` / `get_portfolio`
   - 策略查询: `list_strategies` / `get_strategy_library` / `get_yujie_detail` / `analyze_with_strategy` / `analyze_with_yujie`
   - 策略操作: `toggle_strategy` / `set_strategy_params` / `enable_library_strategy`
-  - 回测寻优: `backtest_strategy` / `grid_search_params`
+  - 回测寻优选股: `backtest_strategy` / `grid_search_strategy` / `scan_with_strategy`(全市场策略选股,耗时5-30分钟)
   - 自选股: `watchlist`(add/remove/list)
   - 财务: `get_finance`(单股 PE/PB/市值/ROE/毛利率/净利率/EPS/营收/净利润)
   - 批量: `compare_stocks`(多股对比) / `analyze_sector`(板块成分股) / `query_history_picks`(历史玉姐复盘)
+  - 新闻: `get_stock_news`(个股新闻,东财搜索接口,strict 过滤无关列表新闻)
 - **跨轮记忆**: `session_id = f"{chat_id}:{sender}"`,sqlite `agent_history.db`,最近 6 轮
   - assistant >500 字裁到 200 字 + 截断标记
   - >7 天自动过期(`_purge_old_history` 启动时清理)

@@ -104,6 +104,116 @@ def fetch_news(num=30):
     return merged
 
 
+def fetch_stock_news(code: str, num: int = 15, strict: bool = True) -> list[dict]:
+    """抓取个股相关新闻(东财搜索接口,按股票名搜索)。
+
+    Args:
+        code: 6 位股票代码,如 301189
+        num: 返回新闻条数,默认 15
+        strict: True=只保留 title/summary 明确提到股票名或代码的新闻(过滤列表型无关新闻);
+                False=返回所有搜索结果
+
+    Returns: [{title, summary, time, source, url}, ...] 按时间降序,失败返回 []
+
+    实现要点:
+      - 先用 stock_names 解析股票名(失败时回退用代码搜)
+      - 调东财搜索接口 search-api-web.eastmoney.com 搜 cmsArticleWebOld 类型
+      - 清理 <em> 高亮标签
+      - 截断 summary 到 120 字
+    """
+    if not code or not (isinstance(code, str) and code.isdigit() and len(code) == 6):
+        return []
+
+    # 1. 解析股票名(失败回退用代码)
+    keyword = code
+    try:
+        # 反查:从缓存找 code -> name
+        import sqlite3
+
+        import stock_names as sn
+        db = sn.DB_PATH
+        conn = sqlite3.connect(str(db), timeout=5)
+        rows = conn.execute(
+            "SELECT name, full_name FROM stock_names WHERE code=?", (code,)
+        ).fetchall()
+        conn.close()
+        if rows:
+            for name, full_name in rows:
+                if name:
+                    keyword = name
+                    break
+                if full_name:
+                    keyword = full_name
+                    break
+        else:
+            # 缓存没有,主动 resolve 一次触发搜索 + 缓存
+            resolved = sn.resolve_code(code)
+            if resolved:
+                # 再查一次缓存
+                conn = sqlite3.connect(str(db), timeout=5)
+                rows = conn.execute(
+                    "SELECT name FROM stock_names WHERE code=?", (code,)
+                ).fetchall()
+                conn.close()
+                if rows and rows[0][0]:
+                    keyword = rows[0][0]
+    except Exception:
+        pass
+
+    # 2. 调东财搜索接口
+    import urllib.parse
+    param = json.dumps({
+        "uid": "",
+        "keyword": keyword,
+        "type": ["cmsArticleWebOld"],
+        "client": "web",
+        "clientVersion": "curr",
+    })
+    url = (
+        "https://search-api-web.eastmoney.com/search/jsonp?cb=cb&param="
+        + urllib.parse.quote(param)
+    )
+    try:
+        raw = _http_get(url, "https://so.eastmoney.com/").decode("utf-8", "replace")
+    except Exception:
+        return []
+
+    # 3. 解析 JSONP("cb({...})") -> JSON
+    body = raw.strip()
+    if body.startswith("cb(") and body.endswith(")"):
+        body = body[3:-1]
+    try:
+        data = json.loads(body)
+    except Exception:
+        return []
+
+    items = ((data.get("result") or {}).get("cmsArticleWebOld")) or []
+    import re
+    out = []
+    stock_name = keyword if keyword != code else None
+    for it in items:
+        title = (it.get("title") or "").strip()
+        title = re.sub(r"</?em>", "", title)
+        summary = (it.get("content") or "").strip()
+        summary = re.sub(r"</?em>", "", summary)[:120]
+        # strict 过滤:title 或 summary 必须明确提到股票名或代码
+        if strict:
+            hit_name = stock_name and (stock_name in title or stock_name in summary)
+            hit_code = code in title or code in summary
+            if not (hit_name or hit_code):
+                continue
+        out.append({
+            "title": title,
+            "summary": summary,
+            "time": (it.get("date") or "")[:16],
+            "source": it.get("mediaName") or "东方财富",
+            "url": it.get("url") or "",
+        })
+        if len(out) >= num:
+            break
+    return out
+
+
 def build_prompt(news, date_str):
     lines = []
     for i, n in enumerate(news[:40], 1):

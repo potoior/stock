@@ -1445,6 +1445,38 @@ TOOLS = [
             }
         }
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "scan_with_strategy",
+            "description": "全市场扫描指定策略,返回当日触发 buy 信号的股票列表(选股)。耗时约 5-30 分钟(全市场4700只)。用户问'用X策略选股/哪些股票今天触发X信号/X策略选股/X策略选哪些'时调用。注意:与 analyze_with_strategy(判断个股) 不同,本工具是反向操作(给定策略找股票)。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "strategy_id": {"type": "string", "description": "策略id,如 macd/bottom/dragon_pullback/pe_select 等内置策略"},
+                    "top_n": {"type": "integer", "description": "返回前 N 只(按涨幅降序),默认 20", "default": 20},
+                    "min_amount_yi": {"type": "number", "description": "最小成交额(亿)过滤,默认 0.5", "default": 0.5},
+                    "limit": {"type": "integer", "description": "限制扫描股票数(调试用),默认 0=全市场", "default": 0}
+                },
+                "required": ["strategy_id"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_stock_news",
+            "description": "查询个股相关新闻(东财搜索接口,实时抓取)。用户问'X股票有什么新闻/X最近消息/X公司动态/跟X相关的新闻'时调用。返回最近 N 条提到该股票名或代码的新闻(已过滤无关列表新闻)。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "code": {"type": "string", "description": "6位股票代码或股票名,如 301189 / 茅台 / 600519"},
+                    "num": {"type": "integer", "description": "返回新闻条数,默认 15", "default": 15}
+                },
+                "required": ["code"]
+            }
+        }
+    },
 ]
 
 
@@ -2091,6 +2123,113 @@ def handler_grid_search(strategy_id: str, sample: int = 400) -> str:
         return f"❌ 寻优出错: {e}"
 
 
+def handler_scan_with_strategy(
+    strategy_id: str, top_n: int = 20, min_amount_yi: float = 0.5, limit: int = 0
+) -> str:
+    """全市场扫描指定策略,返回当日触发 buy 信号的股票列表(选股)。
+
+    与 analyze_with_strategy(判断个股) 反向:这里是"给定策略找股票"。
+    耗时约 5-30 分钟(全市场 4700 只),单线程跑(策略函数非线程安全)。
+    """
+    try:
+        import strategy_engine as se
+        log.info(
+            "开始策略选股 %s, top_n=%d, min_amount_yi=%s, limit=%d (耗时约 5-30 分钟)",
+            strategy_id, top_n, min_amount_yi, limit,
+        )
+        result = se.scan_with_strategy(
+            strategy_id=strategy_id,
+            top_n=top_n,
+            min_amount_yi=min_amount_yi,
+            limit=limit,
+        )
+        if "error" in result:
+            return f"❌ {result['error']}"
+
+        hits = result.get("hits", [])
+        if not hits:
+            return (
+                f"🔍 **策略 {strategy_id} 全市场扫描完成**\n"
+                f"- 扫描股票数: {result.get('scanned', 0)}\n"
+                f"- 触发 buy 信号: 0 只\n"
+                f"- 耗时: {result.get('elapsed_sec', 0):.0f}s\n"
+                f"今日无股票触发 {strategy_id} 买入信号"
+            )
+
+        # 批量补股票名(用 stock_names 解析)
+        try:
+            import stock_names as sn
+            codes = [h["code"] for h in hits]
+            name_map = sn.resolve_codes(codes) if hasattr(sn, "resolve_codes") else {}
+            for h in hits:
+                h["name"] = name_map.get(h["code"], "") or h.get("name", "")
+        except Exception:
+            pass
+
+        lines = [
+            f"🔍 **策略 {strategy_id} 全市场选股结果**",
+            f"- 扫描股票数: {result.get('scanned', 0)}",
+            f"- 触发 buy 信号: {result.get('hits_count', 0)} 只(显示前 {len(hits)})",
+            f"- 耗时: {result.get('elapsed_sec', 0):.0f}s",
+            "",
+            "| 代码 | 名称 | 现价 | 涨幅 | 成交额(亿) | 触发理由 |",
+            "|---|---|---|---|---|---|",
+        ]
+        for h in hits:
+            reason = h.get("reason", "")
+            # 截断长理由,避免表格过宽
+            if len(reason) > 40:
+                reason = reason[:38] + ".."
+            lines.append(
+                f"| {h['code']} | {h.get('name', '-')} | {h['price']} | "
+                f"{h['pct']:+.2f}% | {h['amount_yi']} | {reason} |"
+            )
+        return "\n".join(lines)
+    except Exception as e:
+        return f"❌ 策略选股出错: {e}"
+
+
+def handler_get_stock_news(code: str, num: int = 15) -> str:
+    """查询个股相关新闻(东财搜索接口,实时抓取)。"""
+    try:
+        import stock_names as sn
+        from news_digest import fetch_stock_news
+
+        # 1. 解析股票代码(支持股票名输入)
+        resolved = sn.resolve_code(code) if code else None
+        if not resolved:
+            return f"❌ 无法识别股票: {code},请输入 6 位代码或股票名(如 301189 / 茅台)"
+        # 2. 抓新闻
+        news = fetch_stock_news(resolved, num=num, strict=True)
+        if not news:
+            return f"📰 未抓到 {resolved} 的相关新闻(可能暂无新闻或接口异常)"
+
+        # 3. 反查股票名(若有)
+        stock_name = ""
+        try:
+            import sqlite3
+            conn = sqlite3.connect(str(sn.DB_PATH), timeout=5)
+            row = conn.execute("SELECT name FROM stock_names WHERE code=?", (resolved,)).fetchone()
+            conn.close()
+            if row and row[0]:
+                stock_name = row[0]
+        except Exception:
+            pass
+
+        lines = [f"📰 **{resolved}{(' ' + stock_name) if stock_name else ''} 相关新闻**({len(news)} 条)"]
+        for i, n in enumerate(news, 1):
+            lines.append(
+                f"\n{i}. **{n['title']}**\n"
+                f"   {n['time']} · {n['source']}\n"
+                f"   {n['summary']}"
+            )
+            if n["url"]:
+                lines.append(f"   🔗 {n['url']}")
+        return "\n".join(lines)
+    except Exception as e:
+        return f"❌ 查询新闻出错: {e}"
+
+
 # 工具名 → 处理函数映射
 TOOL_HANDLERS = {
     "analyze_stock": lambda args: handler_analyze(args.get("code", "")),
@@ -2136,12 +2275,21 @@ TOOL_HANDLERS = {
     "grid_search_strategy": lambda args: handler_grid_search(
         args.get("strategy_id", ""), int(args.get("sample", 400))
     ),
+    "scan_with_strategy": lambda args: handler_scan_with_strategy(
+        args.get("strategy_id", ""),
+        int(args.get("top_n", 20)),
+        float(args.get("min_amount_yi", 0.5)),
+        int(args.get("limit", 0)),
+    ),
+    "get_stock_news": lambda args: handler_get_stock_news(
+        args.get("code", ""), int(args.get("num", 15))
+    ),
 }
 
 MAX_AGENT_STEPS = 6  # 最多 6 步推理(避免无限循环)
 
 # 耗时工具(超过 10 秒),需先发"思考中"提示用户
-SLOW_TOOLS = {"backtest_strategy", "grid_search_strategy"}
+SLOW_TOOLS = {"backtest_strategy", "grid_search_strategy", "scan_with_strategy"}
 
 # 工具结果回灌给 LLM 时的字符上限(防止上下文污染,OpenClaw 风格)
 TOOL_RESULT_MAX_CHARS = 3000
@@ -2282,6 +2430,15 @@ SYSTEM_PROMPT = """你是 A 股量化分析助手(集成于飞书群聊),拥有�
 【回测寻优类(耗时1-5分钟)】
 - backtest_strategy(strategy_id, sample?): 全市场回测某策略,返回超额alpha
 - grid_search_strategy(strategy_id, sample?): 参数网格寻优(仅macd/kdj/boll/dmi)
+- scan_with_strategy(strategy_id, top_n?, min_amount_yi?, limit?): 全市场扫描某策略选股(耗时5-30分钟),返回当日触发buy信号的股票列表
+  · 与 analyze_with_strategy(判断个股) 反向:这里是"给定策略找股票"
+  · 示例: "用龙回头选股" / "哪些股票今天触发抄底信号"
+
+【新闻资讯类】
+- get_stock_news(code, num?): 查个股相关新闻(东财搜索接口,实时抓取)
+  · code 支持 6 位代码或股票名(如 301189 / 茅台)
+  · strict 过滤: 只保留 title/summary 明确提到股票名或代码的新闻,过滤无关列表新闻
+  · 示例: "301189 有什么新闻" / "茅台最近消息" / "跟奥尼电子相关的新闻"
 
 工作流程:
 1. 根据用户问题决定调用哪个工具(可多次调用、组合调用)
