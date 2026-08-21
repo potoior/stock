@@ -350,12 +350,18 @@ def test_handlers_registered_in_tools():
     import feishu_bot
     tool_names = {t["function"]["name"] for t in feishu_bot.TOOLS}
     for sid in ("get_lhb", "get_north_flow", "get_main_flow",
-                "get_concept_sectors", "get_index"):
+                "get_concept_sectors", "get_index", "scan_with_yujie"):
         assert sid in tool_names, f"{sid} 未在 TOOLS 列表中"
 
 
-def test_tool_count_26():
-    """工具总数应为 26(21 旧 + 5 新)。"""
+def test_scan_with_yujie_in_slow_tools():
+    """scan_with_yujie 应在 SLOW_TOOLS 中(耗时 1-3 分钟)。"""
     import feishu_bot
-    assert len(feishu_bot.TOOLS) == 26
-    assert len(feishu_bot.TOOL_HANDLERS) == 26
+    assert "scan_with_yujie" in feishu_bot.SLOW_TOOLS
+
+
+def test_tool_count_27():
+    """工具总数应为 27(21 旧 + 5 市场 + 1 玉姐扫描)。"""
+    import feishu_bot
+    assert len(feishu_bot.TOOLS) == 27
+    assert len(feishu_bot.TOOL_HANDLERS) == 27

@@ -1,5 +1,7 @@
 """yujie_scan 单元测试：合成数据 mock get_daily_data，不联网。"""
 
+from unittest.mock import MagicMock
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -117,3 +119,119 @@ def test_load_picks_roundtrip(monkeypatch, tmp_path):
     assert loaded[0]["rank"] == 1
     assert loaded[0]["hits"] == ["MACD金叉"]
     assert loaded[0]["detail"]["price"] == 1500
+
+
+# ---------------- scan_all_cached 全市场扫描 ----------------
+
+
+def test_scan_all_cached_with_limit(monkeypatch):
+    """scan_all_cached 用 limit=10 应只扫 10 只,返回结构正确。"""
+    import yujie_scan
+    # mock sqlite 返回 10 只假股票
+    fake_rows = [(f"60000{i}", 120, "20260820") for i in range(10)]
+
+    def fake_connect(*args, **kwargs):
+        conn = MagicMock()
+        conn.execute.return_value.fetchall.return_value = fake_rows
+        conn.close = lambda: None
+        return conn
+
+    # mock pd.read_sql 返回简单 df
+    def fake_read_sql(query, conn, params=None):
+        code = params[0] if params else ""
+        n = 120
+        import numpy as np
+        import pandas as pd
+        rng = np.random.default_rng(42)
+        close = 10 + np.cumsum(rng.normal(0, 0.2, n))
+        return pd.DataFrame({
+            "code": [code] * n,
+            "date": [f"20260{i:03d}" for i in range(n)],
+            "open": close, "close": close,
+            "high": close * 1.02, "low": close * 0.98,
+            "volume": [1000000.0] * n,
+        })
+
+    monkeypatch.setattr("sqlite3.connect", fake_connect)
+    monkeypatch.setattr("pandas.read_sql", fake_read_sql)
+    result = yujie_scan.scan_all_cached(top_n=5, min_score=0, limit=10)
+    assert "scanned" in result
+    assert "hits_count" in result
+    assert "hits" in result
+    assert "elapsed_sec" in result
+    assert result["scanned"] == 10
+    assert isinstance(result["hits"], list)
+
+
+def test_scan_all_cached_hits_structure(monkeypatch):
+    """hits 中每条应有 code/score/hits/price 字段。"""
+    import yujie_scan
+    fake_rows = [("600519", 120, "20260820")]
+
+    def fake_connect(*args, **kwargs):
+        conn = MagicMock()
+        conn.execute.return_value.fetchall.return_value = fake_rows
+        conn.close = lambda: None
+        return conn
+
+    def fake_read_sql(query, conn, params=None):
+        code = params[0] if params else "600519"
+        import numpy as np
+        import pandas as pd
+        n = 120
+        rng = np.random.default_rng(42)
+        close = 10 + np.cumsum(rng.normal(0, 0.2, n))
+        return pd.DataFrame({
+            "code": [code] * n,
+            "date": [f"20260{i:03d}" for i in range(n)],
+            "open": close, "close": close,
+            "high": close * 1.02, "low": close * 0.98,
+            "volume": [1000000.0] * n,
+        })
+
+    monkeypatch.setattr("sqlite3.connect", fake_connect)
+    monkeypatch.setattr("pandas.read_sql", fake_read_sql)
+    result = yujie_scan.scan_all_cached(top_n=5, min_score=0, limit=1)
+    for h in result["hits"]:
+        assert "code" in h
+        assert "score" in h
+        assert "hits" in h
+        assert "price" in h
+
+
+def test_scan_all_cached_progress_callback(monkeypatch):
+    """progress_callback 应被调用。"""
+    import yujie_scan
+    fake_rows = [(f"60000{i}", 120, "20260820") for i in range(10)]
+    call_log = []
+
+    def fake_connect(*args, **kwargs):
+        conn = MagicMock()
+        conn.execute.return_value.fetchall.return_value = fake_rows
+        conn.close = lambda: None
+        return conn
+
+    def fake_read_sql(query, conn, params=None):
+        code = params[0] if params else ""
+        import numpy as np
+        import pandas as pd
+        n = 120
+        rng = np.random.default_rng(42)
+        close = 10 + np.cumsum(rng.normal(0, 0.2, n))
+        return pd.DataFrame({
+            "code": [code] * n,
+            "date": [f"20260{i:03d}" for i in range(n)],
+            "open": close, "close": close,
+            "high": close * 1.02, "low": close * 0.98,
+            "volume": [1000000.0] * n,
+        })
+
+    monkeypatch.setattr("sqlite3.connect", fake_connect)
+    monkeypatch.setattr("pandas.read_sql", fake_read_sql)
+
+    def cb(scanned, total, hits_count):
+        call_log.append((scanned, total, hits_count))
+
+    yujie_scan.scan_all_cached(top_n=5, min_score=0, limit=10, progress_callback=cb)
+    # 应至少被调用一次(完成时)
+    assert len(call_log) >= 1

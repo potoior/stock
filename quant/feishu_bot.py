@@ -1575,6 +1575,22 @@ TOOLS = [
             }
         }
     },
+    # ---------- 玉姐全市场实时扫描 ----------
+    {
+        "type": "function",
+        "function": {
+            "name": "scan_with_yujie",
+            "description": "全市场玉姐评分实时扫描(耗时1-3分钟)。用 daily 表已缓存数据对全市场4700+只股票重新打分,返回 Top N 高分股。用户说'扫描整个市场/全市场玉姐/实时玉姐评分/重新扫一遍/按玉姐选股'时调用。与 get_yujie_picks(盘前09:00扫描结果)区别:这是实时重跑全市场评分。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "top_n": {"type": "integer", "description": "返回前 N 只(按评分降序),默认 20", "default": 20},
+                    "min_score": {"type": "number", "description": "最低评分门槛,默认 5.0(玉姐精选默认)。降低到 3 可看更多弱势候选", "default": 5.0},
+                    "limit": {"type": "integer", "description": "限制扫描股票数(调试用),0=全市场", "default": 0}
+                }
+            }
+        }
+    },
 ]
 
 
@@ -2412,6 +2428,83 @@ def handler_get_index(name: str = "") -> str:
         return f"❌ 查询指数行情出错: {e}"
 
 
+def handler_scan_with_yujie(top_n: int = 20, min_score: float = 5.0, limit: int = 0) -> str:
+    """全市场玉姐评分实时扫描(用 daily 表已缓存数据,不联网,耗时 1-3 分钟)。
+
+    与 get_yujie_picks(盘前 09:00 扫描结果)区别:这里实时重跑全市场评分。
+    """
+    try:
+        import yujie_scan
+        log.info(
+            "开始玉姐全市场扫描, top_n=%d, min_score=%s, limit=%d (耗时约 1-3 分钟)",
+            top_n, min_score, limit,
+        )
+
+        # 进度回调(同 scan_with_strategy)
+        chat_id = _current_chat_id()
+        bot_ref = _current_bot()
+        last_progress_ts = [0.0]
+
+        def _progress_cb(scanned, total, hits_count):
+            import time as _t
+            now = _t.time()
+            if now - last_progress_ts[0] < 30 and scanned != total:
+                return
+            last_progress_ts[0] = now
+            pct = scanned * 100 // total if total else 0
+            msg = f"⏳ 玉姐全市场扫描: {scanned}/{total} ({pct}%) | 达标 {hits_count} 只"
+            if bot_ref and chat_id:
+                try:
+                    bot_ref._send_text(chat_id, msg)
+                except Exception:
+                    pass
+
+        result = yujie_scan.scan_all_cached(
+            top_n=int(top_n),
+            min_score=float(min_score),
+            limit=int(limit),
+            progress_callback=_progress_cb if (bot_ref and chat_id) else None,
+        )
+
+        hits = result.get("hits", [])
+        if not hits:
+            return (
+                f"🎯 **玉姐全市场扫描完成**\n"
+                f"- 扫描: {result.get('scanned', 0)} 只\n"
+                f"- 达标(≥{min_score:g}分): 0 只\n"
+                f"- 耗时: {result.get('elapsed_sec', 0):.0f}s\n"
+                f"当前无股票达到 {min_score:g} 分门槛,市场偏弱。可降低门槛(如 3 分)再试。"
+            )
+
+        # 批量补股票名
+        try:
+            import stock_names as sn
+            codes = [h["code"] for h in hits]
+            name_map = sn.resolve_codes(codes) if hasattr(sn, "resolve_codes") else {}
+            for h in hits:
+                h["name"] = name_map.get(h["code"], "")
+        except Exception:
+            for h in hits:
+                h["name"] = ""
+
+        lines = [
+            f"🎯 **玉姐全市场实时扫描** 共扫 {result.get('scanned', 0)} 只,"
+            f"达标(≥{min_score:g}分) {len(hits)} 只,耗时 {result.get('elapsed_sec', 0):.0f}s",
+            "",
+        ]
+        for i, h in enumerate(hits, 1):
+            hits_str = "、".join(h.get("hits", [])[:3])
+            if len(h.get("hits", [])) > 3:
+                hits_str += f"等{len(h['hits'])}条"
+            name = h.get("name", "") or ""
+            lines.append(
+                f"{i}. **{h['code']} {name}** | {h['score']:g}分 | {hits_str}"
+            )
+        return "\n".join(lines)
+    except Exception as e:
+        return f"❌ 玉姐扫描出错: {e}"
+
+
 # 工具名 → 处理函数映射
 TOOL_HANDLERS = {
     "analyze_stock": lambda args: handler_analyze(args.get("code", "")),
@@ -2474,12 +2567,17 @@ TOOL_HANDLERS = {
     "get_main_flow": lambda args: handler_get_main_flow(args.get("code", "")),
     "get_concept_sectors": lambda args: handler_get_concept_sectors(args.get("code", "")),
     "get_index": lambda args: handler_get_index(args.get("name", "")),
+    "scan_with_yujie": lambda args: handler_scan_with_yujie(
+        int(args.get("top_n", 20)),
+        float(args.get("min_score", 5.0)),
+        int(args.get("limit", 0)),
+    ),
 }
 
 MAX_AGENT_STEPS = 6  # 最多 6 步推理(避免无限循环)
 
 # 耗时工具(超过 10 秒),需先发"思考中"提示用户
-SLOW_TOOLS = {"backtest_strategy", "grid_search_strategy", "scan_with_strategy"}
+SLOW_TOOLS = {"backtest_strategy", "grid_search_strategy", "scan_with_strategy", "scan_with_yujie"}
 
 # 工具结果回灌给 LLM 时的字符上限(防止上下文污染,OpenClaw 风格)
 TOOL_RESULT_MAX_CHARS = 3000
@@ -2574,9 +2672,10 @@ SYSTEM_PROMPT = """你是 A 股量化分析助手(集成于飞书群聊),拥有�
 - analyze_stock(code): 个股技术面分析,返回已启用策略的买卖信号 + K线图
   · code 支持中文简称(茅台/五粮液)、英文/拼音(byd/gzmt)、6位代码(600519),自动解析
 - get_market_status(): 今日市场概况(涨跌停/成交额)
-- get_yujie_picks(min_score?, hit_rule?): 今日玉姐精选候选股(默认 Top10 + 缩略图墙)
+- get_yujie_picks(min_score?, hit_rule?): 今日玉姐精选候选股(盘前 09:00 扫描结果,默认 Top10 + 缩略图墙)
   · min_score: 最低评分门槛,如 7=只看7+分强势股,5=玉姐默认门槛
   · hit_rule: 按命中规则过滤,如 "MACD金叉"/"突破+金叉"/"深回撤"
+  · 注意: 这是盘前扫描结果,不是实时的。用户要"实时评分/重新扫描"时用 scan_with_yujie
 - get_portfolio(): 当前模拟盘持仓
 - get_finance(code): 个股财务数据(PE/PB/市值/ROE/毛利率/净利率/EPS/营收/净利润/同比)
   · code 支持 6 位代码或中文简称(茅台/byd/宁德时代)
@@ -2623,6 +2722,11 @@ SYSTEM_PROMPT = """你是 A 股量化分析助手(集成于飞书群聊),拥有�
 - scan_with_strategy(strategy_id, top_n?, min_amount_yi?, limit?): 全市场扫描某策略选股(耗时5-30分钟),返回当日触发buy信号的股票列表
   · 与 analyze_with_strategy(判断个股) 反向:这里是"给定策略找股票"
   · 示例: "用龙回头选股" / "哪些股票今天触发抄底信号"
+- scan_with_yujie(top_n?, min_score?, limit?): 全市场玉姐评分实时扫描(耗时1-3分钟)
+  · 用 daily 表已缓存数据对全市场 4700+ 只重新打分,返回 Top N 高分股
+  · 与 get_yujie_picks(盘前 09:00 扫描结果)区别:这是实时重跑全市场评分
+  · 用户说"扫描整个市场/全市场玉姐/实时玉姐评分/重新扫一遍/按玉姐选股"时用这个
+  · 示例: "扫描整个市场按玉姐评分推荐" / "实时玉姐选股" / "重新扫一遍全市场"
 
 【新闻资讯类】
 - get_stock_news(code, num?): 查个股相关新闻(东财搜索接口,实时抓取)
@@ -3084,7 +3188,8 @@ class FeishuBotClient:
 
         用关键词匹配,避免额外 LLM 调用。
         """
-        slow_keywords = ("回测", "测试", "寻优", "调参", "网格", "最优参数", "backtest", "grid")
+        slow_keywords = ("回测", "测试", "寻优", "调参", "网格", "最优参数", "backtest", "grid",
+                         "扫描整个市场", "全市场扫描", "全市场玉姐", "重新扫", "scan_with_yujie")
         return any(kw in text.lower() for kw in slow_keywords)
 
     def _reply_text(self, chat_id: str, text: str):

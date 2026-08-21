@@ -141,9 +141,16 @@ def _hit_label(rule_id):
     }.get(rule_id, rule_id)
 
 
-def score_stock(code: str, params: dict) -> tuple[float, list, dict | None]:
-    """对单只股票打分，返回 (score, hits, detail) 或 (0, [], None) 数据不足。"""
-    df = get_daily_data(code)
+def score_stock(code: str, params: dict, df=None) -> tuple[float, list, dict | None]:
+    """对单只股票打分，返回 (score, hits, detail) 或 (0, [], None) 数据不足。
+
+    Args:
+        code: 6 位股票代码
+        params: 玉姐参数 dict
+        df: 可选,外部传入的 K 线 DataFrame(跳过 get_daily_data 联网,加速全市场扫描)
+    """
+    if df is None:
+        df = get_daily_data(code)
     if len(df) < params["scope"]["min_history_days"]:
         return 0, [], None
     df = df.sort_values("date").reset_index(drop=True)
@@ -416,6 +423,125 @@ def run_once(limit: int = 0) -> int:
 
     save_picks(date_str, results)
     return len(results)
+
+
+def scan_all_cached(
+    top_n: int = 20,
+    min_score: float = 5.0,
+    limit: int = 0,
+    progress_callback=None,
+) -> dict:
+    """全市场玉姐评分扫描(用 daily 表已缓存数据,不联网)。
+
+    与 run_once 区别:run_once 先从新浪抓全市场实时行情(联网)再评分;
+    本函数直接用 daily 表已缓存的 4700+ 只股票评分,不联网,速度快(1-3 分钟)。
+
+    Args:
+        top_n: 返回前 N 只(按评分降序),默认 20
+        min_score: 最低评分门槛,默认 5.0(玉姐精选默认门槛)
+        limit: 限制扫描股票数(调试用),0=全市场
+        progress_callback: 可选回调 fn(scanned, total, hits_count)
+
+    Returns: {scanned, hits_count, hits, elapsed_sec}
+             hits: [{code, score, hits, price, ...}, ...] 按评分降序
+    """
+    import time as _time
+
+    t0 = _time.time()
+    params = get_params()
+
+    # 1. 从 daily 表取所有有缓存的股票(同 scan_with_strategy 思路)
+    from strategy_engine import CACHE_DB
+    conn = sqlite3.connect(str(CACHE_DB), timeout=30)
+    try:
+        rows = conn.execute(
+            "SELECT code, COUNT(*) as n, MAX(date) as last FROM daily GROUP BY code"
+        ).fetchall()
+    finally:
+        conn.close()
+
+    # 过滤:数据 >= 60 日 + 最新日期近 7 日内
+    today = datetime.now().strftime("%Y%m%d")
+    cutoff = str(int(today) - 7) if today.isdigit() else today
+    candidates = []
+    for code, n_days, last in rows:
+        if n_days < 60:
+            continue
+        if last < cutoff:
+            continue
+        candidates.append(code)
+    if limit and limit < len(candidates):
+        candidates = candidates[:limit]
+
+    total = len(candidates)
+
+    # 2. 多线程评分(直接读 sqlite,跳过 get_daily_data 联网,加速全市场扫描)
+    import pandas as pd
+
+    from strategy_engine import CACHE_DB
+
+    results = []
+    scanned = [0]
+    lock = threading.Lock()
+    # 每个 worker 用独立 sqlite 连接(线程安全)
+    def _worker(code):
+        try:
+            conn = sqlite3.connect(str(CACHE_DB), timeout=30)
+            df = pd.read_sql(
+                "SELECT * FROM daily WHERE code=? ORDER BY date", conn, params=(code,)
+            )
+            conn.close()
+            if len(df) < 60:
+                return "", 0, [], None
+            df["date"] = pd.to_datetime(df["date"], format="%Y%m%d")
+            df = df.sort_values("date").reset_index(drop=True)
+            sc, hits, detail = score_stock(code, params, df=df)
+        except Exception:
+            sc, hits, detail = 0, [], None
+        return code, sc, hits, detail
+
+    last_progress = [0.0]
+    with ThreadPoolExecutor(max_workers=16) as ex:
+        futs = {ex.submit(_worker, c): c for c in candidates}
+        for fut in futs:
+            try:
+                code, sc, hits, detail = fut.result()
+            except Exception:
+                code, sc, hits, detail = "", 0, [], None
+            with lock:
+                scanned[0] += 1
+                if sc >= min_score and detail:
+                    results.append({
+                        "code": code,
+                        "score": sc,
+                        "hits": hits,
+                        "price": detail.get("price"),
+                        "ma5": detail.get("ma5"),
+                        "ma10": detail.get("ma10"),
+                        "ma20": detail.get("ma20"),
+                        "macd_dif": detail.get("macd_dif"),
+                        "rsi6": detail.get("rsi6"),
+                    })
+                # 进度回调:每 500 只或完成时
+                if progress_callback and (
+                    scanned[0] - last_progress[0] >= 500 or scanned[0] == total
+                ):
+                    try:
+                        progress_callback(scanned[0], total, len(results))
+                    except Exception:
+                        pass
+                    last_progress[0] = scanned[0]
+
+    # 3. 按评分降序取 top_n
+    results.sort(key=lambda x: -x["score"])
+    hits = results[:top_n]
+
+    return {
+        "scanned": scanned[0],
+        "hits_count": len(hits),
+        "hits": hits,
+        "elapsed_sec": round(_time.time() - t0, 1),
+    }
 
 
 if __name__ == "__main__":
