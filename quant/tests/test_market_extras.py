@@ -334,6 +334,64 @@ def test_fmt_index_error():
     assert "❌" in text
 
 
+def test_fetch_index_full_fields():
+    """fetch_index 应返回扩展字段(开高低昨收/成交额/振幅/量比/换手)。"""
+    jsonp_data = {
+        "data": {
+            "f57": "000001", "f58": "上证指数",
+            "f43": 389674,   # 3896.74
+            "f44": 391213,   # high
+            "f45": 388379,   # low
+            "f46": 389118,   # open
+            "f60": 390372,   # pre_close
+            "f48": 883423480098.6,  # amount(元)
+            "f50": 87,       # 量比 0.87
+            "f168": 92,      # 换手 0.92%
+            "f169": 148,     # change
+            "f170": 4,       # pct 0.04%
+            "f171": 73,      # 振幅 0.73%
+        }
+    }
+    with patch("urllib.request.urlopen", return_value=_mock_resp(jsonp_data)):
+        result = sme.fetch_index("上证")
+    assert "error" not in result
+    assert result["open"] == 3891.18
+    assert result["high"] == 3912.13
+    assert result["low"] == 3883.79
+    assert result["pre_close"] == 3903.72
+    assert result["amount"] == 883423480098.6
+    assert result["amplitude"] == 0.73
+    assert result["qr"] == 0.87
+    assert result["turnover"] == 0.92
+
+
+def test_fmt_index_full_fields():
+    """完整字段格式化应包含成交额/振幅/量比/换手。"""
+    d = {
+        "name": "上证指数", "code": "000001", "price": 3896.74,
+        "pct": 0.04, "change": 1.48,
+        "open": 3891.18, "high": 3912.13, "low": 3883.79, "pre_close": 3903.72,
+        "amount": 883423480098.6, "amplitude": 0.73, "qr": 0.87, "turnover": 0.92,
+    }
+    text = sme.fmt_index(d)
+    assert "3896.74" in text
+    assert "今开 3891.18" in text
+    assert "高 3912.13 / 低 3883.79" in text
+    assert "昨收 3903.72" in text
+    assert "成交额 8834亿" in text
+    assert "振幅 0.73%" in text
+    assert "量比 0.87" in text
+    assert "换手 0.92%" in text
+
+
+def test_fmt_index_amount_format():
+    """成交额格式化:亿为单位,千以下保留 1 位小数。"""
+    d = {"name": "上证", "code": "000001", "price": 100, "pct": 0.5, "change": 0.5,
+         "amount": 12345678900.0}  # 123.46 亿
+    text = sme.fmt_index(d)
+    assert "成交额 123亿" in text
+
+
 # ---------------- 飞书 Bot handler 注册 ----------------
 
 

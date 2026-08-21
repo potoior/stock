@@ -304,30 +304,35 @@ def fetch_index(name=None):
 
 
 def _fetch_one_index(name, secid):
+    # f43 最新价 / f44 最高 / f45 最低 / f46 今开 / f60 昨收
+    # f48 成交额(元) / f50 量比(×100) / f168 换手率(×100)
+    # f169 涨跌额 / f170 涨跌幅 / f171 振幅(×100)
     url = (
         f"http://push2.eastmoney.com/api/qt/stock/get?secid={secid}"
-        f"&fields=f57,f58,f43,f170,f169"
+        f"&fields=f57,f58,f43,f44,f45,f46,f60,f48,f50,f168,f169,f170,f171"
     )
     data = _get_json(url)
     if not data or not data.get("data"):
         return {"error": f"获取 {name} 失败"}
     d = data["data"]
-    # f43 价格 / f170 涨跌幅(%) / f169 涨跌额 — 东财指数接口都是 ×100 整数
-    price = d.get("f43")
-    pct = d.get("f170")
-    change = d.get("f169")
-    if price and isinstance(price, (int, float)):
-        price = round(float(price) / 100, 2)
-    if change and isinstance(change, (int, float)):
-        change = round(float(change) / 100, 2)
-    if pct and isinstance(pct, (int, float)):
-        pct = round(float(pct) / 100, 2)
+    # 东财 push2 指数接口价格类字段都是 ×100 整数
+    def _r(v, div=100):
+        return round(float(v) / div, 2) if isinstance(v, (int, float)) else None
+    price = _r(d.get("f43"))
     return {
         "name": name,
         "code": d.get("f57", ""),
         "price": price,
-        "pct": pct,
-        "change": change,
+        "pct": _r(d.get("f170")),
+        "change": _r(d.get("f169")),
+        "open": _r(d.get("f46")),
+        "high": _r(d.get("f44")),
+        "low": _r(d.get("f45")),
+        "pre_close": _r(d.get("f60")),
+        "amount": d.get("f48"),  # 成交额(元)
+        "amplitude": _r(d.get("f171")),  # 振幅 %
+        "qr": _r(d.get("f50")),  # 量比
+        "turnover": _r(d.get("f168")),  # 换手率 %
     }
 
 
@@ -406,10 +411,32 @@ def fmt_index(data):
     lines = ["📊 **指数行情**", ""]
     for d in data:
         icon = "🔴" if (d.get("pct") or 0) >= 0 else "🟢"  # A股惯例:红涨绿跌
-        lines.append(
+        pct = d.get("pct") or 0
+        chg = d.get("change") or 0
+        head = (
             f"{icon} **{d['name']}**({d['code']}) {d['price']} "
-            f"{'+' if (d.get('pct') or 0) >= 0 else ''}{d.get('pct', 0)}% ({d.get('change', 0):+.2f})"
+            f"{'+' if pct >= 0 else ''}{pct}% ({'+' if chg >= 0 else ''}{chg:.2f})"
         )
+        lines.append(head)
+        # 详细行:今开/最高/最低/昨收 + 成交额 + 振幅/量比
+        ohlc_parts = []
+        if d.get("open") is not None:
+            ohlc_parts.append(f"今开 {d['open']}")
+        if d.get("high") is not None and d.get("low") is not None:
+            ohlc_parts.append(f"高 {d['high']} / 低 {d['low']}")
+        if d.get("pre_close") is not None:
+            ohlc_parts.append(f"昨收 {d['pre_close']}")
+        if d.get("amount") is not None:
+            amt_yi = d["amount"] / 1e8
+            ohlc_parts.append(f"成交额 {amt_yi:.0f}亿")
+        if d.get("amplitude") is not None:
+            ohlc_parts.append(f"振幅 {d['amplitude']}%")
+        if d.get("qr") is not None:
+            ohlc_parts.append(f"量比 {d['qr']}")
+        if d.get("turnover") is not None:
+            ohlc_parts.append(f"换手 {d['turnover']}%")
+        if ohlc_parts:
+            lines.append("   " + " | ".join(ohlc_parts))
     return "\n".join(lines)
 
 
