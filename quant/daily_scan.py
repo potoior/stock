@@ -30,6 +30,38 @@ HQ_URL = "http://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/Ma
 UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36"
 log = logging.getLogger("quant.daily")
 
+# A 股法定节假日(每年 ~20 天,手动维护,年初更新一次)
+# 格式: YYYYMMDD,只列休市日(不含调休上班的周末)
+HOLIDAYS_2026 = {
+    # 元旦
+    "20260101",
+    # 春节(除夕~初六,2026 春节 2 月 17 日)
+    "20260216", "20260217", "20260218", "20260219", "20260220", "20260221", "20260222",
+    # 清明
+    "20260404", "20260405", "20260406",
+    # 劳动节
+    "20260501", "20260502", "20260503", "20260504", "20260505",
+    # 端午
+    "20260619", "20260620", "20260621",
+    # 中秋(2026 中秋 9 月 25 日,与国庆相邻)
+    "20260925", "20260926", "20260927",
+    # 国庆
+    "20261001", "20261002", "20261003", "20261004", "20261005", "20261006", "20261007",
+}
+HOLIDAYS = set(HOLIDAYS_2026)  # 后续年份可加 HOLIDAYS_2027 等
+
+
+def is_trading_day(now=None) -> bool:
+    """判断当前是否为 A 股交易日(周一~周五 且 非节假日)。"""
+    if now is None:
+        now = datetime.now()
+    if now.weekday() >= 5:  # 周六/周日
+        return False
+    today = now.strftime("%Y%m%d")
+    if today in HOLIDAYS:
+        return False
+    return True
+
 
 def fetch_market_page(page=1, num=100, sort="amount", asc=0):
     url = f"{HQ_URL}?page={page}&num={num}&sort={sort}&asc={asc}&node=hs_a&symbol=&_s_r_a=page"
@@ -365,7 +397,7 @@ def main():
         while True:
             now = datetime.now()
             secs = now.hour * 3600 + now.minute * 60 + now.second
-            if now.weekday() < 5 and target <= secs < target + 600:
+            if is_trading_day(now) and target <= secs < target + 600:
                 try:
                     run_once(args.limit, args.top, args.news_limit)
                 except Exception as e:

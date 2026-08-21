@@ -567,6 +567,67 @@ def test_run_combo_backtest_or_mode(monkeypatch):
     assert r["combo"]["signal_count"] >= 0
     assert "macd" in r["per_strategy"]
     assert "boll" in r["per_strategy"]
+    # OR 模式: 组合信号数应 >= 任一单策略信号数(因为 OR 是并集)
+    if r["combo"]["signal_count"] > 0:
+        max_single = max(r["per_strategy"][s]["signal_count"] for s in ["macd", "boll"])
+        assert r["combo"]["signal_count"] >= max_single
+
+
+def test_run_combo_backtest_and_mode(monkeypatch):
+    """AND 模式: 所有策略同日触发才记组合信号(信号数 <= 最小单策略)。"""
+    import numpy as np
+    import pandas as pd
+
+    import backtest_builtin as bb
+
+    monkeypatch.setattr(bb, "_get_universe_codes", lambda: ["600519", "000001"])
+
+    def fake_load(code):
+        n = 250
+        rng = np.random.default_rng(hash(code) % 2**32)
+        close = 10 + np.cumsum(rng.normal(0, 0.1, n))
+        return pd.DataFrame({
+            "date": [f"20260{i:04d}" for i in range(n)],
+            "open": close, "close": close,
+            "high": close * 1.02, "low": close * 0.98,
+            "volume": [1e6] * n,
+        })
+    monkeypatch.setattr(bb, "_load_code", fake_load)
+
+    r = bb.run_combo_backtest(["macd", "boll"], mode="and", horizon=20, sample=0, workers=1)
+    assert "error" not in r
+    assert r["mode"] == "and"
+    # AND 模式: 组合信号数应 <= 任一单策略信号数(因为 AND 是交集)
+    if r["per_strategy"]["macd"]["signal_count"] > 0 and r["per_strategy"]["boll"]["signal_count"] > 0:
+        min_single = min(r["per_strategy"][s]["signal_count"] for s in ["macd", "boll"])
+        assert r["combo"]["signal_count"] <= min_single
+
+
+def test_handler_combo_backtest_output_format(monkeypatch):
+    """handler_combo_backtest 输出应包含关键信息: 组合信号/基准/对比/结论。"""
+    import feishu_bot
+    # mock run_combo_backtest 返回典型结果
+    fake_report = {
+        "strategy_ids": ["macd", "boll"],
+        "mode": "and",
+        "horizon": 20,
+        "sample": 50,
+        "baseline": 0.01,
+        "combo": {"signal_count": 10, "hit_rate": 0.55, "mean_ret": 0.03, "excess": 0.02},
+        "per_strategy": {
+            "macd": {"signal_count": 100, "hit_rate": 0.48, "mean_ret": 0.013, "excess": 0.003},
+            "boll": {"signal_count": 80, "hit_rate": 0.55, "mean_ret": 0.022, "excess": 0.012},
+        },
+        "elapsed_sec": 30,
+    }
+    monkeypatch.setattr("backtest_builtin.run_combo_backtest", lambda *a, **k: fake_report)
+    out = feishu_bot.handler_combo_backtest(["macd", "boll"], "and", 20, 50)
+    assert "组合回测" in out
+    assert "macd" in out and "boll" in out
+    assert "组合信号" in out
+    assert "基准收益" in out
+    # 组合超额 0.02 > 最佳单策略 0.012,应提示"组合有效"
+    assert "组合有效" in out or "优于" in out
 
 
 def test_run_combo_backtest_unknown_strategy():

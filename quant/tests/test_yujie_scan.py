@@ -49,8 +49,8 @@ def test_score_stock_min_history_filter(monkeypatch):
 def test_score_stock_score_in_expected_range(mock_data):
     params = yujie_scan.DEFAULT_PARAMS
     sc, hits, _ = yujie_scan.score_stock("000001", params)
-    # 满分 11 分(默认参数下所有规则都命中)
-    assert 0 <= sc <= 11.5
+    # 满分 12 分(默认参数下所有规则都命中: macd_golden 2 + breakout 2 + 其余 8 项各 1)
+    assert 0 <= sc <= 12.5
 
 
 def test_get_params_returns_defaults(monkeypatch, tmp_path):

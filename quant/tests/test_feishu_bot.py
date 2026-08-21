@@ -1049,7 +1049,7 @@ def test_query_history_picks_no_data(tmp_path, monkeypatch):
 
 
 def test_query_history_picks_with_data(tmp_path, monkeypatch):
-    """指定日期有数据应返回 Top10 列表。"""
+    """指定日期有数据应返回精简列表(显示前 5,6-10 汇总一行)。"""
     db = tmp_path / "stock_cache.db"
     conn = sqlite3.connect(str(db))
     conn.execute("CREATE TABLE yujie_picks (date TEXT, rank INTEGER, code TEXT, name TEXT, score REAL, hits TEXT, detail TEXT)")
@@ -1065,8 +1065,8 @@ def test_query_history_picks_with_data(tmp_path, monkeypatch):
 
     r = handler_query_history_picks("20260819")
     assert "20260819" in r
-    assert "Top10" in r or "Top" in r
-    assert "评分分布" in r
+    assert "显示前 5" in r or "共 15" in r  # 精简显示
+    assert "评分" in r  # 评分分布(精简版)
     assert "共 15" in r  # 总共 15 只
 
 

@@ -25,13 +25,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from strategy_engine import (
-    CACHE_DB,
-    _ensure_daily_table,
-    compute_macd,
-    compute_rsi,
-    fetch_qfq_tencent,
-)
+from strategy_engine import CACHE_DB, _ensure_daily_table, fetch_qfq_tencent  # noqa: F401
+from strategy_indicators import compute_macd, compute_rsi
 from yujie_scan import get_params
 
 HOME = Path(__file__).parent

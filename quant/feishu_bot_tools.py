@@ -319,7 +319,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "combo_backtest",
-            "description": "多策略组合回测:AND=所有策略同日同时触发买入信号,OR=任一策略触发。对比组合 vs 各策略单独的超额收益,看组合是否有效。耗时约 1-3 分钟。用户问'组合回测X和Y/X+Y策略组合/X和Y同时触发效果'时调用。",
+            "description": "多策略组合回测:AND=所有策略同日同时触发买入信号,OR=任一策略触发。对比组合 vs 各策略单独的超额收益。耗时 1-10 分钟(sample=400 约 1-3 分钟,全市场 5-10 分钟)。用户问'组合回测X和Y/X+Y策略组合/X和Y同时触发效果'时调用。",
             "parameters": {
                 "type": "object",
                 "properties": {

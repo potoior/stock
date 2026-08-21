@@ -24,9 +24,9 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from strategy_engine import (
-    CACHE_DB,
-    DEFAULT_STRATEGY_PARAMS,
+from strategy_engine import CACHE_DB  # noqa: F401  (re-export 兼容)
+from strategy_indicators import (
+    DEFAULT_STRATEGY_PARAMS,  # noqa: F401  (re-export 兼容)
     compute_bbiboll,
     compute_bias,
     compute_boll,
@@ -617,6 +617,7 @@ def run_combo_backtest(
     horizon: int = 20,
     sample: int = 400,
     workers: int = 1,
+    progress_callback=None,
 ) -> dict:
     """多策略组合回测: AND=所有策略同时触发, OR=任一触发。
 
@@ -626,6 +627,7 @@ def run_combo_backtest(
         horizon: 持有期(天),默认 20
         sample: 抽样股票数,0=全市场
         workers: 并发线程数(策略函数非线程安全,建议 1)
+        progress_callback: 可选回调 fn(scanned, total, hits_count),用于发进度提示
 
     Returns: {
         strategy_ids, mode, horizon, sample,
@@ -675,6 +677,11 @@ def run_combo_backtest(
                 done[0] += 1
                 if done[0] % 200 == 0 or done[0] == len(codes):
                     print(f"  预加载 {done[0]}/{len(codes)}  耗时 {time.time()-t0:.0f}s", flush=True)
+                    if progress_callback:
+                        try:
+                            progress_callback(done[0], len(codes), len(pieces))
+                        except Exception:
+                            pass
             if r is not None:
                 pieces.append(r)
     if not pieces:

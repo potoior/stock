@@ -557,12 +557,12 @@ def fmt_market_sentiment(data):
             mn_yi = mn / 1e8
             icon = "🔴" if (r.get("pct") or 0) >= 0 else "🟢"
             lines.append(f"  {icon} {r['name']} {(r.get('pct') or 0):+.2f}% 主力{mn_yi:+.2f}亿")
-    # 3. 概念板块资金流前 5
+    # 3. 概念板块资金流前 3(原 5,改 3 防超 600 字)
     top_con = data.get("top_concepts") or []
     if top_con:
         lines.append("")
-        lines.append("**概念板块资金流 Top5**:")
-        for r in top_con[:5]:
+        lines.append("**概念板块资金流 Top3**:")
+        for r in top_con[:3]:
             mn = r.get("main_net") or 0
             mn_yi = mn / 1e8
             icon = "🔴" if (r.get("pct") or 0) >= 0 else "🟢"

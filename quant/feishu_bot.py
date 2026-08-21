@@ -1124,15 +1124,23 @@ def handler_query_history_picks(date: str) -> str:
             "提示: 玉姐精选每日 09:00 自动生成,历史数据需当天跑过才有。"
         )
 
-    # Top10 列表
+    # Top10 列表(精简: 默认只展开 top 5 详情,避免超 600 字截断)
     top = picks[:10]
-    lines = [f"📅 {date_str} 玉姐精选 Top{len(top)}(共 {len(picks)} 只)"]
-    for p in top:
-        hits = "、".join(p.get("hits", [])) if p.get("hits") else "无命中"
+    show_n = min(5, len(top))  # 展开前 5,与 handler_yujie 一致
+    lines = [f"📅 {date_str} 玉姐精选(共 {len(picks)} 只,显示前 {show_n})"]
+    for p in top[:show_n]:
+        hits = "、".join(p.get("hits", [])[:3]) if p.get("hits") else "无命中"
+        if p.get("hits") and len(p["hits"]) > 3:
+            hits += f" 等{len(p['hits'])}项"
         lines.append(f"{p['rank']}. **{p['code']} {p['name']}** | {p['score']:g}分 | {hits}")
 
+    # 6-10 只精简一行展示
+    if len(top) > show_n:
+        rest = "、".join(f"{p['code']}({p['score']:g})" for p in top[show_n:])
+        lines.append(f"\n6-{len(top)}: {rest}")
+
     if len(picks) > 10:
-        lines.append(f"\n(共 {len(picks)} 只,仅显示前 10)")
+        lines.append(f"(共 {len(picks)} 只,完整 10 只可追问 '分析 XXX')")
 
     # 评分分布
     scores = [p.get("score", 0) for p in picks]
@@ -1140,9 +1148,9 @@ def handler_query_history_picks(date: str) -> str:
         high = sum(1 for s in scores if s >= 7)
         mid = sum(1 for s in scores if 5 <= s < 7)
         low = sum(1 for s in scores if s < 5)
-        lines.append(f"\n评分分布: 7+分 {high} 只 / 5-7分 {mid} 只 / <5分 {low} 只")
+        lines.append(f"\n评分: 7+分 {high} / 5-7分 {mid} / <5分 {low}")
 
-    lines.append(f"\n💡 可继续追问单只股票: '分析 {top[0]['code']}'")
+    lines.append(f"\n💡 可追问: '分析 {top[0]['code']}'")
     return "\n".join(lines)
 
 
@@ -1816,8 +1824,35 @@ def handler_combo_backtest(
     """多策略组合回测(AND=同日同时触发, OR=任一触发)。"""
     try:
         import backtest_builtin as bb
-        log.info("开始组合回测 %s [%s], horizon=%d (耗时约 1-3 分钟)", strategy_ids, mode, horizon)
-        report = bb.run_combo_backtest(strategy_ids, mode, horizon, sample, workers=1)
+        time_hint = "全市场约 5-10 分钟" if sample == 0 or sample >= 2000 else "约 1-3 分钟"
+        log.info("开始组合回测 %s [%s], horizon=%d, sample=%d (%s)",
+                 strategy_ids, mode, horizon, sample, time_hint)
+
+        # 进度回调(同 scan_with_strategy / scan_with_yujie)
+        chat_id = _current_chat_id()
+        bot_ref = _current_bot()
+        last_progress_ts = [0.0]
+
+        def _progress_cb(scanned, total, hits_count):
+            import time as _t
+            now = _t.time()
+            if now - last_progress_ts[0] < 30 and scanned != total:
+                return
+            last_progress_ts[0] = now
+            if bot_ref and chat_id:
+                pct = scanned * 100 // total if total else 0
+                try:
+                    bot_ref._send_text(
+                        chat_id,
+                        f"⏳ 组合回测预加载: {scanned}/{total} ({pct}%) | 有效 {hits_count} 只",
+                    )
+                except Exception:
+                    pass
+
+        report = bb.run_combo_backtest(
+            strategy_ids, mode, horizon, sample, workers=1,
+            progress_callback=_progress_cb if (bot_ref and chat_id) else None,
+        )
         if "error" in report:
             return f"❌ {report['error']}"
         combo = report["combo"]
@@ -1944,7 +1979,11 @@ def handler_scan_with_strategy(
 
 
 def handler_get_stock_news(code: str, num: int = 15) -> str:
-    """查询个股相关新闻(东财搜索接口,实时抓取)。"""
+    """查询个股相关新闻(东财搜索接口,实时抓取)。
+
+    输出精简: 默认只展开 top 8 条(title+time+source+summary),url 单独行省略
+    避免超 600 字硬截断(15 条全展开 ~2500 字会被截到只剩 3-4 条)
+    """
     try:
         import stock_names as sn
         from news_digest import fetch_stock_news
@@ -1970,15 +2009,20 @@ def handler_get_stock_news(code: str, num: int = 15) -> str:
         except Exception:
             pass
 
-        lines = [f"📰 **{resolved}{(' ' + stock_name) if stock_name else ''} 相关新闻**({len(news)} 条)"]
-        for i, n in enumerate(news, 1):
+        # 4. 输出精简: 只展开 top 8(超 600 字会被截断),summary 截到 80 字
+        show_n = min(8, len(news))
+        lines = [f"📰 **{resolved}{(' ' + stock_name) if stock_name else ''} 相关新闻**"
+                 f"(共 {len(news)} 条,显示前 {show_n})"]
+        for i, n in enumerate(news[:show_n], 1):
+            summary = n["summary"] or ""
+            if len(summary) > 80:
+                summary = summary[:80] + "..."
             lines.append(
                 f"\n{i}. **{n['title']}**\n"
-                f"   {n['time']} · {n['source']}\n"
-                f"   {n['summary']}"
+                f"   {n['time']} · {n['source']} | {summary}"
             )
-            if n["url"]:
-                lines.append(f"   🔗 {n['url']}")
+        if len(news) > show_n:
+            lines.append(f"\n(其余 {len(news) - show_n} 条请去东财搜索 {resolved} 查看)")
         return "\n".join(lines)
     except Exception as e:
         return f"❌ 查询新闻出错: {e}"
@@ -2109,11 +2153,13 @@ def handler_scan_with_yujie(top_n: int = 20, min_score: float = 5.0, limit: int 
         )
 
         hits = result.get("hits", [])
+        # 门槛描述: min_score<=0 时是"无门槛 Top 排序",否则是"达标(≥X分)"
+        threshold_desc = f"达标(≥{min_score:g}分)" if min_score > 0 else f"Top{len(hits)}(无门槛排序)"
         if not hits:
             return (
                 f"🎯 **玉姐全市场扫描完成**\n"
                 f"- 扫描: {result.get('scanned', 0)} 只\n"
-                f"- 达标(≥{min_score:g}分): 0 只\n"
+                f"- {threshold_desc}: 0 只\n"
                 f"- 耗时: {result.get('elapsed_sec', 0):.0f}s\n"
                 f"当前无股票达到 {min_score:g} 分门槛,市场偏弱。可降低门槛(如 3 分)再试。"
             )
@@ -2131,7 +2177,7 @@ def handler_scan_with_yujie(top_n: int = 20, min_score: float = 5.0, limit: int 
 
         lines = [
             f"🎯 **玉姐全市场实时扫描** 共扫 {result.get('scanned', 0)} 只,"
-            f"达标(≥{min_score:g}分) {len(hits)} 只,耗时 {result.get('elapsed_sec', 0):.0f}s",
+            f"{threshold_desc} {len(hits)} 只,耗时 {result.get('elapsed_sec', 0):.0f}s",
             "",
         ]
         for i, h in enumerate(hits, 1):
@@ -2657,24 +2703,24 @@ class FeishuBotClient:
         _set_current_bot(self)
         log.info("飞书 Bot 客户端已初始化, app_id=%s...", self.app_id[:10])
 
-    def _needs_thinking_hint(self, text: str) -> bool:
-        """轻量判断:用户问题是否触发了耗时工具(回测/寻优)。
+    def _needs_thinking_hint(self, text: str) -> tuple[bool, str]:
+        """轻量判断:用户问题是否触发了耗时工具,返回 (需提示, 提示文案)。
 
         用关键词匹配,避免额外 LLM 调用。
+        分两档: 真正慢工具(回测/扫描,1-30分钟) vs 快查询(对比/新闻,1-10秒)
         """
-        slow_keywords = (
-            # 回测/寻优
-            "回测", "测试", "寻优", "调参", "网格", "最优参数", "backtest", "grid",
+        # 真正慢工具(>30s):回测/寻优/全市场扫描/组合回测
+        very_slow = (
+            "回测", "寻优", "调参", "网格", "最优参数", "backtest", "grid",
             "组合回测", "组合测试", "同时触发", "combo",
-            # 全市场扫描
             "扫描整个市场", "全市场扫描", "全市场玉姐", "重新扫", "scan_with_yujie",
-            # 多股对比/板块分析(各发多次 HTTP,~10s)
-            "对比", "vs", "和.*哪个", "板块", "成分",
-            # 新闻/资金流(实时抓取,有延迟)
-            "新闻", "消息", "资金流", "龙虎榜", "北向",
         )
+        # 快查询(1-10s):多股对比/板块/新闻/资金流(无提示或短提示)
+        # 这些不需要"思考 1-2 分钟"提示,实际很快
         text_lower = text.lower()
-        return any(kw in text_lower for kw in slow_keywords)
+        if any(kw in text_lower for kw in very_slow):
+            return True, "🤔 正在跑回测/扫描,需要 1-3 分钟,请耐心等待..."
+        return False, ""
 
     def _reply_text(self, chat_id: str, text: str):
         """发送文本消息到 chat_id。超长自动分段(按段落边界拆分)。"""
@@ -2792,9 +2838,9 @@ class FeishuBotClient:
                 agent = FeishuAgent()
                 history = _load_history(session_id)
                 # 先看 LLM 第一步是否要调慢工具:用轻量探测(同 LLM 但只取 tool_calls)
-                need_thinking_hint = self._needs_thinking_hint(text)
+                need_thinking_hint, hint_text = self._needs_thinking_hint(text)
                 if need_thinking_hint:
-                    self._reply_text(chat_id, "🤔 正在思考,需要 1-2 分钟(回测/寻优)...")
+                    self._reply_text(chat_id, hint_text)
                 # 设置 chat_id 到 thread-local,供 handler 内部主动发消息(如进度提示)
                 _set_current_chat_id(chat_id)
                 _set_current_bot(self)
