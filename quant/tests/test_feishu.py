@@ -139,7 +139,7 @@ def test_build_daily_card_bullish():
          "verdict": "买入", "hits": ["MACD金叉", "放量"]},
     ]
     card = feishu.build_daily_card(stats, cands, "AI 综合分析内容...")
-    assert card["header"]["template"] == "green"  # 偏多
+    assert card["header"]["template"] == "red"  # 偏多(A股红涨)
     assert "5000" in card["elements"][0]["text"]["content"]
     assert "平安银行" in card["elements"][3]["text"]["content"]
     assert "AI 综合分析内容..." in card["elements"][6]["text"]["content"]
@@ -149,7 +149,7 @@ def test_build_daily_card_bearish():
     stats = {"total": 5000, "up": 1000, "down": 3500, "flat": 500,
              "limit_up": 5, "limit_down": 80, "total_amount_yi": 8000}
     card = feishu.build_daily_card(stats, [], "")
-    assert card["header"]["template"] == "red"
+    assert card["header"]["template"] == "green"  # 偏空(A股绿跌)
     assert "（无候选）" in card["elements"][3]["text"]["content"]
     assert "(AI 调用失败)" in card["elements"][6]["text"]["content"]
 

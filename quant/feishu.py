@@ -225,9 +225,9 @@ def build_daily_card(stats, cands, ai_summary, now=None):
     up = stats.get("up", 0)
     dn = stats.get("down", 0)
     if up > dn * 1.5:
-        mood, tmpl = "偏多(普涨)", "green"
+        mood, tmpl = "偏多(普涨)", "red"  # A股惯例:红涨绿跌
     elif dn > up * 1.5:
-        mood, tmpl = "偏空(普跌)", "red"
+        mood, tmpl = "偏空(普跌)", "green"  # A股惯例:红涨绿跌
     else:
         mood, tmpl = "震荡", "blue"
 

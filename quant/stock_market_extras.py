@@ -363,7 +363,7 @@ def fmt_north_flow(rows):
         total = r.get("total_net")
         if total is None:
             continue
-        icon = "🟢" if total >= 0 else "🔴"
+        icon = "🔴" if total >= 0 else "🟢"  # A股惯例:红涨绿跌
         lines.append(
             f"{icon} {r['date']}: 沪股通 {r.get('hk2sh_net', 0):+.2f}亿 + "
             f"深股通 {r.get('hk2sz_net', 0):+.2f}亿 = 北向合计 {total:+.2f}亿"
@@ -405,7 +405,7 @@ def fmt_index(data):
         data = [data]
     lines = ["📊 **指数行情**", ""]
     for d in data:
-        icon = "🟢" if (d.get("pct") or 0) >= 0 else "🔴"
+        icon = "🔴" if (d.get("pct") or 0) >= 0 else "🟢"  # A股惯例:红涨绿跌
         lines.append(
             f"{icon} **{d['name']}**({d['code']}) {d['price']} "
             f"{'+' if (d.get('pct') or 0) >= 0 else ''}{d.get('pct', 0)}% ({d.get('change', 0):+.2f})"
