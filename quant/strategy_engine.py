@@ -2922,6 +2922,7 @@ def scan_with_strategy(
     top_n: int = 20,
     min_amount_yi: float = 0.5,
     limit: int = 0,
+    progress_callback=None,
 ) -> dict:
     """全市场扫描指定策略,返回触发 buy 信号的股票列表。
 
@@ -2933,6 +2934,7 @@ def scan_with_strategy(
         top_n: 返回前 N 只(按涨幅降序),默认 20
         min_amount_yi: 最小成交额(亿)过滤,默认 0.5 亿,过滤小盘股流动性差
         limit: 限制扫描股票数(调试用),0=全市场
+        progress_callback: 可选回调 fn(scanned, total, hits_count),用于发进度提示
 
     Returns: {"strategy": sid, "scanned": n, "hits": [...], "elapsed_sec": float}
              hits: [{code, name, price, pct, signal, reason, amount_yi}, ...]
@@ -3012,8 +3014,17 @@ def scan_with_strategy(
     params = {**DEFAULT_STRATEGY_PARAMS.get(strategy_id, {})}
     hits = []
     scanned = 0
+    total = len(candidates)
+    last_progress_at = 0  # 上次发进度的 scanned 值
     for code in candidates:
         scanned += 1
+        # 进度回调:每 200 只或完成时发一次
+        if progress_callback and (scanned - last_progress_at >= 200 or scanned == total):
+            try:
+                progress_callback(scanned, total, len(hits))
+            except Exception:
+                pass
+            last_progress_at = scanned
         try:
             df = get_daily_data(code, days=320)
             if len(df) < 60:

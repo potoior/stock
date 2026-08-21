@@ -209,6 +209,31 @@ def _set_current_session_id(session_id: str) -> None:
     """设置当前线程的 session_id。"""
     _tl.session_id = session_id
 
+
+def _current_chat_id() -> str:
+    """读取当前线程的飞书 chat_id(默认 '')。"""
+    return getattr(_tl, "chat_id", "")
+
+
+def _set_current_chat_id(chat_id: str) -> None:
+    """设置当前线程的 chat_id,供 handler 内部主动发消息(如进度提示)。"""
+    _tl.chat_id = chat_id
+
+
+# 当前线程的 FeishuBot 实例(供 handler 内部主动发消息)
+_bot_ref = None
+
+
+def _current_bot():
+    """返回当前 FeishuBot 单例(若已初始化)。"""
+    return _bot_ref
+
+
+def _set_current_bot(bot):
+    """设置 FeishuBot 单例(由 FeishuBot.__init__ 调用)。"""
+    global _bot_ref
+    _bot_ref = bot
+
 # 跨轮对话历史持久化(按 session_id 存储,sqlite)
 # 保留最近 MAX_HISTORY_TURNS 轮(1 轮 = user + assistant 两条消息)
 # 超过 HISTORY_EXPIRE_DAYS 天未活跃的 session 自动清理(启动时跑一次)
@@ -684,16 +709,20 @@ def handler_yujie(min_score: float = 0, hit_rule: str = "") -> str:
         else:
             cond_str = " Top10"
 
-        lines = [f"🎯 今日玉姐精选{cond_str} 共 {len(filtered)} 只"]
-        for p in show:
-            hits = "、".join(p.get("hits", [])) if p.get("hits") else "无命中"
+        # 精简版:默认只列 Top5 详情,完整 10 只看附图
+        text_show = show[:5] if not has_filter else show[:10]
+        lines = [f"🎯 今日玉姐精选{cond_str} 共 {len(filtered)} 只(详情看附图)"]
+        for p in text_show:
+            hits = "、".join(p.get("hits", [])[:2]) if p.get("hits") else "无命中"
+            if p.get("hits") and len(p["hits"]) > 2:
+                hits += f"等{len(p['hits'])}条"
             lines.append(
                 f"{p['rank']}. **{p['code']} {p['name']}** | {p['score']:g}分 | {hits}"
             )
-        if len(filtered) > len(show):
-            lines.append(f"\n(共 {len(filtered)} 只,仅显示前 {len(show)} 只)")
+        if len(filtered) > len(text_show):
+            lines.append(f"\n(共 {len(filtered)} 只,文字仅列前 {len(text_show)} 只,完整 {len(show)} 只见附图)")
         if _pending_images:
-            lines.append("\n[已附候选 K 线缩略图墙]")
+            lines.append("[已附候选 K 线缩略图墙]")
         return "\n".join(lines)
     except Exception as e:
         return f"❌ 读取玉姐精选出错: {e}"
@@ -1569,29 +1598,28 @@ def handler_list_strategies() -> str:
             except Exception:
                 pass
 
-        lines = ["📋 **当前策略状态**\n"]
-        lines.append("| ID | 名称 | 开关 | 关键参数 | 60天超额 |")
-        lines.append("|---|---|---|---|---|")
-        builtin_ids = set()
-        for s in strategies:
-            sid = s.get("id", "")
-            name = s.get("name", sid)
-            enabled = "✅" if s.get("enabled", True) else "❌"
-            params = s.get("params", {})
-            # 只显示 2 个关键参数,避免表格过宽
-            p_str = ", ".join(f"{k}={v}" for k, v in list(params.items())[:2]) if params else "-"
-            excess = excess_map.get(sid)
-            excess_str = f"{excess:+.2f}%" if excess is not None else "-"
-            if s.get("type") == "builtin" or sid in (
-                "macd", "kdj", "ma_stop", "boll", "dmi", "psy", "bias", "sar",
-                "bbiboll", "tower", "ma_combo", "two_line", "life_line",
-                "three_third", "sparrow", "bounce", "volume_div", "resonance",
-                "dmi_psy", "rsi", "bottom", "top", "zt",
-            ):
-                builtin_ids.add(sid)
-            lines.append(f"| {sid} | {name} | {enabled} | {p_str} | {excess_str} |")
+        # 精简版:只列摘要 + Top5 超额,避免长表格(完整列表用 get_strategy_library 查)
+        enabled_count = sum(1 for s in strategies if s.get("enabled", True))
+        disabled = [s for s in strategies if not s.get("enabled", True)]
+        # 按超额排序取 Top5
+        sorted_by_excess = sorted(
+            [(s.get("id", ""), s.get("name", ""), excess_map.get(s.get("id", ""), 0))
+             for s in strategies if s.get("id", "") in excess_map],
+            key=lambda x: x[2], reverse=True
+        )[:5]
 
-        lines.append(f"\n共 {len(strategies)} 个策略(23 内置 + 自定义)")
+        lines = [
+            f"📋 **当前策略状态** 共 {len(strategies)} 个(启用 {enabled_count} / 禁用 {len(disabled)})",
+            "",
+            "**Top5 60天超额**:",
+        ]
+        for sid, name, exc in sorted_by_excess:
+            lines.append(f"- {name}({sid}): {exc:+.2f}%")
+        if disabled:
+            lines.append(f"\n**已禁用**({len(disabled)} 个): " + ", ".join(f"{s['id']}" for s in disabled[:5]))
+            if len(disabled) > 5:
+                lines.append(f"  …共 {len(disabled)} 个")
+        lines.append("\n(完整策略列表用'策略大全'查,启停用'开关 策略ID')")
         return "\n".join(lines)
     except Exception as e:
         return f"❌ 列出策略出错: {e}"
@@ -2206,11 +2234,33 @@ def handler_scan_with_strategy(
             "开始策略选股 %s, top_n=%d, min_amount_yi=%s, limit=%d (耗时约 5-30 分钟)",
             strategy_id, top_n, min_amount_yi, limit,
         )
+
+        # 进度回调:每 200 只发一次进度消息(通过当前线程的 chat_id)
+        chat_id = _current_chat_id()
+        bot_ref = _current_bot()  # 拿到 FeishuBot 实例(若在飞书消息处理中)
+        last_progress_ts = [0.0]
+
+        def _progress_cb(scanned, total, hits_count):
+            import time as _t
+            now = _t.time()
+            # 限频:至少间隔 30s 发一次进度,避免刷屏
+            if now - last_progress_ts[0] < 30 and scanned != total:
+                return
+            last_progress_ts[0] = now
+            pct = scanned * 100 // total if total else 0
+            msg = f"⏳ 策略选股进度: {scanned}/{total} ({pct}%) | 命中 buy 信号 {hits_count} 只"
+            if bot_ref and chat_id:
+                try:
+                    bot_ref._send_text(chat_id, msg)
+                except Exception:
+                    pass
+
         result = se.scan_with_strategy(
             strategy_id=strategy_id,
             top_n=top_n,
             min_amount_yi=min_amount_yi,
             limit=limit,
+            progress_callback=_progress_cb if (bot_ref and chat_id) else None,
         )
         if "error" in result:
             return f"❌ {result['error']}"
@@ -2596,7 +2646,10 @@ SYSTEM_PROMPT = """你是 A 股量化分析助手(集成于飞书群聊),拥有�
 工作流程:
 1. 根据用户问题决定调用哪个工具(可多次调用、组合调用)
 2. 拿到工具返回的原始数据后,用简洁的中文向用户解释
-3. 回复要条理清晰,用 markdown 格式(加粗、列表、emoji),不超过 600 字
+3. 回复严格 ≤400 字(飞书群聊场景,简洁优先),用 markdown(加粗/列表/emoji)
+   · 只给关键结论 + 数字,不要复述工具返回的全部数据
+   · 例: "茅台 600519 | 买入 ⬆ | 5/45 策略看多 | MACD金叉+BOLL下轨支撑 | 非投资建议"
+   · 不要再列长表格(超 5 行就改用一句话总结)
 4. 不要编造数据,只基于工具返回的事实
 5. 涉及投资判断时务必加风险提示(非投资建议)
 
@@ -2791,7 +2844,7 @@ class FeishuAgent:
                 "tools": TOOLS,
                 "tool_choice": "auto",
                 "temperature": 0.3,
-                "max_tokens": 2048,
+                "max_tokens": 1024,  # 限制输出长度,避免飞书消息过长(中文约 500-700 字)
             }
             headers = {
                 "Authorization": f"Bearer {self.api_key}",
@@ -2935,6 +2988,9 @@ class FeishuAgent:
 
                 # 工具结果截断(OpenClaw 风格):防止上下文污染
                 result = _truncate_tool_result(result)
+                # 给 LLM 加压缩提示:不要复述全部数据,只取关键信息
+                if isinstance(result, str) and len(result) > 200:
+                    result = result + "\n\n[提示: 以上数据请精简总结给用户,只保留关键结论和数字,不要复述全部]"
 
                 # 结构化日志(JSONL)
                 _log_tool_call(session_id, step + 1, fn_name, fn_args,
@@ -2990,6 +3046,8 @@ class FeishuBotClient:
         if not self.app_id or not self.app_secret:
             raise RuntimeError("feishu app_id/app_secret 未配置")
         self.client = lark.Client.builder().app_id(self.app_id).app_secret(self.app_secret).build()
+        # 注册到全局,供 handler 内部主动发消息(如 scan_with_strategy 进度提示)
+        _set_current_bot(self)
         log.info("飞书 Bot 客户端已初始化, app_id=%s...", self.app_id[:10])
 
     def _needs_thinking_hint(self, text: str) -> bool:
@@ -3112,6 +3170,9 @@ class FeishuBotClient:
                 need_thinking_hint = self._needs_thinking_hint(text)
                 if need_thinking_hint:
                     self._reply_text(chat_id, "🤔 正在思考,需要 1-2 分钟(回测/寻优)...")
+                # 设置 chat_id 到 thread-local,供 handler 内部主动发消息(如进度提示)
+                _set_current_chat_id(chat_id)
+                _set_current_bot(self)
                 reply, new_history, images = agent.chat(text, history=history, session_id=session_id)
                 _save_history(session_id, new_history)
             except Exception as e:
@@ -3122,6 +3183,10 @@ class FeishuBotClient:
                 session_lock.release()
 
             log.info("回复长度 %d, 附图 %d 张", len(reply), len(images))
+            # 最终回复硬截断:超 600 字截断,避免飞书消息过长
+            if len(reply) > 600:
+                reply = reply[:590] + "\n\n…(内容过长已截断,详情可继续问)"
+                log.info("回复截断 %d → 600", len(reply))
             self._reply_text(chat_id, reply)
             # 发送图片
             for png in images:
