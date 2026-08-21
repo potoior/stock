@@ -1477,6 +1477,25 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "combo_backtest",
+            "description": "多策略组合回测:AND=所有策略同日同时触发买入信号,OR=任一策略触发。对比组合 vs 各策略单独的超额收益,看组合是否有效。耗时约 1-3 分钟。用户问'组合回测X和Y/X+Y策略组合/X和Y同时触发效果'时调用。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "strategy_ids": {"type": "array", "items": {"type": "string"},
+                                     "description": "策略 id 列表(至少2个),如 [\"macd\",\"boll\"]"},
+                    "mode": {"type": "string", "enum": ["and", "or"],
+                             "description": "and=所有策略同日触发, or=任一触发。默认 and", "default": "and"},
+                    "horizon": {"type": "integer", "description": "持有期(天),默认 20", "default": 20},
+                    "sample": {"type": "integer", "description": "抽样股票数,默认 400", "default": 400}
+                },
+                "required": ["strategy_ids"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "scan_with_strategy",
             "description": "全市场扫描指定策略,返回当日触发 buy 信号的股票列表(选股)。耗时约 5-30 分钟(全市场4700只)。用户问'用X策略选股/哪些股票今天触发X信号/X策略选股/X策略选哪些'时调用。注意:与 analyze_with_strategy(判断个股) 不同,本工具是反向操作(给定策略找股票)。",
             "parameters": {
@@ -2262,6 +2281,51 @@ def handler_grid_search(strategy_id: str, sample: int = 400) -> str:
         return f"❌ 寻优出错: {e}"
 
 
+def handler_combo_backtest(
+    strategy_ids: list[str], mode: str = "and", horizon: int = 20, sample: int = 400
+) -> str:
+    """多策略组合回测(AND=同日同时触发, OR=任一触发)。"""
+    try:
+        import backtest_builtin as bb
+        log.info("开始组合回测 %s [%s], horizon=%d (耗时约 1-3 分钟)", strategy_ids, mode, horizon)
+        report = bb.run_combo_backtest(strategy_ids, mode, horizon, sample, workers=1)
+        if "error" in report:
+            return f"❌ {report['error']}"
+        combo = report["combo"]
+        per = report["per_strategy"]
+        baseline = report["baseline"]
+
+        mode_label = "同日同时触发(AND)" if mode == "and" else "任一触发(OR)"
+        lines = [
+            f"📊 **多策略组合回测** {' + '.join(strategy_ids)} [{mode_label}]",
+            f"- 持有期: {report['horizon']} 天 | 抽样: {report['sample']} 只",
+            f"- 基准收益: {baseline*100:+.2f}%",
+            "",
+            f"**组合信号** 触发 {combo['signal_count']} 次",
+            f"- 收益 {combo['mean_ret']*100:+.2f}% | 超额 {combo['excess']*100:+.2f}% | 命中率 {combo['hit_rate']*100:.1f}%",
+            "",
+            "**各策略单独对比**:",
+        ]
+        for sid in strategy_ids:
+            s = per[sid]
+            lines.append(
+                f"- {sid}: 触发 {s['signal_count']} 次,收益 {s['mean_ret']*100:+.2f}%,"
+                f"超额 {s['excess']*100:+.2f}%,命中率 {s['hit_rate']*100:.1f}%"
+            )
+        # 结论
+        if combo["signal_count"] > 0:
+            best_single = max(per.values(), key=lambda x: x["excess"])
+            if combo["excess"] > best_single["excess"]:
+                lines.append(f"\n💡 组合({mode.upper()})超额 {combo['excess']*100:+.2f}% "
+                             f"优于最佳单策略 {best_single['excess']*100:+.2f}%,组合有效")
+            else:
+                lines.append(f"\n⚠️ 组合({mode.upper()})超额 {combo['excess']*100:+.2f}% "
+                             f"未超过最佳单策略 {best_single['excess']*100:+.2f}%")
+        return "\n".join(lines)
+    except Exception as e:
+        return f"❌ 组合回测出错: {e}"
+
+
 def handler_scan_with_strategy(
     strategy_id: str, top_n: int = 20, min_amount_yi: float = 0.5, limit: int = 0
 ) -> str:
@@ -2599,6 +2663,12 @@ TOOL_HANDLERS = {
     "grid_search_strategy": lambda args: handler_grid_search(
         args.get("strategy_id", ""), int(args.get("sample", 400))
     ),
+    "combo_backtest": lambda args: handler_combo_backtest(
+        args.get("strategy_ids", []),
+        args.get("mode", "and"),
+        int(args.get("horizon", 20)),
+        int(args.get("sample", 400)),
+    ),
     "scan_with_strategy": lambda args: handler_scan_with_strategy(
         args.get("strategy_id", ""),
         int(args.get("top_n", 20)),
@@ -2631,7 +2701,7 @@ TOOL_HANDLERS = {
 MAX_AGENT_STEPS = 6  # 最多 6 步推理(避免无限循环)
 
 # 耗时工具(超过 10 秒),需先发"思考中"提示用户
-SLOW_TOOLS = {"backtest_strategy", "grid_search_strategy", "scan_with_strategy", "scan_with_yujie"}
+SLOW_TOOLS = {"backtest_strategy", "grid_search_strategy", "scan_with_strategy", "scan_with_yujie", "combo_backtest"}
 
 # 工具结果回灌给 LLM 时的字符上限(防止上下文污染,OpenClaw 风格)
 TOOL_RESULT_MAX_CHARS = 3000
@@ -2749,6 +2819,9 @@ SYSTEM_PROMPT = """你是 A 股量化分析助手(飞书群聊 Bot),有 29 个�
 【回测寻优(耗时1-5分钟)】
 - backtest_strategy(strategy_id, sample?): 全市场回测
 - grid_search_strategy(strategy_id, sample?): 参数网格寻优(仅macd/kdj/boll/dmi)
+- combo_backtest(strategy_ids, mode?, horizon?, sample?): 多策略组合回测(AND/OR),耗时1-3分钟
+  · mode: and=同日同时触发, or=任一触发
+  · 示例: "组合回测MACD和BOLL" / "MACD+KDJ同时触发效果"
 - scan_with_strategy(strategy_id, top_n?, min_amount_yi?, limit?): 全市场扫描某策略选股(5-30分钟)
 - scan_with_yujie(top_n?, min_score?, limit?): 全市场玉姐评分实时扫描(1-3分钟)
   · 与 get_yujie_picks 区别: 这是实时重跑全市场评分,不是盘前缓存
@@ -3148,6 +3221,7 @@ class FeishuBotClient:
         slow_keywords = (
             # 回测/寻优
             "回测", "测试", "寻优", "调参", "网格", "最优参数", "backtest", "grid",
+            "组合回测", "组合测试", "同时触发", "combo",
             # 全市场扫描
             "扫描整个市场", "全市场扫描", "全市场玉姐", "重新扫", "scan_with_yujie",
             # 多股对比/板块分析(各发多次 HTTP,~10s)

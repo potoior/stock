@@ -606,6 +606,152 @@ def grid_search(sample: int = 400, horizon: int = 20, workers: int = 16) -> dict
     return report
 
 
+# ============================================================
+# 5. 多策略组合回测(AND/OR)
+# ============================================================
+
+
+def run_combo_backtest(
+    strategy_ids: list[str],
+    mode: str = "and",
+    horizon: int = 20,
+    sample: int = 400,
+    workers: int = 1,
+) -> dict:
+    """多策略组合回测: AND=所有策略同时触发, OR=任一触发。
+
+    Args:
+        strategy_ids: 策略 id 列表(如 ["macd", "boll"])
+        mode: "and"=所有策略同日触发, "or"=任一触发
+        horizon: 持有期(天),默认 20
+        sample: 抽样股票数,0=全市场
+        workers: 并发线程数(策略函数非线程安全,建议 1)
+
+    Returns: {
+        strategy_ids, mode, horizon, sample,
+        signal_count, hit_rate, mean_ret, excess, baseline,
+        per_strategy: {sid: {signal_count, hit_rate, mean_ret, excess}}
+    }
+    """
+    import random
+
+    # 验证策略 id
+    fn_map = {sid: fn for sid, _, fn in SIGNAL_FNS}
+    for sid in strategy_ids:
+        if sid not in fn_map:
+            return {"error": f"未知策略 id: {sid},必须是内置策略之一: {list(fn_map.keys())}"}
+    if len(strategy_ids) < 2:
+        return {"error": "组合回测需要至少 2 个策略"}
+    if mode not in ("and", "or"):
+        return {"error": f"mode 必须是 'and' 或 'or',实际 '{mode}'"}
+
+    codes = _get_universe_codes()
+    if sample and sample < len(codes):
+        rng = random.Random(42)
+        codes = rng.sample(codes, sample)
+    print(f"== 组合回测 == 策略 {strategy_ids} [{mode}],抽样 {len(codes)} 只,持有 {horizon} 天")
+    t0 = time.time()
+
+    # 预加载并算指标
+    pieces: list[tuple] = []  # (closes, inds)
+    lock = threading.Lock()
+    done = [0]
+
+    def _work(c):
+        df = _load_code(c)
+        if df is None:
+            return None
+        try:
+            inds = _indicators(df)
+        except Exception:
+            return None
+        return inds["close"].values, inds
+
+    with ThreadPoolExecutor(max_workers=max(workers, 1)) as ex:
+        futs = [ex.submit(_work, c) for c in codes]
+        for f in futs:
+            r = f.result()
+            with lock:
+                done[0] += 1
+                if done[0] % 200 == 0 or done[0] == len(codes):
+                    print(f"  预加载 {done[0]}/{len(codes)}  耗时 {time.time()-t0:.0f}s", flush=True)
+            if r is not None:
+                pieces.append(r)
+    if not pieces:
+        return {"error": "无有效股票数据"}
+
+    # 基准:同股全日期随机入场平均前向收益
+    all_rets = []
+    for closes, _ in pieces:
+        n = len(closes)
+        for i in range(WARMUP, n - horizon):
+            all_rets.append(closes[i + horizon] / closes[i] - 1)
+    baseline = float(np.mean(all_rets)) if all_rets else 0.0
+
+    # 算每个策略的信号
+    per_strategy: dict[str, dict] = {sid: {"rets": [], "count": 0} for sid in strategy_ids}
+    combo_rets: list[float] = []
+    combo_count = 0
+
+    for closes, inds in pieces:
+        n = len(closes)
+        # 预算各策略信号
+        sigs = {}
+        for sid in strategy_ids:
+            params = DEFAULT_STRATEGY_PARAMS.get(sid, {})
+            try:
+                sigs[sid] = fn_map[sid](inds, params).values
+            except Exception:
+                sigs[sid] = np.zeros(n, dtype=bool)
+
+        for i in range(WARMUP, n - horizon):
+            ret = closes[i + horizon] / closes[i] - 1
+            # 组合信号
+            fires = [bool(sigs[sid][i]) for sid in strategy_ids]
+            if mode == "and":
+                combo_fire = all(fires)
+            else:  # or
+                combo_fire = any(fires)
+            if combo_fire:
+                combo_rets.append(ret)
+                combo_count += 1
+            # 各策略单独统计
+            for sid in strategy_ids:
+                if fires[strategy_ids.index(sid)]:
+                    per_strategy[sid]["rets"].append(ret)
+                    per_strategy[sid]["count"] += 1
+
+    # 汇总
+    def _stats(rets, count):
+        if count == 0:
+            return {"signal_count": 0, "hit_rate": 0.0, "mean_ret": 0.0, "excess": 0.0}
+        arr = np.array(rets)
+        return {
+            "signal_count": count,
+            "hit_rate": float((arr > 0).mean()),
+            "mean_ret": float(arr.mean()),
+            "excess": float(arr.mean() - baseline),
+        }
+
+    combo_stats = _stats(combo_rets, combo_count)
+    per_stats = {sid: _stats(per_strategy[sid]["rets"], per_strategy[sid]["count"])
+                 for sid in strategy_ids}
+
+    elapsed = time.time() - t0
+    print(f"组合回测完成: {mode.upper()} 模式,信号 {combo_count} 次,超额 {combo_stats['excess']*100:.2f}%,耗时 {elapsed:.0f}s")
+
+    return {
+        "strategy_ids": strategy_ids,
+        "mode": mode,
+        "horizon": horizon,
+        "sample": len(pieces),
+        "baseline": baseline,
+        "combo": combo_stats,
+        "per_strategy": per_stats,
+        "elapsed_sec": elapsed,
+    }
+
+
 def write_grid_report(report: dict) -> None:
     GRID_REPORT_JSON.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     lines: list[str] = []

@@ -419,11 +419,11 @@ def test_scan_with_yujie_in_slow_tools():
     assert "scan_with_yujie" in feishu_bot.SLOW_TOOLS
 
 
-def test_tool_count_29():
-    """工具总数应为 29(26 旧 + 1 玉姐扫描 + 2 板块/情绪)。"""
+def test_tool_count_30():
+    """工具总数应为 30(29 旧 + 1 组合回测)。"""
     import feishu_bot
-    assert len(feishu_bot.TOOLS) == 29
-    assert len(feishu_bot.TOOL_HANDLERS) == 29
+    assert len(feishu_bot.TOOLS) == 30
+    assert len(feishu_bot.TOOL_HANDLERS) == 30
 
 
 # ---------------- 板块资金流 / 市场情绪 ----------------
@@ -524,3 +524,67 @@ def test_handler_get_market_sentiment_registered():
     """handler_get_market_sentiment 应在 TOOL_HANDLERS 注册。"""
     import feishu_bot
     assert "get_market_sentiment" in feishu_bot.TOOL_HANDLERS
+
+
+# ---------------- combo_backtest 组合回测 ----------------
+
+
+def test_combo_backtest_registered():
+    """combo_backtest 应在 TOOLS + HANDLERS + SLOW_TOOLS 注册。"""
+    import feishu_bot
+    tool_names = {t["function"]["name"] for t in feishu_bot.TOOLS}
+    assert "combo_backtest" in tool_names
+    assert "combo_backtest" in feishu_bot.TOOL_HANDLERS
+    assert "combo_backtest" in feishu_bot.SLOW_TOOLS
+
+
+def test_run_combo_backtest_or_mode(monkeypatch):
+    """OR 模式: 任一策略触发即记组合信号。"""
+    import numpy as np
+    import pandas as pd
+
+    import backtest_builtin as bb
+
+    # mock _get_universe_codes 返回 2 只
+    monkeypatch.setattr(bb, "_get_universe_codes", lambda: ["600519", "000001"])
+
+    # mock _load_code 返回合成 df
+    def fake_load(code):
+        n = 250
+        rng = np.random.default_rng(hash(code) % 2**32)
+        close = 10 + np.cumsum(rng.normal(0, 0.1, n))
+        return pd.DataFrame({
+            "date": [f"20260{i:04d}" for i in range(n)],
+            "open": close, "close": close,
+            "high": close * 1.02, "low": close * 0.98,
+            "volume": [1e6] * n,
+        })
+    monkeypatch.setattr(bb, "_load_code", fake_load)
+
+    r = bb.run_combo_backtest(["macd", "boll"], mode="or", horizon=20, sample=0, workers=1)
+    assert "error" not in r
+    assert r["mode"] == "or"
+    assert r["combo"]["signal_count"] >= 0
+    assert "macd" in r["per_strategy"]
+    assert "boll" in r["per_strategy"]
+
+
+def test_run_combo_backtest_unknown_strategy():
+    """未知策略应返 error。"""
+    import backtest_builtin as bb
+    r = bb.run_combo_backtest(["unknown_strat", "macd"], mode="and")
+    assert "error" in r
+
+
+def test_run_combo_backtest_single_strategy():
+    """少于 2 个策略应返 error。"""
+    import backtest_builtin as bb
+    r = bb.run_combo_backtest(["macd"], mode="and")
+    assert "error" in r
+
+
+def test_run_combo_backtest_invalid_mode():
+    """无效 mode 应返 error。"""
+    import backtest_builtin as bb
+    r = bb.run_combo_backtest(["macd", "boll"], mode="invalid")
+    assert "error" in r
