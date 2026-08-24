@@ -746,8 +746,10 @@ def test_handler_combo_backtest_compact_4strategies():
 
 
 def test_screen_stocks_returns_error_on_502(monkeypatch):
-    """screen_stocks 首页全失败应返 error dict,而非空 list。"""
+    """screen_stocks 快照为空(接口全失败)应返 error dict。"""
     import stock_market_extras as sme
+    # 重置快照缓存
+    monkeypatch.setattr(sme, "_MARKET_SNAPSHOT", None)
     monkeypatch.setattr(sme, "_get_json", lambda *a, **k: None)
     r = sme.screen_stocks(pe_max=20, top_n=10)
     assert isinstance(r, dict)
@@ -767,25 +769,45 @@ def test_handler_screen_stocks_502_friendly():
     assert "不可用" in out or "限频" in out
 
 
-def test_screen_stocks_negative_pe_allowed():
+def test_screen_stocks_negative_pe_allowed(monkeypatch):
     """pe_max<=0 时亏损股应放行(用户主动找亏损股)。"""
+    import time
+
     import stock_market_extras as sme
-    # mock 接口: 第 1 页返回 1 只亏损股(PE=-5),第 2 页起返回 None(终止)
-    fake_data = {"data": {"diff": [
+    # mock 快照已缓存(刚刚,不触发刷新),含 1 只亏损股
+    monkeypatch.setattr(sme, "_MARKET_SNAPSHOT", [
         {"f12": "600519", "f14": "茅台", "f2": 1500, "f3": 0.5,
          "f162": -5.0, "f167": 6.0, "f116": 1.88e11},
-    ]}}
-    call_count = [0]
-    def fake_get(*a, **k):
-        call_count[0] += 1
-        return fake_data if call_count[0] == 1 else None
-    import unittest.mock as mock
-    with mock.patch.object(sme, "_get_json", side_effect=fake_get):
-        # pe_max=-1 (找亏损股),应放行 PE=-5
-        r = sme.screen_stocks(pe_max=-1, top_n=5)
+    ])
+    monkeypatch.setattr(sme, "_MARKET_SNAPSHOT_TS", time.time())  # 刚刚,缓存有效
+    r = sme.screen_stocks(pe_max=-1, top_n=5)
     assert isinstance(r, list)
     assert len(r) == 1
     assert r[0]["pe_ttm"] == -5.0
+
+
+def test_screen_stocks_uses_snapshot_cache(monkeypatch):
+    """5 分钟内第二次调用应用缓存,不再拉接口。"""
+    import time
+
+    import stock_market_extras as sme
+    # 模拟快照已缓存(刚刚拉过)
+    fake_snapshot = [
+        {"f12": "600519", "f14": "茅台", "f2": 1500, "f3": 0.5,
+         "f162": 20.0, "f167": 6.0, "f116": 1.88e11},
+    ]
+    monkeypatch.setattr(sme, "_MARKET_SNAPSHOT", fake_snapshot)
+    monkeypatch.setattr(sme, "_MARKET_SNAPSHOT_TS", time.time())  # 刚刚
+    # _get_json 不应被调用(缓存命中)
+    call_count = [0]
+    def fake_get(*a, **k):
+        call_count[0] += 1
+        return None
+    monkeypatch.setattr(sme, "_get_json", fake_get)
+    r = sme.screen_stocks(pe_max=30, top_n=5)
+    assert call_count[0] == 0  # 缓存命中,未拉接口
+    assert isinstance(r, list)
+    assert len(r) == 1
 
 
 def test_handler_watchlist_group_in_p2p_rejected(monkeypatch):

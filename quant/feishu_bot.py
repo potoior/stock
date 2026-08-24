@@ -33,6 +33,7 @@ import sqlite3
 import threading
 import time
 import traceback
+from collections import OrderedDict
 from datetime import datetime, timedelta
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -251,16 +252,25 @@ HISTORY_DB = ENGINE_HOME / "agent_history.db"
 MAX_HISTORY_TURNS = 6
 HISTORY_EXPIRE_DAYS = 7
 
+# 进程级 LRU 缓存: 最近 N 个 session 的 history(读命中跳过 sqlite)
+# 配合 _save_history 写时同步更新缓存,高频对话省 sqlite 读
+_HISTORY_CACHE: OrderedDict[str, list] = OrderedDict()
+_HISTORY_CACHE_MAX = 32
+
 
 def _load_history(session_id: str) -> list:
-    """从 sqlite 加载某会话的对话历史(按 chat_id+sender 组合隔离)。
+    """从 LRU 缓存或 sqlite 加载会话历史。
 
-    Args:
-        session_id: 格式 "<chat_id>:<open_id>",同一群里不同用户各自独立
+    命中缓存时跳过 sqlite 读(高频对话加速),未命中读 sqlite 并入缓存。
     """
+    # 1. 先查 LRU 缓存
+    cached = _HISTORY_CACHE.get(session_id)
+    if cached is not None:
+        _HISTORY_CACHE.move_to_end(session_id)
+        return cached
+    # 2. 未命中,读 sqlite
     try:
         conn = _history_db()
-        # 表不存在时静默返回 [](首次启动正常情况)
         if not conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='agent_history'"
         ).fetchone():
@@ -271,10 +281,25 @@ def _load_history(session_id: str) -> list:
         ).fetchone()
         conn.close()
         if row and row[0]:
-            return json.loads(row[0])
+            history = json.loads(row[0])
+            _put_history_cache(session_id, history)
+            return history
     except Exception as e:
         log.warning("加载历史失败 %s: %s", session_id, e)
     return []
+
+
+def _put_history_cache(session_id: str, history: list) -> None:
+    """写入 LRU 缓存(超限时淘汰最久未访问的)。"""
+    _HISTORY_CACHE[session_id] = history
+    _HISTORY_CACHE.move_to_end(session_id)
+    while len(_HISTORY_CACHE) > _HISTORY_CACHE_MAX:
+        _HISTORY_CACHE.popitem(last=False)
+
+
+def _invalidate_history_cache(session_id: str) -> None:
+    """清除某 session 的缓存(重置/清空时调用)。"""
+    _HISTORY_CACHE.pop(session_id, None)
 
 
 # 历史里 assistant 消息裁剪阈值(超长截断到摘要,避免回测/策略大全等长回复撑爆历史)
@@ -326,6 +351,8 @@ def _save_history(session_id: str, history: list) -> None:
         )
         conn.commit()
         conn.close()
+        # 同步更新 LRU 缓存(下次 _load_history 命中跳过 sqlite)
+        _put_history_cache(session_id, history)
     except Exception as e:
         log.warning("保存历史失败 %s: %s", session_id, e)
 
@@ -355,6 +382,7 @@ def _clear_history(session_id: str) -> None:
         conn.close()
     except Exception as e:
         log.warning("清空历史失败 %s: %s", session_id, e)
+    _invalidate_history_cache(session_id)
 
 
 def _purge_old_history() -> int:

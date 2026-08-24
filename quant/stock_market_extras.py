@@ -342,6 +342,42 @@ def fetch_market_sentiment() -> dict:
 # 全 A 股 fs 参数(沪深主板 + 创业板 + 科创板 + 北交所)
 MARKET_FS = "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23,m:0+t:81+s:2048"
 
+# 全市场行情快照缓存(PE/PB/市值日内变化小,5 分钟复用避免重复拉取 10 页)
+_MARKET_SNAPSHOT: list[dict] | None = None
+_MARKET_SNAPSHOT_TS: float = 0.0
+_MARKET_SNAPSHOT_TTL = 300  # 5 分钟
+
+
+def _get_market_snapshot() -> list[dict]:
+    """获取全市场行情快照(5 分钟缓存),返回所有 A 股的 PE/PB/市值原始数据。"""
+    global _MARKET_SNAPSHOT, _MARKET_SNAPSHOT_TS
+    import time
+    now = time.time()
+    if _MARKET_SNAPSHOT is not None and now - _MARKET_SNAPSHOT_TS < _MARKET_SNAPSHOT_TTL:
+        return _MARKET_SNAPSHOT
+    # 重新拉取
+    out: list[dict] = []
+    for pn in range(1, 61):  # 最多 60 页 × 20 = 1200 只(覆盖主要 A 股)
+        url = (
+            f"http://push2.eastmoney.com/api/qt/clist/get?pn={pn}&pz=20&po=1&np=1"
+            f"&fltt=2&invt=2&fid=f3&fs={MARKET_FS}"
+            f"&fields=f12,f14,f2,f3,f162,f167,f116"
+        )
+        data = None
+        for _ in range(2):
+            data = _get_json(url, referer="https://data.eastmoney.com/")
+            if data:
+                break
+            time.sleep(1.0)
+        if not data or not data.get("data") or not data["data"].get("diff"):
+            break
+        for r in data["data"]["diff"]:
+            out.append(r)
+        time.sleep(0.3)
+    _MARKET_SNAPSHOT = out
+    _MARKET_SNAPSHOT_TS = now
+    return out
+
 
 def screen_stocks(
     pe_max: float | None = None,
@@ -362,87 +398,52 @@ def screen_stocks(
         top_n: 返回前 N 只
         sort_by: 排序字段,pe/pb/mv
 
-    Returns: list[dict] 或 {"error": str}(首页全失败时)
+    Returns: list[dict] 或 {"error": str}(快照为空时)
              list 元素: {code, name, price, pct, pe_ttm, pb, total_mv_yi}
 
-    耗时: 5-15 秒(10 页 × 0.5s)
+    耗时: 首次 5-15 秒(拉 10 页),5 分钟内复用缓存秒回
     """
-    import time
+    snapshot = _get_market_snapshot()
+    if not snapshot:
+        return {"error": "东财接口暂时不可用(可能限频),请稍后重试"}
     out: list[dict] = []
-    pages_failed = 0  # 连续失败页数
-    pages_ok = 0
-    # 分页拉取全市场(含北交所/B股,客户端过滤)
-    # 注意: pz=100 易被东财限频 502,用 pz=20 + sleep(0.5) 更稳定
-    # 最多拉 200 只(10 页 × 20),够筛选 Top30 用
-    for pn in range(1, 11):
-        url = (
-            f"http://push2.eastmoney.com/api/qt/clist/get?pn={pn}&pz=20&po=1&np=1"
-            f"&fltt=2&invt=2&fid=f3&fs={MARKET_FS}"
-            f"&fields=f12,f14,f2,f3,f162,f167,f116"
-        )
-        # 重试 2 次(东财偶发 502)
-        data = None
-        for _ in range(2):
-            data = _get_json(url, referer="https://data.eastmoney.com/")
-            if data:
-                break
-            time.sleep(1.0)
-        if not data or not data.get("data") or not data["data"].get("diff"):
-            pages_failed += 1
-            # 首页就失败:接口限频/不可用,返 error 让 handler 给友好提示
-            if pn == 1:
-                return {"error": "东财接口暂时不可用(可能限频),请稍后重试"}
-            # 后续页失败:可能到尾页了,用已拉到的数据
-            if pages_failed >= 3:
-                break
+    for r in snapshot:
+        code = r.get("f12", "")
+        # 过滤北交所(8 开头)和 B 股,只要 A 股(0/3/6 开头)
+        if not code or code[0] not in "036":
             continue
-        pages_ok += 1
-        pages_failed = 0  # 重置连续失败计数
-        for r in data["data"]["diff"]:
-            code = r.get("f12", "")
-            # 过滤北交所(8 开头)和 B 股(2 开头 9 结尾),只要 A 股
-            if not code or code[0] not in "036":
-                continue
-            pe = r.get("f162")
-            pb = r.get("f167")
-            mv = r.get("f116")  # 总市值(元)
-            # PE/PB 为 '-' 或 None 时跳过(亏损/未披露)
-            if not isinstance(pe, (int, float)) or not isinstance(pb, (int, float)):
-                continue
-            if not isinstance(mv, (int, float)) or mv <= 0:
-                continue
-            mv_yi = mv / 1e8
-            # 应用过滤
-            # 亏损股(PE<=0): 仅当 pe_max>0(用户找正 PE)时过滤;
-            # pe_max<=0 或 pe_min<0 表示用户主动找亏损股,放行
-            if pe <= 0 and pe_max is not None and pe_max > 0:
-                continue
-            if pe_max is not None and pe > pe_max:
-                continue
-            if pe_min is not None and pe < pe_min:
-                continue
-            if pb_max is not None and pb > pb_max:
-                continue
-            if pb_min is not None and pb < pb_min:
-                continue
-            if mv_min_yi is not None and mv_yi < mv_min_yi:
-                continue
-            if mv_max_yi is not None and mv_yi > mv_max_yi:
-                continue
-            out.append({
-                "code": code,
-                "name": r.get("f14", ""),
-                "price": r.get("f2"),
-                "pct": r.get("f3"),
-                "pe_ttm": round(pe, 2),
-                "pb": round(pb, 2),
-                "total_mv_yi": round(mv_yi, 1),
-            })
-            if len(out) >= top_n * 3:  # 多拉一些再排
-                break
-        if len(out) >= top_n * 3:
-            break
-        time.sleep(0.3)  # 防封
+        pe = r.get("f162")
+        pb = r.get("f167")
+        mv = r.get("f116")  # 总市值(元)
+        if not isinstance(pe, (int, float)) or not isinstance(pb, (int, float)):
+            continue
+        if not isinstance(mv, (int, float)) or mv <= 0:
+            continue
+        mv_yi = mv / 1e8
+        # 亏损股(PE<=0): 仅当 pe_max>0(用户找正 PE)时过滤
+        if pe <= 0 and pe_max is not None and pe_max > 0:
+            continue
+        if pe_max is not None and pe > pe_max:
+            continue
+        if pe_min is not None and pe < pe_min:
+            continue
+        if pb_max is not None and pb > pb_max:
+            continue
+        if pb_min is not None and pb < pb_min:
+            continue
+        if mv_min_yi is not None and mv_yi < mv_min_yi:
+            continue
+        if mv_max_yi is not None and mv_yi > mv_max_yi:
+            continue
+        out.append({
+            "code": code,
+            "name": r.get("f14", ""),
+            "price": r.get("f2"),
+            "pct": r.get("f3"),
+            "pe_ttm": round(pe, 2),
+            "pb": round(pb, 2),
+            "total_mv_yi": round(mv_yi, 1),
+        })
     # 按 sort_by 排序: pe 升序(低估值优先),pb/mv 降序
     if sort_by == "pe":
         out.sort(key=lambda x: x["pe_ttm"])
