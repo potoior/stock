@@ -268,3 +268,100 @@ def test_handler_analyze_valid_code(monkeypatch):
     monkeypatch.setattr("feishu_image.gen_kline_chart", lambda *a, **k: None)
     out = feishu_bot.handler_analyze("600519")
     assert "600519" in out or "茅台" in out
+
+
+# ---------------- 第五批优化测试 ----------------
+
+
+def test_news_digest_no_full_name_column(tmp_path, monkeypatch):
+    """news_digest.fetch_stock_news 应不依赖 full_name 列(已删除)。
+    验证 SQL 只用 name 列,且 keyword 被正确设为股票名而非代码。
+    """
+    import sqlite3
+
+    import news_digest
+    import stock_names as sn
+
+    # 建临时 stock_names 表(只有 query/code/name/ts 四列,无 full_name)
+    db = tmp_path / "test.db"
+    conn = sqlite3.connect(str(db))
+    conn.execute("""CREATE TABLE stock_names(
+        query TEXT, code TEXT, name TEXT, ts REAL,
+        PRIMARY KEY (query, name))""")
+    conn.execute("INSERT INTO stock_names VALUES(?,?,?,?)",
+                 ("茅台", "600519", "茅台", 1.0))
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr(sn, "DB_PATH", db)
+
+    # mock _http_get 捕获 URL 中的 keyword(避免联网)
+    captured_urls = []
+    def fake_http_get(url, referer=None):
+        captured_urls.append(url)
+        return b""  # 空 response,fetch_stock_news 会返 []
+    monkeypatch.setattr(news_digest, "_http_get", fake_http_get)
+
+    news_digest.fetch_stock_news("600519", num=5, strict=True)
+    # URL 应含"茅台"(JSON unicode 转义形式 \u8305\u53f0)
+    assert captured_urls, "应调 _http_get 抓搜索"
+    url = captured_urls[0]
+    # json.dumps 把中文转为 \uXXXX 转义,再 urllib.parse.quote
+    # 解码整个 URL
+    import urllib.parse
+    decoded = urllib.parse.unquote(url)
+    # "茅台" 的 unicode 转义是 \u8305\u53f0
+    assert "\\u8305\\u53f0" in decoded or "茅台" in decoded, \
+        f"URL 应含股票名茅台,实际 {decoded[:200]}"
+    # 不应回退到代码("keyword":"600519")
+    assert '"keyword": "600519"' not in decoded, "keyword 应回退到代码 600519"
+
+
+def test_health_endpoint():
+    """/health 端点应返回 200 + 关键字段。"""
+    from fastapi.testclient import TestClient
+
+    import api
+    client = TestClient(api.app)
+    r = client.get("/health")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["ok"] is True
+    assert "uptime_sec" in data
+    assert "db_size_mb" in data
+    assert "daily_table_rows" in data
+    assert "ts" in data
+
+
+def test_combo_backtest_no_on2_index(monkeypatch):
+    """combo_backtest 各策略统计不应调 list.index(O(N²))。
+    验证 5 策略组合能正常完成,不抛 AttributeError。
+    """
+    import numpy as np
+    import pandas as pd
+
+    import backtest_builtin as bb
+
+    monkeypatch.setattr(bb, "_get_universe_codes", lambda: ["600519", "000001"])
+
+    def fake_load(code):
+        n = 250
+        rng = np.random.default_rng(hash(code) % 2**32)
+        close = 10 + np.cumsum(rng.normal(0, 0.1, n))
+        return pd.DataFrame({
+            "date": [f"20260{i:04d}" for i in range(n)],
+            "open": close, "close": close,
+            "high": close * 1.02, "low": close * 0.98,
+            "volume": [1e6] * n,
+        })
+    monkeypatch.setattr(bb, "_load_code", fake_load)
+
+    # 5 策略组合(触发 zip 优化路径)
+    r = bb.run_combo_backtest(
+        ["macd", "kdj", "boll", "dmi", "psy"], mode="or", horizon=20, sample=0, workers=1
+    )
+    assert "error" not in r
+    assert len(r["per_strategy"]) == 5
+    # 每个策略都应有统计
+    for sid in ["macd", "kdj", "boll", "dmi", "psy"]:
+        assert sid in r["per_strategy"]
+        assert r["per_strategy"][sid]["signal_count"] >= 0

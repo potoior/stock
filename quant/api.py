@@ -1,3 +1,4 @@
+import time
 import urllib.parse
 import urllib.request
 from datetime import datetime
@@ -18,6 +19,57 @@ app.mount("/lib", StaticFiles(directory=str(WEB_DIR / "lib")), name="lib")
 app.mount("/js", StaticFiles(directory=str(WEB_DIR / "js")), name="js")
 
 DEFAULT_CODES = ["600789", "000001", "600519", "601318", "000333", "002415"]
+
+# 服务启动时间(用于 /health 计算 uptime)
+_START_TS = time.time()
+
+
+@app.get("/health")
+def health():
+    """健康检查端点:服务存活 + 关键依赖状态,供 systemd 探活/反代健康检查。
+
+    返回 200 即服务正常,无需打 / 触发完整启动 + 静态文件。
+    """
+    import os
+    import sqlite3
+
+    uptime_sec = int(time.time() - _START_TS)
+    # daily 表行数(数据新鲜度指标)
+    daily_rows = 0
+    latest_date = None
+    try:
+        conn = sqlite3.connect(str(DB_PATH), timeout=2)
+        row = conn.execute("SELECT COUNT(*), MAX(date) FROM daily").fetchone()
+        daily_rows = row[0] or 0
+        latest_date = row[1]
+        conn.close()
+    except Exception:
+        pass
+    # db 文件大小(MB)
+    db_size_mb = 0.0
+    try:
+        db_size_mb = round(os.path.getsize(str(DB_PATH)) / 1024 / 1024, 1)
+    except Exception:
+        pass
+    # 最近日报
+    reports_dir = Path(__file__).parent / "reports"
+    latest_report = None
+    try:
+        reports = sorted(reports_dir.glob("daily_*.md"), reverse=True)
+        if reports:
+            latest_report = reports[0].stem.replace("daily_", "")
+    except Exception:
+        pass
+    return {
+        "ok": True,
+        "uptime_sec": uptime_sec,
+        "uptime_human": f"{uptime_sec // 3600}h {(uptime_sec % 3600) // 60}m",
+        "db_size_mb": db_size_mb,
+        "daily_table_rows": daily_rows,
+        "latest_daily_date": latest_date,
+        "latest_report": latest_report,
+        "ts": datetime.now().isoformat(timespec="seconds"),
+    }
 
 
 def compute_signals(code, current_price=None):

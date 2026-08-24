@@ -722,9 +722,9 @@ def run_combo_backtest(
             if combo_fire:
                 combo_rets.append(ret)
                 combo_count += 1
-            # 各策略单独统计
-            for sid in strategy_ids:
-                if fires[strategy_ids.index(sid)]:
+            # 各策略单独统计(zip 避免内层 O(N) list.index 查找)
+            for sid, fire in zip(strategy_ids, fires, strict=False):
+                if fire:
                     per_strategy[sid]["rets"].append(ret)
                     per_strategy[sid]["count"] += 1
 

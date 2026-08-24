@@ -164,9 +164,6 @@ CMD_MARKET = ("市场", "大盘", "行情", "今日")
 CMD_YUJIE = ("玉姐", "候选", "精选", "top")
 CMD_PORTFOLIO = ("持仓", "portfolio", "仓位", "股票池")
 
-# A股代码正则(6位数字)
-RE_CODE = re.compile(r"\b(60[0-3]\d{3}|00[0-2]\d{3}|30[0-4]\d{3}|688\d{3}|8\d{5}|4\d{5})\b")
-
 # ---- 会话级 thread-local 状态 ----
 # 关键: 飞书 Bot 会并发处理不同 session 的消息(会话锁按 session_id 隔离,
 # 同 session 串行、不同 session 并行)。因此累积图片队列和当前 session_id
@@ -513,11 +510,6 @@ def watchlist_group_remove(session_id: str, code: str) -> str:
 
 
 
-# 简单股票名称缓存(避免每次都查 DB)
-_name_cache: dict[str, str] = {}
-_name_cache_loaded = False
-
-
 # ============ 配置 ============
 
 
@@ -525,71 +517,6 @@ def load_config():
     if not CONFIG_PATH.exists():
         return {}
     return json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-
-
-# ============ 股票名称映射 ============
-
-
-def _ensure_name_cache():
-    global _name_cache_loaded
-    if _name_cache_loaded:
-        return
-    cache_db = ENGINE_HOME / "stock_cache.db"
-    if not cache_db.exists():
-        _name_cache_loaded = True
-        return
-    try:
-        conn = sqlite3.connect(str(cache_db), timeout=5)
-        # 尝试从 daily 表里取最新一条对应 code 的 name(若有 name 列)
-        rows = conn.execute("SELECT DISTINCT code, name FROM (SELECT code, name FROM daily LIMIT 1)").fetchall()
-        conn.close()
-        # daily 表可能没有 name 列,这种情况下 cache 留空
-        for code, name in rows:
-            _name_cache[code] = name
-    except Exception:
-        pass
-    _name_cache_loaded = True
-
-
-def resolve_code(text: str) -> str | None:
-    """从用户文本里提取股票代码。支持直接 6 位代码或名称(查 daily 表)。"""
-    m = RE_CODE.search(text)
-    if m:
-        return m.group(1)
-    # 名称查找:从 stock_cache.db daily 表 LIKE 匹配
-    cache_db = ENGINE_HOME / "stock_cache.db"
-    if not cache_db.exists():
-        return None
-    try:
-        conn = sqlite3.connect(str(cache_db), timeout=5)
-        # daily 表结构: date, code, open, close, high, low, volume, amount
-        # 没有 name 列,只能通过其他方式。先用代码本身或 common 名称硬编码常见股
-        conn.close()
-    except Exception:
-        pass
-    # 常见股票硬编码(可后续扩展)
-    well_known = {
-        "茅台": "600519", "贵州茅台": "600519",
-        "五粮液": "000858",
-        "宁德时代": "300750",
-        "比亚迪": "002594",
-        "平安银行": "000001", "平安": "000001",
-        "招商银行": "600036", "招行": "600036",
-        "中信证券": "600030",
-        "京东方": "000725",
-        "恒瑞医药": "600276",
-        "海康威视": "002415",
-        "美的集团": "000333",
-        "格力电器": "000651",
-        "万科": "000002", "万科A": "000002",
-        "中石油": "601857", "中国石油": "601857",
-        "工商银行": "601398", "工行": "601398",
-        "建设银行": "601939", "建行": "601939",
-    }
-    for name, code in well_known.items():
-        if name in text:
-            return code
-    return None
 
 
 # ============ 命令分发 ============
@@ -606,7 +533,12 @@ def route(text: str) -> tuple[str, str]:
         return "ai", "请告诉我您要查询的内容,例如:\n- 分析 600519\n- 市场\n- 玉姐\n- 持仓"
 
     # 1. 个股分析(优先级最高,含 6 位代码或常见股名)
-    code = resolve_code(text)
+    # 用 stock_names.resolve_code(腾讯搜索全市场)替代本地退化版(17 硬编码)
+    try:
+        from stock_names import resolve_code as _resolve_code
+    except ImportError:
+        _resolve_code = lambda x: None  # noqa: E731
+    code = _resolve_code(text)
     if code and any(k in text for k in CMD_ANALYZE) or (code and not any(k in text for k in CMD_MARKET + CMD_YUJIE + CMD_PORTFOLIO)):
         return "analyze", handler_analyze(code)
 

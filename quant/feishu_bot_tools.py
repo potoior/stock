@@ -161,7 +161,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "list_strategies",
-            "description": "列出所有策略(45个内置+自定义),含开关状态、当前参数、回测超额收益。用户问'有哪些策略/策略状态/策略列表/哪些策略开了'时调用。",
+            "description": "列出所有策略(54个内置+自定义),含开关状态、当前参数、回测超额收益。用户问'有哪些策略/策略状态/策略列表/哪些策略开了'时调用。",
             "parameters": {"type": "object", "properties": {}}
         }
     },
@@ -210,7 +210,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "analyze_with_strategy",
-            "description": "用指定策略单独分析个股(只看该策略的信号,不跑全部45个)。用户问'看X的MACD/KDJ/BOLL信号'、'用某策略分析X'时调用。",
+            "description": "用指定策略单独分析个股(只看该策略的信号,不跑全部54个)。用户问'看X的MACD/KDJ/BOLL信号'、'用某策略分析X'时调用。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -295,7 +295,7 @@ TOOLS = [
                 "type": "object",
                 "properties": {
                     "strategy_id": {"type": "string", "description": "策略id(必须是内置策略)"},
-                    "sample": {"type": "integer", "description": "抽样股票数,默认 0=全市场4376只。调试可用 200", "default": 0}
+                    "sample": {"type": "integer", "description": "抽样股票数,默认 0=全市场约4700只。调试可用 200", "default": 0}
                 },
                 "required": ["strategy_id"]
             }
@@ -339,7 +339,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "scan_with_strategy",
-            "description": "全市场扫描指定策略,返回当日触发 buy 信号的股票列表(选股)。耗时约 5-30 分钟(全市场4700只)。用户问'用X策略选股/哪些股票今天触发X信号/X策略选股/X策略选哪些'时调用。注意:与 analyze_with_strategy(判断个股) 不同,本工具是反向操作(给定策略找股票)。",
+            "description": "全市场扫描指定策略,返回当日触发 buy 信号的股票列表(选股)。耗时约 5-30 分钟(全市场约4700只)。用户问'用X策略选股/哪些股票今天触发X信号/X策略选股/X策略选哪些'时调用。注意:与 analyze_with_strategy(判断个股) 不同,本工具是反向操作(给定策略找股票)。",
             "parameters": {
                 "type": "object",
                 "properties": {

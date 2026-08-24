@@ -133,18 +133,16 @@ def fetch_stock_news(code: str, num: int = 15, strict: bool = True) -> list[dict
         import stock_names as sn
         db = sn.DB_PATH
         conn = sqlite3.connect(str(db), timeout=5)
+        # stock_names 表只有 query/code/name/ts 四列(无 full_name)
+        # 旧代码 SELECT name, full_name 会抛 OperationalError 被外层吞掉,
+        # 导致 keyword 始终回退到 6 位代码,东财搜索用代码而非股票名,召回率大降
         rows = conn.execute(
-            "SELECT name, full_name FROM stock_names WHERE code=?", (code,)
+            "SELECT name FROM stock_names WHERE code=? AND name != '' ORDER BY ts DESC LIMIT 1",
+            (code,),
         ).fetchall()
         conn.close()
-        if rows:
-            for name, full_name in rows:
-                if name:
-                    keyword = name
-                    break
-                if full_name:
-                    keyword = full_name
-                    break
+        if rows and rows[0][0]:
+            keyword = rows[0][0]
         else:
             # 缓存没有,主动 resolve 一次触发搜索 + 缓存
             resolved = sn.resolve_code(code)
@@ -152,7 +150,8 @@ def fetch_stock_news(code: str, num: int = 15, strict: bool = True) -> list[dict
                 # 再查一次缓存
                 conn = sqlite3.connect(str(db), timeout=5)
                 rows = conn.execute(
-                    "SELECT name FROM stock_names WHERE code=?", (code,)
+                    "SELECT name FROM stock_names WHERE code=? AND name != '' ORDER BY ts DESC LIMIT 1",
+                    (code,),
                 ).fetchall()
                 conn.close()
                 if rows and rows[0][0]:
