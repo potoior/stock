@@ -199,15 +199,55 @@ def fetch_shareholder(code: str) -> dict:
 
 
 def _ensure_table():
-    """确保 stock_finance 缓存表存在(分层缓存:实时 + 财报)。"""
+    """确保 stock_finance 缓存表存在(分层缓存:实时 + 财报)。
+
+    旧表升级时迁移数据(非 DROP),避免首批查询缓存雪崩。
+    """
     conn = sqlite3.connect(str(DB_PATH), timeout=5)
     # 检查是否需要升级旧表(只有 code/data_json/ts 三列的旧版)
-    cols = conn.execute("PRAGMA table_info(stock_finance)").fetchall() if conn.execute(
+    old_cols = conn.execute("PRAGMA table_info(stock_finance)").fetchall() if conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name='stock_finance'"
     ).fetchone() else []
-    if cols and any(c[1] == "data_json" for c in cols):
-        # 旧表,删除重建(数据量小,重新拉即可)
-        conn.execute("DROP TABLE stock_finance")
+    needs_migrate = bool(old_cols) and any(c[1] == "data_json" for c in old_cols)
+    if needs_migrate:
+        # 旧表迁移: 读出 data_json,拆为 rt_json(实时字段) + rep_json(财报字段)
+        # 避免 DROP 后首批查询全打网络(push2 + F10 双接口)缓存雪崩
+        try:
+            old_rows = conn.execute("SELECT code, data_json, ts FROM stock_finance").fetchall()
+            conn.execute("DROP TABLE stock_finance")
+            conn.execute("""
+                CREATE TABLE stock_finance (
+                    code TEXT PRIMARY KEY,
+                    rt_json TEXT,
+                    rt_ts INTEGER,
+                    rep_json TEXT,
+                    rep_ts INTEGER
+                )
+            """)
+            # rt 字段(实时估值): pe_dynamic/pe_static/pe_ttm/pb/total_mv/float_mv/total_share/float_share/bps/name
+            rt_keys = {"name", "total_share", "float_share", "bps",
+                       "total_mv", "float_mv", "pe_dynamic", "pe_static", "pe_ttm", "pb"}
+            migrated = 0
+            for code, dj, ts in old_rows:
+                if not dj:
+                    continue
+                try:
+                    data = json.loads(dj)
+                    rt = {k: v for k, v in data.items() if k in rt_keys}
+                    rep = {k: v for k, v in data.items() if k not in rt_keys and k != "ts"}
+                    rt_js = json.dumps(rt, ensure_ascii=False) if rt else None
+                    rep_js = json.dumps(rep, ensure_ascii=False) if rep else None
+                    conn.execute(
+                        "INSERT INTO stock_finance(code, rt_json, rt_ts, rep_json, rep_ts) VALUES(?,?,?,?,?)",
+                        (code, rt_js, ts, rep_js, ts),
+                    )
+                    migrated += 1
+                except Exception:
+                    continue
+            log.info("stock_finance 旧表迁移完成: %d 条", migrated)
+        except Exception as e:
+            log.warning("stock_finance 旧表迁移失败,降级 DROP: %s", e)
+            conn.execute("DROP TABLE IF EXISTS stock_finance")
     conn.execute("""
         CREATE TABLE IF NOT EXISTS stock_finance (
             code TEXT PRIMARY KEY,

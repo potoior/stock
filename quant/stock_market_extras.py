@@ -362,12 +362,15 @@ def screen_stocks(
         top_n: 返回前 N 只
         sort_by: 排序字段,pe/pb/mv
 
-    Returns: [{code, name, price, pct, pe_ttm, pb, total_mv_yi}, ...]
+    Returns: list[dict] 或 {"error": str}(首页全失败时)
+             list 元素: {code, name, price, pct, pe_ttm, pb, total_mv_yi}
 
-    耗时: 全市场约 15-30 秒(分 50 页拉取)
+    耗时: 5-15 秒(10 页 × 0.5s)
     """
     import time
     out: list[dict] = []
+    pages_failed = 0  # 连续失败页数
+    pages_ok = 0
     # 分页拉取全市场(含北交所/B股,客户端过滤)
     # 注意: pz=100 易被东财限频 502,用 pz=20 + sleep(0.5) 更稳定
     # 最多拉 200 只(10 页 × 20),够筛选 Top30 用
@@ -385,7 +388,16 @@ def screen_stocks(
                 break
             time.sleep(1.0)
         if not data or not data.get("data") or not data["data"].get("diff"):
-            break
+            pages_failed += 1
+            # 首页就失败:接口限频/不可用,返 error 让 handler 给友好提示
+            if pn == 1:
+                return {"error": "东财接口暂时不可用(可能限频),请稍后重试"}
+            # 后续页失败:可能到尾页了,用已拉到的数据
+            if pages_failed >= 3:
+                break
+            continue
+        pages_ok += 1
+        pages_failed = 0  # 重置连续失败计数
         for r in data["data"]["diff"]:
             code = r.get("f12", "")
             # 过滤北交所(8 开头)和 B 股(2 开头 9 结尾),只要 A 股
@@ -401,8 +413,10 @@ def screen_stocks(
                 continue
             mv_yi = mv / 1e8
             # 应用过滤
-            if pe <= 0 and pe_max is not None:
-                continue  # 亏损股不在 PE_MAX 筛选范围
+            # 亏损股(PE<=0): 仅当 pe_max>0(用户找正 PE)时过滤;
+            # pe_max<=0 或 pe_min<0 表示用户主动找亏损股,放行
+            if pe <= 0 and pe_max is not None and pe_max > 0:
+                continue
             if pe_max is not None and pe > pe_max:
                 continue
             if pe_min is not None and pe < pe_min:

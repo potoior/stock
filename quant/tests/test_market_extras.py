@@ -625,7 +625,7 @@ def test_handler_combo_backtest_output_format(monkeypatch):
     assert "组合回测" in out
     assert "macd" in out and "boll" in out
     assert "组合信号" in out
-    assert "基准收益" in out
+    assert "基准" in out  # "基准 +X.XX%"
     # 组合超额 0.02 > 最佳单策略 0.012,应提示"组合有效"
     assert "组合有效" in out or "优于" in out
 
@@ -701,3 +701,97 @@ def test_handler_screen_stocks_error(monkeypatch):
     out = feishu_bot.handler_screen_stocks(pe_max=20)
     assert "❌" in out
     assert "条件选股出错" in out
+
+
+# ---------------- 第三批优化测试 ----------------
+
+
+def test_handler_combo_backtest_zero_signal_and_mode():
+    """combo_backtest 0 信号时应有结论提示(AND 条件过严 / OR 无触发)。"""
+    import feishu_bot
+    # AND 模式 0 信号
+    fake_and = {
+        "strategy_ids": ["macd", "boll"], "mode": "and", "horizon": 20, "sample": 50,
+        "baseline": 0.01,
+        "combo": {"signal_count": 0, "hit_rate": 0.0, "mean_ret": 0.0, "excess": 0.0},
+        "per_strategy": {"macd": {"signal_count": 100, "hit_rate": 0.48, "mean_ret": 0.01, "excess": 0.0},
+                         "boll": {"signal_count": 80, "hit_rate": 0.55, "mean_ret": 0.02, "excess": 0.01}},
+        "elapsed_sec": 30,
+    }
+    import unittest.mock as mock
+    with mock.patch("backtest_builtin.run_combo_backtest", return_value=fake_and):
+        out = feishu_bot.handler_combo_backtest(["macd", "boll"], "and", 20, 50)
+    assert "无同日触发" in out or "条件过严" in out
+    assert "OR" in out  # 建议改 OR
+
+
+def test_handler_combo_backtest_compact_4strategies():
+    """4+ 策略时用紧凑格式(每策略一行短)。"""
+    import unittest.mock as mock
+
+    import feishu_bot
+    fake = {
+        "strategy_ids": ["macd", "kdj", "boll", "dmi"], "mode": "or", "horizon": 20, "sample": 50,
+        "baseline": 0.01,
+        "combo": {"signal_count": 500, "hit_rate": 0.5, "mean_ret": 0.03, "excess": 0.02},
+        "per_strategy": {s: {"signal_count": 100, "hit_rate": 0.5, "mean_ret": 0.02, "excess": 0.01}
+                         for s in ["macd", "kdj", "boll", "dmi"]},
+        "elapsed_sec": 30,
+    }
+    with mock.patch("backtest_builtin.run_combo_backtest", return_value=fake):
+        out = feishu_bot.handler_combo_backtest(["macd", "kdj", "boll", "dmi"], "or", 20, 50)
+    # 紧凑格式: 每策略一行只含"超额 X% (触发 N)"
+    assert "超额 +1.00%" in out
+    assert "触发 100" in out
+
+
+def test_screen_stocks_returns_error_on_502(monkeypatch):
+    """screen_stocks 首页全失败应返 error dict,而非空 list。"""
+    import stock_market_extras as sme
+    monkeypatch.setattr(sme, "_get_json", lambda *a, **k: None)
+    r = sme.screen_stocks(pe_max=20, top_n=10)
+    assert isinstance(r, dict)
+    assert "error" in r
+    assert "不可用" in r["error"] or "限频" in r["error"]
+
+
+def test_handler_screen_stocks_502_friendly():
+    """handler 在 screen_stocks 返 error 时给友好提示。"""
+    import unittest.mock as mock
+
+    import feishu_bot
+    with mock.patch("stock_market_extras.screen_stocks",
+                    return_value={"error": "东财接口暂时不可用(可能限频),请稍后重试"}):
+        out = feishu_bot.handler_screen_stocks(pe_max=20)
+    assert "⚠️" in out
+    assert "不可用" in out or "限频" in out
+
+
+def test_screen_stocks_negative_pe_allowed():
+    """pe_max<=0 时亏损股应放行(用户主动找亏损股)。"""
+    import stock_market_extras as sme
+    # mock 接口: 第 1 页返回 1 只亏损股(PE=-5),第 2 页起返回 None(终止)
+    fake_data = {"data": {"diff": [
+        {"f12": "600519", "f14": "茅台", "f2": 1500, "f3": 0.5,
+         "f162": -5.0, "f167": 6.0, "f116": 1.88e11},
+    ]}}
+    call_count = [0]
+    def fake_get(*a, **k):
+        call_count[0] += 1
+        return fake_data if call_count[0] == 1 else None
+    import unittest.mock as mock
+    with mock.patch.object(sme, "_get_json", side_effect=fake_get):
+        # pe_max=-1 (找亏损股),应放行 PE=-5
+        r = sme.screen_stocks(pe_max=-1, top_n=5)
+    assert isinstance(r, list)
+    assert len(r) == 1
+    assert r[0]["pe_ttm"] == -5.0
+
+
+def test_handler_watchlist_group_in_p2p_rejected(monkeypatch):
+    """1v1 私聊(chat_type=p2p)时 group_* action 应拒绝。"""
+    import feishu_bot
+    monkeypatch.setattr(feishu_bot, "_current_chat_type", lambda: "p2p")
+    out = feishu_bot.handler_watchlist("group_list", session_id="user_x:user_x")
+    assert "群聊" in out or "私聊" in out
+    assert "加自选" in out  # 提示用个人自选

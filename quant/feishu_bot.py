@@ -220,6 +220,16 @@ def _set_current_chat_id(chat_id: str) -> None:
     _tl.chat_id = chat_id
 
 
+def _current_chat_type() -> str:
+    """读取当前线程的飞书 chat_type('p2p' 私聊 / 'group' 群聊,默认 'group')。"""
+    return getattr(_tl, "chat_type", "group")
+
+
+def _set_current_chat_type(chat_type: str) -> None:
+    """设置当前线程的 chat_type,供 handler 判断群共享功能是否适用。"""
+    _tl.chat_type = chat_type or "group"
+
+
 # 当前线程的 FeishuBot 实例(供 handler 内部主动发消息)
 _bot_ref = None
 
@@ -249,7 +259,7 @@ def _load_history(session_id: str) -> list:
         session_id: 格式 "<chat_id>:<open_id>",同一群里不同用户各自独立
     """
     try:
-        conn = sqlite3.connect(str(HISTORY_DB), timeout=5)
+        conn = _history_db()
         # 表不存在时静默返回 [](首次启动正常情况)
         if not conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='agent_history'"
@@ -302,7 +312,7 @@ def _save_history(session_id: str, history: list) -> None:
             history = history[-max_msgs:]
         # 裁剪超长 assistant 消息(省 token + 省 sqlite 体积)
         history = _truncate_history(history)
-        conn = sqlite3.connect(str(HISTORY_DB), timeout=5)
+        conn = _history_db()
         conn.execute("""
             CREATE TABLE IF NOT EXISTS agent_history (
                 session_id TEXT PRIMARY KEY,
@@ -339,7 +349,7 @@ def _is_reset_command(text: str) -> bool:
 def _clear_history(session_id: str) -> None:
     """清空某会话的对话历史。"""
     try:
-        conn = sqlite3.connect(str(HISTORY_DB), timeout=5)
+        conn = _history_db()
         conn.execute("DELETE FROM agent_history WHERE session_id=?", (session_id,))
         conn.commit()
         conn.close()
@@ -354,7 +364,7 @@ def _purge_old_history() -> int:
     返回清理的条数。
     """
     try:
-        conn = sqlite3.connect(str(HISTORY_DB), timeout=5)
+        conn = _history_db()
         if not conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='agent_history'"
         ).fetchone():
@@ -379,8 +389,10 @@ WATCHLIST_DB = ENGINE_HOME / "agent_watchlist.db"
 
 
 def _watchlist_db():
-    """自选股 sqlite,按 session_id(用户)隔离。"""
-    conn = sqlite3.connect(str(WATCHLIST_DB), timeout=5)
+    """自选股 sqlite,按 session_id(用户)隔离。启用 WAL 防群内并发锁竞争。"""
+    conn = sqlite3.connect(str(WATCHLIST_DB), timeout=10)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=10000")
     conn.execute("""
         CREATE TABLE IF NOT EXISTS watchlist (
             session_id TEXT,
@@ -391,6 +403,14 @@ def _watchlist_db():
         )
     """)
     conn.commit()
+    return conn
+
+
+def _history_db():
+    """对话历史 sqlite 连接(启用 WAL,防高频对话锁竞争)。"""
+    conn = sqlite3.connect(str(HISTORY_DB), timeout=10)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=10000")
     return conn
 
 
@@ -769,6 +789,9 @@ def handler_watchlist(action: str, codes: list = None, session_id: str = "cli") 
         return "\n".join(lines)
 
     if action in ("group_list", "group_analyze"):
+        # 群共享功能仅群聊可用,1v1 私聊 chat_type=p2p
+        if _current_chat_type() == "p2p":
+            return "💡 群共享自选股功能仅在群聊中可用。\n私聊请用 '加自选'/'我的自选' 管理个人列表。"
         # 群共享自选池:所有群成员添加的去重列表
         items = watchlist_group_list(session_id)
         if not items:
@@ -782,7 +805,8 @@ def handler_watchlist(action: str, codes: list = None, session_id: str = "cli") 
         if len(items) == 1:
             return handler_analyze(items[0]["code"])
         codes = [it["code"] for it in items[:8]]
-        extra = f"\n\n(群共享共 {len(items)} 只,仅分析前 8 只)" if len(items) > 8 else ""
+        extra = (f"\n\n(群共享共 {len(items)} 只,仅分析前 8。"
+                 f"看其余: '分析群自选 9-16'") if len(items) > 8 else ""
         return handler_compare_stocks(codes) + extra
 
     if action == "analyze":
@@ -796,7 +820,7 @@ def handler_watchlist(action: str, codes: list = None, session_id: str = "cli") 
         # 多只:compare_stocks 最多 8 只
         codes = [it["code"] for it in items[:8]]
         if len(items) > 8:
-            extra = f"\n\n(自选共 {len(items)} 只,仅分析前 8 只)"
+            extra = f"\n\n(自选共 {len(items)} 只,仅分析前 8。看其余: '分析自选 9-16')"
         else:
             extra = ""
         return handler_compare_stocks(codes) + extra
@@ -829,6 +853,10 @@ def handler_watchlist(action: str, codes: list = None, session_id: str = "cli") 
 
     if not resolved:
         return f"❌ 未能识别任何股票: {codes}"
+
+    # group_* 在 1v1 私聊禁用(语义错误)
+    if action.startswith("group_") and _current_chat_type() == "p2p":
+        return "💡 群共享自选股功能仅在群聊中可用。\n私聊请用 '加自选'/'删自选'/'我的自选' 管理个人列表。"
 
     if action in ("add", "group_add"):
         # 名称缺失时通过实时接口补名(批量查,1次网络)
@@ -1932,22 +1960,27 @@ def handler_combo_backtest(
         baseline = report["baseline"]
 
         mode_label = "同日同时触发(AND)" if mode == "and" else "任一触发(OR)"
+        # 多策略(>=4)时用紧凑格式防超 600 字
+        compact = len(strategy_ids) >= 4
         lines = [
             f"📊 **多策略组合回测** {' + '.join(strategy_ids)} [{mode_label}]",
-            f"- 持有期: {report['horizon']} 天 | 抽样: {report['sample']} 只",
-            f"- 基准收益: {baseline*100:+.2f}%",
+            f"- 持有期: {report['horizon']} 天 | 抽样: {report['sample']} 只 | 基准 {baseline*100:+.2f}%",
             "",
-            f"**组合信号** 触发 {combo['signal_count']} 次",
-            f"- 收益 {combo['mean_ret']*100:+.2f}% | 超额 {combo['excess']*100:+.2f}% | 命中率 {combo['hit_rate']*100:.1f}%",
+            f"**组合信号** 触发 {combo['signal_count']} 次,收益 {combo['mean_ret']*100:+.2f}%,"
+            f"超额 {combo['excess']*100:+.2f}%,命中率 {combo['hit_rate']*100:.1f}%",
             "",
-            "**各策略单独对比**:",
+            "**各策略单独**:",
         ]
         for sid in strategy_ids:
             s = per[sid]
-            lines.append(
-                f"- {sid}: 触发 {s['signal_count']} 次,收益 {s['mean_ret']*100:+.2f}%,"
-                f"超额 {s['excess']*100:+.2f}%,命中率 {s['hit_rate']*100:.1f}%"
-            )
+            if compact:
+                # 紧凑: 每策略一行短
+                lines.append(f"- {sid}: 超额 {s['excess']*100:+.2f}% (触发 {s['signal_count']})")
+            else:
+                lines.append(
+                    f"- {sid}: 触发 {s['signal_count']} 次,超额 {s['excess']*100:+.2f}%,"
+                    f"命中率 {s['hit_rate']*100:.1f}%"
+                )
         # 结论
         if combo["signal_count"] > 0:
             best_single = max(per.values(), key=lambda x: x["excess"])
@@ -1957,6 +1990,13 @@ def handler_combo_backtest(
             else:
                 lines.append(f"\n⚠️ 组合({mode.upper()})超额 {combo['excess']*100:+.2f}% "
                              f"未超过最佳单策略 {best_single['excess']*100:+.2f}%")
+        else:
+            # 0 信号: AND 模式常因条件过严
+            if mode == "and":
+                lines.append("\n⚠️ 组合(AND)无同日触发信号,条件过严。"
+                             "建议改 OR 模式,或换相关度低的策略组合")
+            else:
+                lines.append("\n⚠️ 组合(OR)无任何触发信号,各策略可能均无信号")
         return "\n".join(lines)
     except Exception as e:
         return f"❌ 组合回测出错: {e}"
@@ -2097,7 +2137,7 @@ def handler_get_stock_news(code: str, num: int = 15) -> str:
             lines.append(f"\n(其余 {len(news) - show_n} 条请去东财搜索 {resolved} 查看)")
         return "\n".join(lines)
     except Exception as e:
-        return f"❌ 查询新闻出错: {e}"
+        return f"❌ 查询新闻出错: {_friendly_err(e)}"
 
 
 def handler_get_lhb(date: str = "", top_n: int = 20) -> str:
@@ -2108,7 +2148,7 @@ def handler_get_lhb(date: str = "", top_n: int = 20) -> str:
         rows = fetch_lhb(date_str=date if date else None, top_n=int(top_n))
         return fmt_lhb(rows)
     except Exception as e:
-        return f"❌ 查询龙虎榜出错: {e}"
+        return f"❌ 查询龙虎榜出错: {_friendly_err(e)}"
 
 
 def handler_get_north_flow(days: int = 5) -> str:
@@ -2119,7 +2159,7 @@ def handler_get_north_flow(days: int = 5) -> str:
         rows = fetch_north_flow(days=int(days))
         return fmt_north_flow(rows)
     except Exception as e:
-        return f"❌ 查询北向资金出错: {e}"
+        return f"❌ 查询北向资金出错: {_friendly_err(e)}"
 
 
 def handler_get_main_flow(code: str) -> str:
@@ -2134,7 +2174,7 @@ def handler_get_main_flow(code: str) -> str:
         d = fetch_main_flow(resolved)
         return fmt_main_flow(d)
     except Exception as e:
-        return f"❌ 查询主力资金流出错: {e}"
+        return f"❌ 查询主力资金流出错: {_friendly_err(e)}"
 
 
 def handler_get_concept_sectors(code: str) -> str:
@@ -2149,7 +2189,7 @@ def handler_get_concept_sectors(code: str) -> str:
         sectors = fetch_concept_sectors(resolved)
         return fmt_concept_sectors(sectors)
     except Exception as e:
-        return f"❌ 查询概念板块出错: {e}"
+        return f"❌ 查询概念板块出错: {_friendly_err(e)}"
 
 
 def handler_get_index(name: str = "") -> str:
@@ -2160,7 +2200,7 @@ def handler_get_index(name: str = "") -> str:
         data = fetch_index(name if name else None)
         return fmt_index(data)
     except Exception as e:
-        return f"❌ 查询指数行情出错: {e}"
+        return f"❌ 查询指数行情出错: {_friendly_err(e)}"
 
 
 def handler_get_sector_flow(sector_type: str = "industry", top_n: int = 10) -> str:
@@ -2172,7 +2212,7 @@ def handler_get_sector_flow(sector_type: str = "industry", top_n: int = 10) -> s
         label = "行业板块" if sector_type == "industry" else "概念板块"
         return fmt_sector_flow(rows, label)
     except Exception as e:
-        return f"❌ 查询板块资金流出错: {e}"
+        return f"❌ 查询板块资金流出错: {_friendly_err(e)}"
 
 
 def handler_get_market_sentiment() -> str:
@@ -2183,7 +2223,7 @@ def handler_get_market_sentiment() -> str:
         data = fetch_market_sentiment()
         return fmt_market_sentiment(data)
     except Exception as e:
-        return f"❌ 查询市场情绪出错: {e}"
+        return f"❌ 查询市场情绪出错: {_friendly_err(e)}"
 
 
 def handler_screen_stocks(
@@ -2197,6 +2237,8 @@ def handler_screen_stocks(
         from stock_market_extras import fmt_screen_result, screen_stocks
 
         rows = screen_stocks(pe_max, pe_min, pb_max, pb_min, mv_min_yi, mv_max_yi, top_n, sort_by)
+        if isinstance(rows, dict) and "error" in rows:
+            return f"⚠️ {rows['error']}"
         # 拼条件描述
         conds = []
         if pe_max is not None:
@@ -2214,7 +2256,7 @@ def handler_screen_stocks(
         cond_str = " + ".join(conds) if conds else "无门槛"
         return fmt_screen_result(rows, cond_str)
     except Exception as e:
-        return f"❌ 条件选股出错: {e}"
+        return f"❌ 条件选股出错: {_friendly_err(e)}"
 
 
 def handler_scan_with_yujie(top_n: int = 20, min_score: float = 5.0, limit: int = 0) -> str:
@@ -2399,6 +2441,23 @@ _TOOL_SCHEMA: dict[str, dict] = {
     t["function"]["name"]: t["function"].get("parameters", {})
     for t in TOOLS
 }
+
+
+# 网络类异常关键词(用于错误友好化)
+_NET_ERR_KEYWORDS = ("502", "503", "504", "timeout", "timed out", "urlopen",
+                     "HTTPError", "URLError", "ConnectionError", "Remote end")
+
+
+def _friendly_err(e: Exception) -> str:
+    """把技术异常转为用户友好提示。"""
+    msg = str(e)
+    if any(kw in msg for kw in _NET_ERR_KEYWORDS):
+        return "接口暂时不可用,请稍后重试"
+    if "代码" in msg and "6 位" in msg:
+        return msg  # 参数错误,原文已友好
+    if "未识别" in msg or "无法识别" in msg:
+        return msg  # 股票名解析错误,原文已友好
+    return f"内部错误,请稍后重试({type(e).__name__})"
 
 
 def _validate_tool_args(fn_name: str, fn_args: dict) -> tuple[bool, str | None]:
@@ -2915,6 +2974,10 @@ class FeishuBotClient:
                 return
 
             log.info("收到消息 chat=%s sender=%s text=%r", chat_id, sender, text[:100])
+
+            # chat_type: 'p2p' 私聊 / 'group' 群聊,供 handler 判断群共享功能
+            chat_type = getattr(msg, "chat_type", "") or "group"
+            _set_current_chat_type(chat_type)
 
             # 跨轮记忆: 按 chat_id+sender 隔离,群里不同用户各自独立历史
             session_id = f"{chat_id}:{sender}"

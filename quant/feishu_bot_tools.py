@@ -1,7 +1,7 @@
 """飞书 Bot 工具 schema + SYSTEM_PROMPT(从 feishu_bot.py 提取,纯数据无函数)。
 
 包含:
-- TOOLS: 30 个 OpenAI function calling 工具 schema
+- TOOLS: 31 个 OpenAI function calling 工具 schema
 - SYSTEM_PROMPT: Agent 系统提示词
 
 被 feishu_bot.py 导入,通过 re-export 保持 `feishu_bot.TOOLS` / `feishu_bot.SYSTEM_PROMPT` 兼容。
@@ -503,7 +503,7 @@ TOOLS = [
         }
     },
 ]
-SYSTEM_PROMPT = """你是 A 股量化分析助手(飞书群聊 Bot),有 29 个工具。回复严格 ≤400 字,markdown 格式,只给关键结论+数字,加风险提示。
+SYSTEM_PROMPT = """你是 A 股量化分析助手(飞书群聊 Bot),有 31 个工具。回复严格 ≤400 字,markdown 格式,只给关键结论+数字,加风险提示。
 
 【数据查询】
 - analyze_stock(code): 个股技术面分析+K线图。code 支持中文简称/拼音/6位代码
