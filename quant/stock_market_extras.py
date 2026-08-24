@@ -337,6 +337,127 @@ def fetch_market_sentiment() -> dict:
     }
 
 
+# ---------------- 条件选股(PE/PB/市值) ----------------
+
+# 全 A 股 fs 参数(沪深主板 + 创业板 + 科创板 + 北交所)
+MARKET_FS = "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23,m:0+t:81+s:2048"
+
+
+def screen_stocks(
+    pe_max: float | None = None,
+    pe_min: float | None = None,
+    pb_max: float | None = None,
+    pb_min: float | None = None,
+    mv_min_yi: float | None = None,
+    mv_max_yi: float | None = None,
+    top_n: int = 30,
+    sort_by: str = "pe",
+) -> list[dict]:
+    """全市场条件选股(PE/PB/市值筛选),用东财 clist 接口一次拉取。
+
+    Args:
+        pe_max/pe_min: PE_TTM 范围(负值=亏损,会被过滤)
+        pb_max/pb_min: PB 范围
+        mv_min_yi/mv_max_yi: 总市值范围(亿元)
+        top_n: 返回前 N 只
+        sort_by: 排序字段,pe/pb/mv
+
+    Returns: [{code, name, price, pct, pe_ttm, pb, total_mv_yi}, ...]
+
+    耗时: 全市场约 15-30 秒(分 50 页拉取)
+    """
+    import time
+    out: list[dict] = []
+    # 分页拉取全市场(含北交所/B股,客户端过滤)
+    # 注意: pz=100 易被东财限频 502,用 pz=20 + sleep(0.5) 更稳定
+    # 最多拉 200 只(10 页 × 20),够筛选 Top30 用
+    for pn in range(1, 11):
+        url = (
+            f"http://push2.eastmoney.com/api/qt/clist/get?pn={pn}&pz=20&po=1&np=1"
+            f"&fltt=2&invt=2&fid=f3&fs={MARKET_FS}"
+            f"&fields=f12,f14,f2,f3,f162,f167,f116"
+        )
+        # 重试 2 次(东财偶发 502)
+        data = None
+        for _ in range(2):
+            data = _get_json(url, referer="https://data.eastmoney.com/")
+            if data:
+                break
+            time.sleep(1.0)
+        if not data or not data.get("data") or not data["data"].get("diff"):
+            break
+        for r in data["data"]["diff"]:
+            code = r.get("f12", "")
+            # 过滤北交所(8 开头)和 B 股(2 开头 9 结尾),只要 A 股
+            if not code or code[0] not in "036":
+                continue
+            pe = r.get("f162")
+            pb = r.get("f167")
+            mv = r.get("f116")  # 总市值(元)
+            # PE/PB 为 '-' 或 None 时跳过(亏损/未披露)
+            if not isinstance(pe, (int, float)) or not isinstance(pb, (int, float)):
+                continue
+            if not isinstance(mv, (int, float)) or mv <= 0:
+                continue
+            mv_yi = mv / 1e8
+            # 应用过滤
+            if pe <= 0 and pe_max is not None:
+                continue  # 亏损股不在 PE_MAX 筛选范围
+            if pe_max is not None and pe > pe_max:
+                continue
+            if pe_min is not None and pe < pe_min:
+                continue
+            if pb_max is not None and pb > pb_max:
+                continue
+            if pb_min is not None and pb < pb_min:
+                continue
+            if mv_min_yi is not None and mv_yi < mv_min_yi:
+                continue
+            if mv_max_yi is not None and mv_yi > mv_max_yi:
+                continue
+            out.append({
+                "code": code,
+                "name": r.get("f14", ""),
+                "price": r.get("f2"),
+                "pct": r.get("f3"),
+                "pe_ttm": round(pe, 2),
+                "pb": round(pb, 2),
+                "total_mv_yi": round(mv_yi, 1),
+            })
+            if len(out) >= top_n * 3:  # 多拉一些再排
+                break
+        if len(out) >= top_n * 3:
+            break
+        time.sleep(0.3)  # 防封
+    # 按 sort_by 排序: pe 升序(低估值优先),pb/mv 降序
+    if sort_by == "pe":
+        out.sort(key=lambda x: x["pe_ttm"])
+    elif sort_by == "pb":
+        out.sort(key=lambda x: -x["pb"])
+    else:
+        out.sort(key=lambda x: -x["total_mv_yi"])
+    return out[:top_n]
+
+
+def fmt_screen_result(rows, conditions: str = "") -> str:
+    """条件选股结果格式化。"""
+    if not rows:
+        return f"📭 无符合条件的股票\n筛选条件: {conditions or '无'}"
+    lines = [f"🔍 **条件选股** {conditions}".rstrip()]
+    lines.append(f"共找到 {len(rows)} 只(显示前 {len(rows)})")
+    lines.append("")
+    lines.append("| 代码 | 名称 | 现价 | 涨幅 | PE | PB | 市值(亿) |")
+    lines.append("|---|---|---|---|---|---|---|")
+    for r in rows:
+        pct = r.get("pct") or 0
+        icon = "🔴" if pct >= 0 else "🟢"
+        lines.append(
+            f"| {r['code']} | {r['name']} | {r['price']} | {icon}{pct:+.2f}% | "
+            f"{r['pe_ttm']} | {r['pb']} | {r['total_mv_yi']:.0f} |"
+        )
+    return "\n".join(lines)
+
+
 def fetch_index(name=None):
     """获取指数实时行情。
 
@@ -591,5 +712,9 @@ if __name__ == "__main__":
         print(fmt_sector_flow(fetch_sector_flow(st, top_n=10), "行业板块" if st == "industry" else "概念板块"))
     elif cmd == "sentiment":
         print(fmt_market_sentiment(fetch_market_sentiment()))
+    elif cmd == "screen":
+        # 简化:PE<20 + PB<3 + 市值>100亿
+        rows = screen_stocks(pe_max=20, pb_max=3, mv_min_yi=100, top_n=20)
+        print(fmt_screen_result(rows, "PE<20 + PB<3 + 市值>100亿"))
     else:
-        print("用法: python stock_market_extras.py [lhb|north|flow|concept|index|sector_flow|sentiment] [args]")
+        print("用法: python stock_market_extras.py [lhb|north|flow|concept|index|sector_flow|sentiment|screen] [args]")

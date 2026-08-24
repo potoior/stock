@@ -9,7 +9,7 @@ A 股量化分析系统,集成飞书群聊 Bot(Function Calling ReAct Agent),覆
 - 45 内置策略信号引擎(MACD/KDJ/BOLL/RSI/玉姐 10 条规则 + 操练大全12/14/15/16/17/20章 + 漫画书量能/实战战法等)
 - 玉姐精选全市场扫描(多因子评分排行)
 - 回测 + 参数网格寻优
-- 飞书 Bot Agent(30 个 skill,跨轮记忆,自选股,财务数据,板块分析,历史复盘,策略选股,个股新闻,龙虎榜,北向资金,主力资金流,板块反查,指数行情,板块资金流,市场情绪,多策略组合回测)
+- 飞书 Bot Agent(31 个 skill,跨轮记忆,自选股,群共享自选股,财务数据,板块分析,历史复盘,策略选股,个股新闻,龙虎榜,北向资金,主力资金流,板块反查,指数行情,板块资金流,市场情绪,多策略组合回测,条件选股)
 - 策略大全(4 来源 73 策略:漫画书 29 + 操练大全 32 + 玉姐 10 + AI 2,已实现 72 个)
 
 ## 目录结构
@@ -93,7 +93,7 @@ journalctl --user -u daily-scan -f
 
 ### Agent 设计
 - **Function Calling ReAct**: LLM 自主决策调工具,失败降级到 `route()` 关键词路由
-- **30 个 skill**: 4 数据查询 + 5 策略查询 + 3 策略操作 + 4 回测寻优(含组合回测) + 1 自选股 + 1 财务 + 3 批量(对比/板块/历史复盘) + 1 个股新闻 + 7 市场数据(龙虎榜/北向/主力资金流/板块反查/指数/板块资金流/市场情绪)
+- **31 个 skill**: 4 数据查询 + 5 策略查询 + 3 策略操作 + 4 回测寻优(含组合回测) + 1 自选股(含群共享/批量分析) + 1 财务 + 3 批量(对比/板块/历史复盘) + 1 个股新闻 + 7 市场数据(龙虎榜/北向/主力资金流/板块反查/指数/板块资金流/市场情绪) + 1 条件选股 + 1 条件选股
   - 数据查询: `analyze_stock` / `get_market_status` / `get_yujie_picks` / `get_portfolio`
   - 策略查询: `list_strategies` / `get_strategy_library` / `get_yujie_detail` / `analyze_with_strategy` / `analyze_with_yujie`
   - 策略操作: `toggle_strategy` / `set_strategy_params` / `enable_library_strategy`

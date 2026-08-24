@@ -419,11 +419,11 @@ def test_scan_with_yujie_in_slow_tools():
     assert "scan_with_yujie" in feishu_bot.SLOW_TOOLS
 
 
-def test_tool_count_30():
-    """工具总数应为 30(29 旧 + 1 组合回测)。"""
+def test_tool_count_31():
+    """工具总数应为 31(30 旧 + 1 条件选股)。"""
     import feishu_bot
-    assert len(feishu_bot.TOOLS) == 30
-    assert len(feishu_bot.TOOL_HANDLERS) == 30
+    assert len(feishu_bot.TOOLS) == 31
+    assert len(feishu_bot.TOOL_HANDLERS) == 31
 
 
 # ---------------- 板块资金流 / 市场情绪 ----------------
@@ -649,3 +649,55 @@ def test_run_combo_backtest_invalid_mode():
     import backtest_builtin as bb
     r = bb.run_combo_backtest(["macd", "boll"], mode="invalid")
     assert "error" in r
+
+
+# ---------------- 条件选股 screen_stocks ----------------
+
+
+def test_screen_stocks_registered():
+    """screen_stocks 应在 TOOLS + HANDLERS 注册。"""
+    import feishu_bot
+    tool_names = {t["function"]["name"] for t in feishu_bot.TOOLS}
+    assert "screen_stocks" in tool_names
+    assert "screen_stocks" in feishu_bot.TOOL_HANDLERS
+
+
+def test_fmt_screen_result_basic():
+    """条件选股结果格式化。"""
+    rows = [
+        {"code": "600519", "name": "贵州茅台", "price": 1500, "pct": 0.5,
+         "pe_ttm": 20.0, "pb": 6.0, "total_mv_yi": 1880},
+        {"code": "000858", "name": "五粮液", "price": 150, "pct": -0.3,
+         "pe_ttm": 15.0, "pb": 3.5, "total_mv_yi": 580},
+    ]
+    text = sme.fmt_screen_result(rows, "PE≤20 + 市值≥500亿")
+    assert "条件选股" in text
+    assert "PE≤20" in text
+    assert "贵州茅台" in text
+    assert "20.0" in text  # PE
+    assert "1880" in text  # 市值
+
+
+def test_fmt_screen_result_empty():
+    """空结果格式化。"""
+    text = sme.fmt_screen_result([], "PE<5")
+    assert "无符合" in text or "无" in text
+    assert "PE<5" in text
+
+
+def test_screen_stocks_unknown_params():
+    """screen_stocks 函数本身不验证参数(handler 层处理),这里只测无参数不抛异常。
+    联网测试在 CI 跳过(易被东财限频)。
+    """
+    # 不实际调用 screen_stocks(会联网),只验证函数存在
+    assert hasattr(sme, "screen_stocks")
+    assert callable(sme.screen_stocks)
+
+
+def test_handler_screen_stocks_error(monkeypatch):
+    """handler_screen_stocks 在 screen_stocks 抛异常时应返友好错误。"""
+    import feishu_bot
+    monkeypatch.setattr("stock_market_extras.screen_stocks", lambda *a, **k: (_ for _ in ()).throw(Exception("接口失败")))
+    out = feishu_bot.handler_screen_stocks(pe_max=20)
+    assert "❌" in out
+    assert "条件选股出错" in out

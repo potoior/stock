@@ -136,19 +136,20 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "manage_watchlist",
-            "description": "管理自选股列表(按用户隔离)。用户说'加自选X'/'删自选X'/'我的自选'/'自选股'时调用。可批量加多只。",
+            "description": "管理自选股列表(按用户隔离)。用户说'加自选X'/'删自选X'/'我的自选'/'分析我的自选'/'群加自选'/'群自选'时调用。可批量加多只,analyze 批量对比自选股财务,group_* 群共享池(全群可见)。",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "action": {
                         "type": "string",
-                        "enum": ["add", "remove", "list"],
-                        "description": "add=添加,remove=删除,list=列出"
+                        "enum": ["add", "remove", "list", "analyze",
+                                 "group_add", "group_remove", "group_list", "group_analyze"],
+                        "description": "add/remove/list/analyze=个人自选;group_*=群共享池(全群可见)"
                     },
                     "codes": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "股票代码或名称列表,如 [\"600519\"] 或 [\"茅台\",\"五粮液\"]。list 动作可省略"
+                        "description": "股票代码或名称列表,如 [\"600519\"] 或 [\"茅台\",\"五粮液\"]。list/analyze/group_list/group_analyze 可省略"
                     }
                 },
                 "required": ["action"]
@@ -479,6 +480,28 @@ TOOLS = [
             }
         }
     },
+    # ---------- 条件选股 ----------
+    {
+        "type": "function",
+        "function": {
+            "name": "screen_stocks",
+            "description": "条件选股:按 PE/PB/市值范围筛选全市场股票。耗时约 5-15 秒。用户问'找出PE<20的/低估值股/PE<20且PB<3的股票/大盘股有哪些'时调用。注意:只支持 PE/PB/市值,不支持 ROE(财报数据需另查)。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "pe_max": {"type": "number", "description": "PE_TTM 上限,如 20=只看 PE≤20。负值(亏损)自动过滤", "default": None},
+                    "pe_min": {"type": "number", "description": "PE_TTM 下限", "default": None},
+                    "pb_max": {"type": "number", "description": "PB 上限", "default": None},
+                    "pb_min": {"type": "number", "description": "PB 下限", "default": None},
+                    "mv_min_yi": {"type": "number", "description": "总市值下限(亿元),如 100=只看市值≥100亿", "default": None},
+                    "mv_max_yi": {"type": "number", "description": "总市值上限(亿元)", "default": None},
+                    "top_n": {"type": "integer", "description": "返回前 N 只,默认 20", "default": 20},
+                    "sort_by": {"type": "string", "enum": ["pe", "pb", "mv"],
+                                "description": "排序: pe=PE升序(低估值优先), pb=PB降序, mv=市值降序。默认 pe", "default": "pe"}
+                }
+            }
+        }
+    },
 ]
 SYSTEM_PROMPT = """你是 A 股量化分析助手(飞书群聊 Bot),有 29 个工具。回复严格 ≤400 字,markdown 格式,只给关键结论+数字,加风险提示。
 
@@ -491,7 +514,9 @@ SYSTEM_PROMPT = """你是 A 股量化分析助手(飞书群聊 Bot),有 29 个�
 - compare_stocks(codes): 多股对比(最多8只),PE/PB/ROE对比表
 - analyze_sector(sector): 板块分析(白酒/银行/医药/新能源/半导体/消费/军工/地产/电力/有色)
 - query_history_picks(date): 历史玉姐复盘(date支持'昨天'/'前天'/'20260818')
-- manage_watchlist(action, codes?): 自选股管理(action=add/remove/list,按用户隔离)
+- manage_watchlist(action, codes?): 自选股管理(action=add/remove/list/analyze/group_*,按用户隔离)
+  · analyze: 批量分析自选股(PE/PB/ROE 对比),最多 8 只
+  · group_add/group_list/group_remove/group_analyze: 群共享自选池(全群可见)
 
 【策略管理】
 - list_strategies(): 列出所有策略+开关+参数
@@ -528,6 +553,9 @@ SYSTEM_PROMPT = """你是 A 股量化分析助手(飞书群聊 Bot),有 29 个�
 - get_sector_flow(sector_type?, top_n?): 行业/概念板块主力资金流排名
   · sector_type: industry(默认)/concept
 - get_market_sentiment(): 市场情绪速览(5大指数+行业/概念板块资金流Top5)
+- screen_stocks(pe_max?, pb_max?, mv_min_yi?, ...): 条件选股(PE/PB/市值筛选)
+  · 用户问"找出PE<20的/低估值股/大盘股"时调用,耗时 5-15 秒
+  · 只支持 PE/PB/市值,不支持 ROE
 
 【工作流程】
 1. 根据问题决定调用哪个工具(可多次/组合调用)

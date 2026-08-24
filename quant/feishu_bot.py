@@ -439,6 +439,31 @@ def watchlist_list(session_id: str) -> list[dict]:
         return []
 
 
+def watchlist_group_add(session_id: str, code: str, name: str = "") -> str:
+    """添加到群共享自选池(以 chat_id 为 key,去 sender)。
+
+    session_id 格式: "<chat_id>:<sender>",取 chat_id 部分作为群共享 key。
+    群内任一成员添加的股票都对全群可见,实现"群友共同关注"。
+    """
+    chat_id = session_id.split(":", 1)[0] if ":" in session_id else session_id
+    group_key = f"group:{chat_id}"
+    return watchlist_add(group_key, code, name)
+
+
+def watchlist_group_list(session_id: str) -> list[dict]:
+    """列出群共享自选池(去重所有群成员添加的)。"""
+    chat_id = session_id.split(":", 1)[0] if ":" in session_id else session_id
+    group_key = f"group:{chat_id}"
+    return watchlist_list(group_key)
+
+
+def watchlist_group_remove(session_id: str, code: str) -> str:
+    """从群共享自选池删除。"""
+    chat_id = session_id.split(":", 1)[0] if ":" in session_id else session_id
+    group_key = f"group:{chat_id}"
+    return watchlist_remove(group_key, code)
+
+
 
 # 简单股票名称缓存(避免每次都查 DB)
 _name_cache: dict[str, str] = {}
@@ -729,9 +754,10 @@ def handler_yujie(min_score: float = 0, hit_rule: str = "") -> str:
 
 
 def handler_watchlist(action: str, codes: list = None, session_id: str = "cli") -> str:
-    """自选股管理:add/remove/list,按 session_id 隔离(每人独立)。
+    """自选股管理:add/remove/list/analyze,按 session_id 隔离(每人独立)。
 
     codes 里的元素可以是代码或名称,统一解析成 6 位代码 + 名称。
+    analyze: 批量分析自选股(调 handler_compare_stocks 做 PE/PB/ROE 对比)
     """
     if action == "list":
         items = watchlist_list(session_id)
@@ -742,8 +768,41 @@ def handler_watchlist(action: str, codes: list = None, session_id: str = "cli") 
             lines.append(f"{i}. {it['code']} {it['name'] or '-'}")
         return "\n".join(lines)
 
+    if action in ("group_list", "group_analyze"):
+        # 群共享自选池:所有群成员添加的去重列表
+        items = watchlist_group_list(session_id)
+        if not items:
+            return "📭 群共享自选池为空。\n用 \"群加自选 茅台\" 添加(全群可见)。"
+        if action == "group_list":
+            lines = [f"👥 群共享自选池({len(items)} 只,全群可见)"]
+            for i, it in enumerate(items, 1):
+                lines.append(f"{i}. {it['code']} {it['name'] or '-'}")
+            return "\n".join(lines)
+        # group_analyze: 批量分析
+        if len(items) == 1:
+            return handler_analyze(items[0]["code"])
+        codes = [it["code"] for it in items[:8]]
+        extra = f"\n\n(群共享共 {len(items)} 只,仅分析前 8 只)" if len(items) > 8 else ""
+        return handler_compare_stocks(codes) + extra
+
+    if action == "analyze":
+        # 批量分析自选股:调 handler_compare_stocks 做财务对比
+        items = watchlist_list(session_id)
+        if not items:
+            return "📭 你的自选股列表为空,无法分析。\n用 \"加自选 茅台\" 添加后再试。"
+        if len(items) == 1:
+            # 单只直接 analyze_stock
+            return handler_analyze(items[0]["code"])
+        # 多只:compare_stocks 最多 8 只
+        codes = [it["code"] for it in items[:8]]
+        if len(items) > 8:
+            extra = f"\n\n(自选共 {len(items)} 只,仅分析前 8 只)"
+        else:
+            extra = ""
+        return handler_compare_stocks(codes) + extra
+
     if not codes:
-        return "❌ add/remove 操作需要 codes 参数,如 [\"600519\"] 或 [\"茅台\"]"
+        return "❌ add/remove/group_add/group_remove 操作需要 codes 参数,如 [\"600519\"] 或 [\"茅台\"]"
 
     # 解析每个 code/name 为 6 位代码
     try:
@@ -771,7 +830,7 @@ def handler_watchlist(action: str, codes: list = None, session_id: str = "cli") 
     if not resolved:
         return f"❌ 未能识别任何股票: {codes}"
 
-    if action == "add":
+    if action in ("add", "group_add"):
         # 名称缺失时通过实时接口补名(批量查,1次网络)
         code_only = [c for c, n in resolved if not n]
         if code_only:
@@ -783,16 +842,29 @@ def handler_watchlist(action: str, codes: list = None, session_id: str = "cli") 
             except Exception:
                 pass
         msgs = []
+        is_group = action == "group_add"
         for code, name in resolved:
-            msgs.append(watchlist_add(session_id, code, name))
-        return "\n".join(msgs) + f"\n\n当前自选 {len(watchlist_list(session_id))} 只,发\"我的自选\"查看"
-    elif action == "remove":
+            if is_group:
+                msgs.append(watchlist_group_add(session_id, code, name))
+            else:
+                msgs.append(watchlist_add(session_id, code, name))
+        if is_group:
+            cnt = len(watchlist_group_list(session_id))
+            return "\n".join(msgs) + f"\n\n群共享自选池共 {cnt} 只,发\"群自选\"查看(全群可见)"
+        cnt = len(watchlist_list(session_id))
+        return "\n".join(msgs) + f"\n\n当前自选 {cnt} 只,发\"我的自选\"查看"
+    elif action in ("remove", "group_remove"):
         msgs = []
+        is_group = action == "group_remove"
         for code, _ in resolved:
-            msgs.append(watchlist_remove(session_id, code))
+            if is_group:
+                msgs.append(watchlist_group_remove(session_id, code))
+            else:
+                msgs.append(watchlist_remove(session_id, code))
         return "\n".join(msgs)
     else:
-        return f"❌ 未知 action: {action},应为 add/remove/list"
+        return (f"❌ 未知 action: {action},应为 "
+                f"add/remove/list/analyze 或 group_add/group_remove/group_list/group_analyze")
 
 
 def handler_portfolio() -> str:
@@ -2114,6 +2186,37 @@ def handler_get_market_sentiment() -> str:
         return f"❌ 查询市场情绪出错: {e}"
 
 
+def handler_screen_stocks(
+    pe_max: float | None = None, pe_min: float | None = None,
+    pb_max: float | None = None, pb_min: float | None = None,
+    mv_min_yi: float | None = None, mv_max_yi: float | None = None,
+    top_n: int = 20, sort_by: str = "pe",
+) -> str:
+    """条件选股(PE/PB/市值筛选),东财 clist 接口拉取,耗时约 5-15 秒。"""
+    try:
+        from stock_market_extras import fmt_screen_result, screen_stocks
+
+        rows = screen_stocks(pe_max, pe_min, pb_max, pb_min, mv_min_yi, mv_max_yi, top_n, sort_by)
+        # 拼条件描述
+        conds = []
+        if pe_max is not None:
+            conds.append(f"PE≤{pe_max}")
+        if pe_min is not None:
+            conds.append(f"PE≥{pe_min}")
+        if pb_max is not None:
+            conds.append(f"PB≤{pb_max}")
+        if pb_min is not None:
+            conds.append(f"PB≥{pb_min}")
+        if mv_min_yi is not None:
+            conds.append(f"市值≥{mv_min_yi}亿")
+        if mv_max_yi is not None:
+            conds.append(f"市值≤{mv_max_yi}亿")
+        cond_str = " + ".join(conds) if conds else "无门槛"
+        return fmt_screen_result(rows, cond_str)
+    except Exception as e:
+        return f"❌ 条件选股出错: {e}"
+
+
 def handler_scan_with_yujie(top_n: int = 20, min_score: float = 5.0, limit: int = 0) -> str:
     """全市场玉姐评分实时扫描(用 daily 表已缓存数据,不联网,耗时 1-3 分钟)。
 
@@ -2271,6 +2374,16 @@ TOOL_HANDLERS = {
         int(args.get("top_n", 10)),
     ),
     "get_market_sentiment": lambda args: handler_get_market_sentiment(),
+    "screen_stocks": lambda args: handler_screen_stocks(
+        args.get("pe_max"),
+        args.get("pe_min"),
+        args.get("pb_max"),
+        args.get("pb_min"),
+        args.get("mv_min_yi"),
+        args.get("mv_max_yi"),
+        int(args.get("top_n", 20)),
+        args.get("sort_by", "pe"),
+    ),
 }
 
 MAX_AGENT_STEPS = 6  # 最多 6 步推理(避免无限循环)
