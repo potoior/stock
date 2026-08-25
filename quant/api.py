@@ -785,7 +785,13 @@ def _start_periodic_scheduler(state, env_prefix, default_time, run_fn, delay_sec
 
 
 def _start_daily_scan_scheduler():
-    """每个交易日 09:00 跑 daily_scan(已合并 yujie 全市场扫描,同时更新两个状态)。"""
+    """每个交易日 09:35 跑 daily_scan(已合并 yujie 全市场扫描,同时更新两个状态)。
+
+    时间选 09:35(开盘后 5 分钟)而非 09:00,原因:
+    - 9:00 集合竞价刚开始,新浪接口被限流(HTTP 456),大量页面拉取失败
+    - 9:00 时多数股票涨跌幅/成交额都是 0(集合竞价未撮合),数据无意义
+    - 9:30 开盘 + 5 分钟稳定,数据可靠
+    """
 
     def _run():
         import daily_scan
@@ -794,7 +800,7 @@ def _start_daily_scan_scheduler():
         _yujie_state["last_status"] = "ok"
         _yujie_state["last_run"] = _daily_scan_state.get("last_run")
 
-    _start_periodic_scheduler(_daily_scan_state, "DAILY_SCAN", "09:00", _run, delay_seconds=0)
+    _start_periodic_scheduler(_daily_scan_state, "DAILY_SCAN", "09:35", _run, delay_seconds=0)
 
 
 @app.get("/api/daily-scan/status")
@@ -1030,7 +1036,7 @@ def builtin_grid():
 
 
 def _start_yujie_scheduler():
-    """玉姐精选已合并入 daily_scan 调度器(9:00 一起跑),这里不再独立调度。
+    """玉姐精选已合并入 daily_scan 调度器(9:35 一起跑),这里不再独立调度。
     保留函数只是为了向后兼容外部调用。
     """
     return

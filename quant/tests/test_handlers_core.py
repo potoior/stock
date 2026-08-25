@@ -48,6 +48,8 @@ def test_handler_yujie_no_data(tmp_path, monkeypatch):
 
 def test_handler_yujie_with_data(tmp_path, monkeypatch):
     """有玉姐精选数据应返回 Top 列表。"""
+    from datetime import datetime
+    today = datetime.now().strftime("%Y%m%d")
     monkeypatch.setattr(feishu_bot, "ENGINE_HOME", tmp_path)
     db = tmp_path / "stock_cache.db"
     conn = sqlite3.connect(str(db))
@@ -55,7 +57,7 @@ def test_handler_yujie_with_data(tmp_path, monkeypatch):
         date TEXT, rank INTEGER, code TEXT, name TEXT,
         score REAL, hits TEXT, detail TEXT)""")
     conn.execute("INSERT INTO yujie_picks VALUES(?,?,?,?,?,?,?)",
-                 ("20260824", 1, "600519", "茅台", 8.0,
+                 (today, 1, "600519", "茅台", 8.0,
                   '["MACD金叉","突破"]', "{}"))
     conn.commit()
     conn.close()

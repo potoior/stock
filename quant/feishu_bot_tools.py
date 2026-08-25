@@ -441,7 +441,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "scan_with_yujie",
-            "description": "全市场玉姐评分实时扫描(耗时1-3分钟)。用 daily 表已缓存数据对全市场4700+只股票重新打分,返回 Top N 高分股。用户说'扫描整个市场/全市场玉姐/实时玉姐评分/重新扫一遍/按玉姐选股'时调用。与 get_yujie_picks(盘前09:00扫描结果)区别:这是实时重跑全市场评分。",
+            "description": "全市场玉姐评分实时扫描(耗时1-3分钟)。用 daily 表已缓存数据对全市场4700+只股票重新打分,返回 Top N 高分股。用户说'扫描整个市场/全市场玉姐/实时玉姐评分/重新扫一遍/按玉姐选股'时调用。与 get_yujie_picks(盘前09:35扫描结果)区别:这是实时重跑全市场评分。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -508,7 +508,7 @@ SYSTEM_PROMPT = """你是 A 股量化分析助手(飞书群聊 Bot),有 31 个�
 【数据查询】
 - analyze_stock(code): 个股技术面分析+K线图。code 支持中文简称/拼音/6位代码
 - get_market_status(): 今日市场概况(涨跌停/成交额)
-- get_yujie_picks(min_score?, hit_rule?): 今日玉姐精选(盘前09:00结果,默认Top10+图)
+- get_yujie_picks(min_score?, hit_rule?): 今日玉姐精选(盘前09:35结果,默认Top10+图)
 - get_portfolio(): 模拟盘持仓
 - get_finance(code): 财务数据(PE/PB/市值/ROE/毛利率/EPS/营收/净利润)
 - compare_stocks(codes): 多股对比(最多8只),PE/PB/ROE对比表

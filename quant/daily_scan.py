@@ -1,6 +1,6 @@
-"""每日 9:00 全市场扫描 + 玉姐精选 + 新闻综合日报
+"""每日 9:35 全市场扫描 + 玉姐精选 + 新闻综合日报
 
-流程（每个交易日 09:00）：
+流程（每个交易日 09:35,开盘后 5 分钟数据稳定）：
   1. 爬取全 A 股（≈5500 只）实时行情，统计涨跌分布 / 涨停跌停 / 板块热度
   2. 调用 yujie_scan.run_once() 跑玉姐精选全市场打分（数据共用 stock_cache.db）
   3. 取玉姐 Top N 作为候选，附加 strategy_engine.analyze 完整策略信号
@@ -10,7 +10,7 @@
 
 用法：
   python daily_scan.py                       # 立即跑一次
-  python daily_scan.py --schedule "09:00"    # 纯 Python 定时，每天 09:00 自动跑
+  python daily_scan.py --schedule "09:35"    # 纯 Python 定时，每天 09:35 自动跑
   python daily_scan.py --limit 1000          # 仅抓前1000只（调试加速）
   python daily_scan.py --top 10              # 对玉姐 Top 10 跑策略信号
 """
@@ -80,24 +80,24 @@ def norm_code(symbol):
 def fetch_market_all(limit=0, max_pages=80):
     """抓取全市场 A 股实时行情,返回标准化字典列表。
 
-    每页失败重试 2 次(间隔 1s),仍失败才跳过该页继续下一页,
-    避免单页网络抖动丢掉后面所有页。
+    每页失败重试 3 次(指数退避 1s/2s/4s),应对开盘瞬间 HTTP 456 限流。
+    仍失败才跳过该页继续下一页,避免单页网络抖动丢掉后面所有页。
     """
     rows = []
     page = 1
     while page <= max_pages:
         batch = None
         last_err = None
-        for _ in range(2):  # 重试 2 次
+        for attempt in range(3):  # 指数退避 1s/2s/4s
             try:
                 batch = fetch_market_page(page=page, num=100, sort="amount", asc=0)
                 break
             except Exception as e:
                 last_err = e
-                time.sleep(1.0)
+                if attempt < 2:
+                    time.sleep(2 ** attempt)  # 1, 2 秒
         if batch is None:
-            # 该页 2 次都失败:跳过继续下一页(避免一页坏掉丢全部)
-            log.warning("fetch_market_page page=%d 重试 2 次仍失败: %s,跳过", page, last_err)
+            log.warning("fetch_market_page page=%d 重试 3 次仍失败: %s,跳过", page, last_err)
             page += 1
             continue
         if not batch:
