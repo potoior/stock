@@ -34,6 +34,7 @@ import threading
 import time
 import traceback
 from collections import OrderedDict
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -246,7 +247,7 @@ def _set_current_bot(bot):
 # 保留最近 MAX_HISTORY_TURNS 轮(1 轮 = user + assistant 两条消息)
 # 超过 HISTORY_EXPIRE_DAYS 天未活跃的 session 自动清理(启动时跑一次)
 HISTORY_DB = ENGINE_HOME / "agent_history.db"
-MAX_HISTORY_TURNS = 6
+MAX_HISTORY_TURNS = 8
 HISTORY_EXPIRE_DAYS = 7
 
 # 进程级 LRU 缓存: 最近 N 个 session 的 history(读命中跳过 sqlite)
@@ -308,9 +309,11 @@ HISTORY_MSG_MAX_CHARS = 500
 HISTORY_MSG_KEEP_CHARS = 200
 
 # 历史压缩(Compaction, OpenClaw 风格):历史达到 N 条时,把最旧的几轮用 LLM 总结成 1 条
-# 触发阈值: 10 条(5 轮);压缩后: 1 条摘要 + 最近 8 条(4 轮)原文
-COMPACTION_THRESHOLD = 10
-COMPACTION_KEEP_RECENT = 8
+# 触发阈值: 16 条(8 轮);压缩后: 1 条摘要 + 最近 12 条(6 轮)原文
+# 注: 阈值/保留比例影响压缩频率 —— 旧参数(10/8)压缩后 1 轮即再触发,
+# 每轮多烧一次 LLM 调用;16/12 压缩后需 2 轮才再触发,省一半压缩调用
+COMPACTION_THRESHOLD = 16
+COMPACTION_KEEP_RECENT = 12
 
 
 def _truncate_history(history: list) -> list:
@@ -1418,7 +1421,18 @@ def handler_get_strategy_library(
                 filters.append("implemented=true")
             if implemented_only is False:
                 filters.append("implemented=false")
-            return f"❌ 无匹配策略(过滤条件: {', '.join(filters) or '无'})"
+            hint = ""
+            if category:
+                # 自愈提示: 列出全部合法分类,避免 LLM 连续盲猜浪费步数(9-01 事故:
+                # LLM 猜了 8 个不存在的分类,耗尽 6 步上限)
+                valid = []
+                for src in lib.get("sources", []):
+                    for cat in src.get("categories", []):
+                        n = cat.get("name", "")
+                        if n and n not in valid:
+                            valid.append(n)
+                hint = f"\n可用分类(子串匹配): {'/'.join(valid)}\n提示: 查策略用本工具;找股票请用 scan_with_strategy 或 scan_with_yujie。"
+            return f"❌ 无匹配策略(过滤条件: {', '.join(filters) or '无'}){hint}"
 
         # 末尾统计
         lines.append(f"\n---\n共显示 {total_shown} 个策略")
@@ -2598,7 +2612,9 @@ class FeishuAgent:
                 "tools": TOOLS,
                 "tool_choice": "auto",
                 "temperature": 0.3,
-                "max_tokens": 1024,  # 限制输出长度,避免飞书消息过长(中文约 500-700 字)
+                # 推理模型思考也占 token:1024 会"思考耗尽"输出空内容(8-27 事故),
+                # 提高到 32768 保证思考完仍有内容;回复另有 600 字硬截断兜底
+                "max_tokens": 32768,
             }
             headers = {
                 "Authorization": f"Bearer {self.api_key}",
@@ -2606,28 +2622,32 @@ class FeishuAgent:
             }
 
             try:
-                # 重试 1 次:网络抖动/网关 5xx 时重试,4xx 不重试(参数错误)
+                # 重试 2 次(共 3 次尝试):网络抖动/网关 5xx/间歇性 404,指数退避 1s/2s
+                # 404 纳入重试: 网关(负载均衡)偶发 404 是瞬时的,重试即恢复(8-24 事故)
                 r = None
                 llm_start = time.time()
-                for attempt in range(2):
+                last_code = None
+                for attempt in range(3):
                     try:
                         with httpx.Client(timeout=60, trust_env=False) as c:
                             r = c.post(self.base_url, json=payload, headers=headers)
-                        if r.status_code < 500:
-                            break  # 2xx 成功或 4xx 参数错误都不重试
-                        log.warning("LLM 调用 %dxx,重试 %d/2", r.status_code, attempt + 1)
+                        last_code = r.status_code
+                        # 404(网关瞬时)/ 5xx(服务过载)重试;其余 2xx/4xx 不重试
+                        if r.status_code != 404 and r.status_code < 500:
+                            break
+                        log.warning("LLM 调用 %d,重试 %d/3", r.status_code, attempt + 1)
                         r = None
-                        time.sleep(1)
+                        time.sleep(2 ** attempt)  # 1s, 2s
                     except (httpx.ConnectError, httpx.ReadTimeout, httpx.RemoteProtocolError) as e:
-                        log.warning("LLM 网络异常 %s,重试 %d/2", e, attempt + 1)
+                        log.warning("LLM 网络异常 %s,重试 %d/3", e, attempt + 1)
                         r = None
-                        time.sleep(1)
+                        time.sleep(2 ** attempt)  # 1s, 2s
                 if r is None:
                     _incr_stats("llm_calls", 1)
                     _incr_stats("llm_failures", 1)
                     _incr_stats("llm_total_ms", int((time.time() - llm_start) * 1000))
                     return (
-                        "⚠️ AI 暂时无响应,请稍后重试(网络抖动,已重试2次)",
+                        f"⚠️ AI 暂时无响应(HTTP {last_code}),请稍后重试(已重试3次)",
                         new_history, list(_pending_images),
                     )
                 if r.status_code != 200:
@@ -2657,6 +2677,10 @@ class FeishuAgent:
                 content = (msg.get("content") or "").strip()
                 # 去除思考过程
                 content = re.split(r"\n\s*(?:Thinking\s*Process|推理过程)[:：]", content)[0].strip()
+                if not content:
+                    # 空回复兜底: 推理模型思考耗尽/内容为空时,不能发空串给飞书
+                    # (8-27 事故: 空串→飞书 230001→用户被晾 8 分钟)
+                    content = "⚠️ 刚才没能生成有效回复,请换个问法或稍后重试。"
                 if tool_log:
                     log.info("Agent 完成, 共 %d 步, 工具调用: %s", step + 1, tool_log)
                 new_history.append({"role": "assistant", "content": content})
@@ -2831,6 +2855,9 @@ class FeishuBotClient:
         self.client = lark.Client.builder().app_id(self.app_id).app_secret(self.app_secret).build()
         # 注册到全局,供 handler 内部主动发消息(如 scan_with_strategy 进度提示)
         _set_current_bot(self)
+        # 消息处理线程池: Agent 处理可能耗时 1-30 分钟(扫描/回测),
+        # 阻塞 ws 事件线程会导致 ping timeout 断连(历史 32 次)
+        self._executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="msg")
         log.info("飞书 Bot 客户端已初始化, app_id=%s...", self.app_id[:10])
 
     def _needs_thinking_hint(self, text: str) -> tuple[bool, str]:
@@ -2898,7 +2925,12 @@ class FeishuBotClient:
             log.error("图片回复失败: %s", resp)
 
     def _handle_message(self, data: P2ImMessageReceiveV1) -> None:
-        """处理收到的消息事件。"""
+        """处理收到的消息事件(轻量:去重后立即丢线程池,不阻塞 ws 心跳)。
+
+        Agent 处理(扫描/回测)可能耗时 1-30 分钟,若在 ws 事件线程里同步执行,
+        会阻塞 ping/pong 导致连接被服务端掐断(ping timeout)。所以这里只做
+        去重(必须同步,防重投递被并发处理),其余全部提交线程池。
+        """
         try:
             msg = data.event.message
             chat_id = msg.chat_id
@@ -2913,6 +2945,21 @@ class FeishuBotClient:
                 log.info("跳过重复消息 msg_id=%s", msg_id)
                 return
 
+            # chat_type: 'p2p' 私聊 / 'group' 群聊,传给 worker 线程设 thread-local
+            chat_type = getattr(msg, "chat_type", "") or "group"
+
+            # 重活丢线程池:ws 事件线程立即返回,继续处理 ping/pong
+            self._executor.submit(
+                self._process_message, chat_id, msg_type, content_str, sender, chat_type
+            )
+        except Exception as e:
+            log.error("提交消息处理失败: %s\n%s", e, traceback.format_exc())
+
+    def _process_message(
+        self, chat_id: str, msg_type: str, content_str: str, sender: str, chat_type: str
+    ) -> None:
+        """实际的消息处理(在线程池中执行)。"""
+        try:
             # 仅处理文本消息
             if msg_type != "text":
                 self._reply_text(chat_id, "目前仅支持文本提问,例如:\n- 分析 600519\n- 市场\n- 玉姐\n- 持仓")
@@ -2933,8 +2980,7 @@ class FeishuBotClient:
 
             log.info("收到消息 chat=%s sender=%s text=%r", chat_id, sender, text[:100])
 
-            # chat_type: 'p2p' 私聊 / 'group' 群聊,供 handler 判断群共享功能
-            chat_type = getattr(msg, "chat_type", "") or "group"
+            # thread-local 必须在 worker 线程里设置(chat_type/chat_id/bot)
             _set_current_chat_type(chat_type)
 
             # 跨轮记忆: 按 chat_id+sender 隔离,群里不同用户各自独立历史
@@ -2987,6 +3033,9 @@ class FeishuBotClient:
             finally:
                 session_lock.release()
 
+            # 空回复防御:不发空串给飞书(230001 invalid message content)
+            if not reply or not reply.strip():
+                reply = "⚠️ 刚才没能生成有效回复,请换个问法或稍后重试。"
             log.info("回复长度 %d, 附图 %d 张", len(reply), len(images))
             # 最终回复硬截断:超 600 字截断,避免飞书消息过长
             if len(reply) > 600:
@@ -2999,7 +3048,7 @@ class FeishuBotClient:
         except Exception as e:
             log.error("处理消息异常: %s\n%s", e, traceback.format_exc())
             try:
-                self._reply_text(data.event.message.chat_id, f"❌ 处理消息出错: {e}")
+                self._reply_text(chat_id, f"❌ 处理消息出错: {e}")
             except Exception:
                 pass
 

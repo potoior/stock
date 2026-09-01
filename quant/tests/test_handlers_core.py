@@ -427,3 +427,24 @@ def test_history_cache_thread_safe():
         t.join()
     assert not errors, f"并发访问 _HISTORY_CACHE 抛异常: {errors[:3]}"
     assert len(feishu_bot._HISTORY_CACHE) <= feishu_bot._HISTORY_CACHE_MAX
+
+
+# ---------------- 工具自愈: 策略库无匹配提示合法分类 ----------------
+
+
+def test_strategy_library_no_match_lists_categories():
+    """无匹配分类时应列出全部合法分类,帮 LLM 一步纠正(9-01 猜分类事故)。"""
+    out = feishu_bot.handler_get_strategy_library(category="低位")
+    assert "无匹配" in out
+    # 应包含合法分类提示
+    assert "技术指标" in out, "应提示合法分类'技术指标'"
+    assert "评分规则" in out, "应提示合法分类'评分规则'"
+    # 应提示选股用其他工具
+    assert "scan_with_strategy" in out or "scan_with_yujie" in out
+
+
+def test_strategy_library_valid_category_still_works():
+    """合法分类('抄底')仍应正常返回策略列表。"""
+    out = feishu_bot.handler_get_strategy_library(category="抄底")
+    assert "无匹配" not in out
+    assert "抄底" in out

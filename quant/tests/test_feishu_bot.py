@@ -1221,3 +1221,124 @@ def test_is_duplicate_message_empty_id():
     """空 msg_id 应返回 False(不去重,允许处理)。"""
     import feishu_bot
     assert feishu_bot._is_duplicate_message("") is False
+
+
+# ============ 空回复兜底 + 404 重试(8-27/8-24 事故修复) ============
+
+
+def _make_bare_agent():
+    """构造绕过 __init__ .env 依赖的 Agent(mock 用)。"""
+    agent = feishu_bot.FeishuAgent.__new__(feishu_bot.FeishuAgent)
+    agent.api_key = "fake"
+    agent.base_url = "http://fake"
+    agent.model = "fake"
+    return agent
+
+
+def test_chat_empty_reply_fallback(monkeypatch):
+    """LLM 返回空 content 时应返回兜底文案,不能返回空串。
+
+    8-27 事故: 推理模型思考耗尽 token 输出空串 → 飞书 230001 → 用户被晾 8 分钟。
+    """
+    import httpx
+
+    class FakeResp:
+        def __init__(self, data):
+            self.status_code = 200
+            self._data = data
+
+        def json(self):
+            return self._data
+
+    class FakeClient:
+        def __init__(self, *a, **kw):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            pass
+
+        def post(self, *a, **kw):
+            # 模型思考耗尽: content 为空
+            return FakeResp({"choices": [{"message": {"content": ""}}]})
+
+    monkeypatch.setattr(httpx, "Client", FakeClient)
+    agent = _make_bare_agent()
+    reply, _history, images = agent.chat("分析茅台", session_id="test")
+    assert reply.strip(), "空 content 不应返回空串(会触发飞书 230001)"
+    assert "没能生成有效回复" in reply
+
+
+def test_chat_retries_transient_404(monkeypatch):
+    """网关间歇性 404 应重试,重试后成功返回。
+
+    8-24 事故: 网关偶发 404 不重试,用户问"继续"只收到错误提示。
+    """
+    import httpx
+
+    calls = {"n": 0}
+
+    class FakeResp:
+        def __init__(self, status, data=None):
+            self.status_code = status
+            self._data = data
+
+        def json(self):
+            return self._data
+
+    class FakeClient:
+        def __init__(self, *a, **kw):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            pass
+
+        def post(self, *a, **kw):
+            calls["n"] += 1
+            if calls["n"] <= 2:
+                return FakeResp(404)
+            return FakeResp(200, {"choices": [{"message": {"content": "回答正常"}}]})
+
+    monkeypatch.setattr(httpx, "Client", FakeClient)
+    monkeypatch.setattr(feishu_bot.time, "sleep", lambda s: None)  # 跳过退避等待
+    agent = _make_bare_agent()
+    reply, _history, _images = agent.chat("继续", session_id="test")
+    assert reply == "回答正常", f"前 2 次 404 后第 3 次应成功,实际: {reply}"
+    assert calls["n"] == 3
+
+
+def test_chat_404_all_retries_fail(monkeypatch):
+    """持续 404 时应返回错误提示(不崩),共尝试 3 次。"""
+    import httpx
+
+    calls = {"n": 0}
+
+    class FakeResp:
+        def __init__(self, status):
+            self.status_code = status
+
+    class FakeClient:
+        def __init__(self, *a, **kw):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            pass
+
+        def post(self, *a, **kw):
+            calls["n"] += 1
+            return FakeResp(404)
+
+    monkeypatch.setattr(httpx, "Client", FakeClient)
+    monkeypatch.setattr(feishu_bot.time, "sleep", lambda s: None)
+    agent = _make_bare_agent()
+    reply, _history, _images = agent.chat("继续", session_id="test")
+    assert "404" in reply
+    assert calls["n"] == 3, f"应重试 3 次,实际 {calls['n']}"
