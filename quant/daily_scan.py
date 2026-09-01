@@ -13,6 +13,7 @@
   python daily_scan.py --schedule "09:25"    # 纯 Python 定时，每天 09:25 自动跑
   python daily_scan.py --limit 1000          # 仅抓前1000只（调试加速）
   python daily_scan.py --top 10              # 对玉姐 Top 10 跑策略信号
+  python daily_scan.py --after-close         # 盘后复盘模式(15:05 收盘后跑)
 """
 
 import argparse
@@ -385,14 +386,158 @@ def save_report(stats, cands, news, body, now):
     return fp
 
 
+def build_afterclose_prompt(stats, picks, sector_lines, news, date_str):
+    """盘后复盘 prompt:收盘全景 + 板块资金流 + 玉姐复盘 + 新闻。"""
+    lines_p = []
+    for p in picks[:10]:
+        hits = "、".join(p.get("hits", [])[:3]) if p.get("hits") else "-"
+        lines_p.append(f"- {p['code']} {p['name']} 玉姐 {p['score']} 分(命中:{hits})→ 今日 {p['pct']:+.2f}%")
+    lines_n = []
+    for i, n in enumerate(news[:25], 1):
+        lines_n.append(f"{i}. [{n['time']} {n['source']}] {n['summary'] or n['title']}")
+    return f"""你是 A 股量化分析师，请基于下面 {date_str} 收盘数据与当日新闻，输出一份盘后复盘报告（Markdown 中文）。
+
+## 一、收盘全景
+- 总数 {stats["total"]} 只：上涨 {stats["up"]}，下跌 {stats["down"]},平 {stats["flat"]}
+- 涨停 {stats["limit_up"]} 只，跌停 {stats["limit_down"]} 只
+- 全市场成交额约 {stats["total_amount_yi"]:.0f} 亿
+
+## 二、板块主力资金流(全日)
+{chr(10).join(sector_lines)}
+
+## 三、早盘玉姐精选复盘(早盘推荐 vs 今日实际表现)
+{chr(10).join(lines_p) if lines_p else "(今日无早盘推荐)"}
+
+## 四、当日新闻快讯（{len(news)} 条）
+{chr(10).join(lines_n) if lines_n else "（无新闻）"}
+
+请按以下结构输出：
+1. **今日市场总结**：涨跌分布与成交活跃度定性，2-3 句
+2. **板块主线复盘**：资金流向揭示的热点与退潮方向
+3. **早盘精选复盘**：点评玉姐候选整体表现，哪些验证/落空
+4. **明日关注**：结合新闻与资金面给出观察要点
+5. **风险提示**
+
+严格基于给出数据，不要编造。"""
+
+
+def save_afterclose_report(stats, picks, sector_lines, news, body, now):
+    REPORTS.mkdir(exist_ok=True)
+    fp = REPORTS / f"afterclose_{now.strftime('%Y%m%d')}.md"
+    lines = [
+        f"# 盘后复盘日报 {now:%Y-%m-%d %H:%M}",
+        "\n## 一、收盘全景\n",
+        f"- 总数 **{stats['total']}** 只：上涨 {stats['up']} / 下跌 {stats['down']} / 平 {stats['flat']}",
+        f"- 涨停 **{stats['limit_up']}** 只，跌停 **{stats['limit_down']}** 只",
+        f"- 全市场成交额约 **{stats['total_amount_yi']:.0f} 亿**\n",
+        "\n## 二、板块主力资金流(全日)\n",
+        *[f"- {s}" for s in sector_lines],
+        "\n## 三、早盘玉姐精选复盘\n",
+    ]
+    for p in picks[:10]:
+        hits = "、".join(p.get("hits", [])[:3]) if p.get("hits") else "-"
+        lines.append(f"- {p['code']} {p['name']} 玉姐{p['score']}分(命中:{hits})→ 今日 **{p['pct']:+.2f}%**")
+    lines.append(f"\n## 四、当日新闻快讯（{len(news)} 条）\n")
+    for i, n in enumerate(news[:30], 1):
+        lines.append(f"{i}. **{n['title']}** `[{n['time']} {n['source']}]`")
+    lines.append("\n---\n\n## 五、AI 盘后复盘\n")
+    lines.append(body)
+    fp.write_text("\n".join(lines), encoding="utf-8")
+    return fp
+
+
+def run_after_close(limit=0, top=10, news_limit=20):
+    """盘后复盘:收盘全景 + 板块资金流 + 早盘玉姐精选复盘 + 新闻 + AI 解读。"""
+    import re
+
+    now = datetime.now()
+    print(f"== 盘后复盘扫描 {now:%Y-%m-%d %H:%M} ==")
+    rows = fetch_market_all(limit=limit)
+    if not rows:
+        print("行情抓取失败")
+        return
+    stats = market_stats(rows)
+    print(
+        f"抓取 {stats['total']} 只: 涨{stats['up']}/跌{stats['down']}/平{stats['flat']} "
+        f"涨停{stats['limit_up']}/跌停{stats['limit_down']} 成交{stats['total_amount_yi']:.0f}亿"
+    )
+
+    # 板块资金流(全日)
+    sector_lines = []
+    try:
+        from stock_market_extras import fetch_sector_flow
+
+        for label, st in (("行业板块", "industry"), ("概念板块", "concept")):
+            flow = fetch_sector_flow(st, top_n=5)
+            items = []
+            for s in flow:
+                if not isinstance(s, dict) or "error" in s:
+                    continue
+                net = s.get("main_net") or 0
+                items.append(f"{s.get('name')} 净流入{net / 1e8:.1f}亿({s.get('pct') or 0:+.2f}%)")
+            if items:
+                sector_lines.append(f"{label}Top5: " + " | ".join(items))
+    except Exception as e:
+        print(f"板块资金流抓取失败: {e}")
+    if not sector_lines:
+        sector_lines = ["(板块资金流抓取失败)"]
+
+    # 玉姐精选复盘:早盘推荐 vs 收盘实际涨跌
+    by_code = {r.get("code6", ""): r for r in rows}
+    picks = []
+    for c in top_candidates_from_yujie(top_n=max(top, 10)):
+        r = by_code.get(c["code"])
+        pct = float(r.get("changepercent") or 0) if r else 0.0
+        picks.append({**c, "pct": pct})
+    up_n = sum(1 for p in picks if p["pct"] > 0)
+    print(f"玉姐候选 {len(picks)} 只, 收盘上涨 {up_n} 只")
+
+    print("抓取当日新闻...")
+    news = fetch_news(news_limit)
+    print(f"新闻 {len(news)} 条")
+
+    print("AI 综合分析...")
+    from ai_decider import AIDecider
+
+    decider = AIDecider()
+    body = decider.generate(
+        build_afterclose_prompt(stats, picks, sector_lines, news, now.strftime("%Y-%m-%d")),
+        timeout=180,
+    )
+    if body.startswith(("API限流", "API错误", "调用失败")):
+        print("AI 调用失败:", body)
+        body = f"（AI 调用失败：{body}）"
+    else:
+        body = re.split(r"\n\s*(?:Thinking\s*Process|推理过程)[:：]", body)[0].strip()
+
+    save_afterclose_report(stats, picks, sector_lines, news, body, now)
+    print(f"\n盘后复盘已生成: {REPORTS / ('afterclose_' + now.strftime('%Y%m%d') + '.md')}")
+
+    # 飞书推送复盘卡片(失败仅打日志,不影响主流程)
+    try:
+        from feishu import send_afterclose_to_feishu
+
+        ok = send_afterclose_to_feishu(stats, picks, sector_lines, body, now=now)
+        if ok:
+            print("飞书推送成功")
+    except Exception as e:
+        print(f"飞书推送失败: {e}")
+
+    print("\n" + body[:1500])
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--limit", type=int, default=0, help="仅抓前N只(调试)")
     ap.add_argument("--top", type=int, default=5, help="对top N候选跑策略信号")
     ap.add_argument("--news-limit", type=int, default=20, help="每源新闻条数")
     ap.add_argument("--schedule", default="", metavar="HH:MM", help="纯Python定时,每天到点自动跑")
+    ap.add_argument("--after-close", action="store_true", help="盘后复盘模式(收盘全景+板块资金流+玉姐复盘)")
     args = ap.parse_args()
 
+    if args.after_close:
+        run_after_close(args.limit, 10, args.news_limit)
+        return
     if args.schedule:
         hh, mm = args.schedule.split(":")
         target = int(hh) * 3600 + int(mm) * 60

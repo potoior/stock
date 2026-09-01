@@ -295,6 +295,89 @@ def build_test_card():
     }
 
 
+def build_afterclose_card(stats, picks, sector_lines, ai_summary, now=None):
+    """构造盘后复盘卡片。
+
+    Args:
+        stats: dict, market_stats 返回
+        picks: list, [{code,name,score,hits,rank,pct}, ...] 早盘玉姐精选 + 今日实际涨跌
+        sector_lines: list[str], 板块资金流行文本
+        ai_summary: str, AI 综合分析全文
+        now: datetime
+    """
+    if now is None:
+        now = datetime.now()
+    date_str = now.strftime("%Y-%m-%d %H:%M")
+
+    up = stats.get("up", 0)
+    dn = stats.get("down", 0)
+    if up > dn * 1.5:
+        mood, tmpl = "偏多(普涨)", "red"
+    elif dn > up * 1.5:
+        mood, tmpl = "偏空(普跌)", "green"
+    else:
+        mood, tmpl = "震荡", "blue"
+
+    pick_lines = []
+    for p in picks[:5]:
+        hits = "、".join(p.get("hits", [])[:2]) if p.get("hits") else "-"
+        pick_lines.append(
+            f"**{p['code']} {p['name']}** 玉姐{p['score']}分(命中:{hits})→ 今日 **{p['pct']:+.2f}%**"
+        )
+    pick_block = "\n".join(pick_lines) if pick_lines else "(无早盘推荐)"
+    sector_block = "\n".join(sector_lines) if sector_lines else "(板块资金流抓取失败)"
+
+    ai_text = (ai_summary or "").strip()
+    if len(ai_text) > 800:
+        ai_text = ai_text[:800] + "..."
+
+    return {
+        "config": {"wide_screen": True},
+        "header": {
+            "title": {"tag": "plain_text", "content": f"📊 A股盘后复盘 {date_str}"},
+            "template": tmpl,
+        },
+        "elements": [
+            {
+                "tag": "div",
+                "text": {
+                    "tag": "lark_md",
+                    "content": (
+                        f"**市场情绪: {mood}**\n"
+                        f"总数 {stats.get('total',0)} | 涨 {up} / 跌 {dn} / 平 {stats.get('flat',0)}\n"
+                        f"涨停 {stats.get('limit_up',0)} | 跌停 {stats.get('limit_down',0)} | "
+                        f"成交额 {stats.get('total_amount_yi',0):.0f} 亿"
+                    ),
+                },
+            },
+            {"tag": "hr"},
+            {"tag": "div", "text": {"tag": "lark_md", "content": "**💰 板块资金流(全日)**"}},
+            {"tag": "div", "text": {"tag": "lark_md", "content": sector_block}},
+            {"tag": "hr"},
+            {"tag": "div", "text": {"tag": "lark_md", "content": f"**🎯 早盘玉姐精选复盘 Top {len(picks[:5])}**"}},
+            {"tag": "div", "text": {"tag": "lark_md", "content": pick_block}},
+            {"tag": "hr"},
+            {"tag": "div", "text": {"tag": "lark_md", "content": "**🤖 AI 盘后复盘**"}},
+            {"tag": "div", "text": {"tag": "lark_md", "content": ai_text or "(AI 调用失败)"}},
+        ],
+    }
+
+
+def send_afterclose_to_feishu(stats, picks, sector_lines, ai_summary, now=None):
+    """供 daily_scan 盘后复盘调用,推送卡片。失败仅打日志,不抛异常。"""
+    try:
+        bot = FeishuBot()
+        if not bot.enabled:
+            print("feishu: 未启用,跳过推送")
+            return False
+        card = build_afterclose_card(stats, picks, sector_lines, ai_summary, now=now)
+        resp = bot.send_card(card)
+        return bool(resp and resp.get("code") == 0)
+    except Exception as e:
+        print(f"feishu: 推送失败 {e}")
+        return False
+
+
 # -------- 主流程接入 --------
 
 

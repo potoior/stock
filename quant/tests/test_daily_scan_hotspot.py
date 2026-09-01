@@ -84,3 +84,68 @@ def test_scan_hotspot_default_params():
     sig = inspect.signature(daily_scan.scan_hotspot_stocks)
     assert sig.parameters["top_sectors"].default == 5
     assert sig.parameters["top_stocks_per_sector"].default == 5
+
+
+# ---------------- 盘后复盘测试 ----------------
+
+
+class TestAfterClose:
+    """run_after_close / build_afterclose_prompt / 卡片构造测试(mock,不联网)。"""
+
+    def test_build_afterclose_prompt(self):
+        import daily_scan
+
+        stats = {"total": 5000, "up": 2500, "down": 2000, "flat": 500,
+                 "limit_up": 40, "limit_down": 10, "total_amount_yi": 15000.0}
+        picks = [{"code": "600519", "name": "贵州茅台", "score": 8, "hits": ["多头", "放量"], "rank": 1, "pct": 2.5}]
+        sectors = ["行业板块Top5: 白酒 | 银行"]
+        out = daily_scan.build_afterclose_prompt(stats, picks, sectors, [], "2026-09-01")
+        assert "收盘全景" in out
+        assert "玉姐" in out
+        assert "+2.50%" in out
+        assert "复盘" in out
+
+    def test_build_afterclose_prompt_empty(self):
+        import daily_scan
+
+        stats = {"total": 0, "up": 0, "down": 0, "flat": 0, "limit_up": 0,
+                 "limit_down": 0, "total_amount_yi": 0.0}
+        out = daily_scan.build_afterclose_prompt(stats, [], ["(无)"], [], "2026-09-01")
+        assert "今日无早盘推荐" in out
+
+    def test_build_afterclose_card(self):
+        import feishu
+
+        stats = {"total": 5000, "up": 2500, "down": 2000, "flat": 500,
+                 "limit_up": 40, "limit_down": 10, "total_amount_yi": 15000.0}
+        picks = [{"code": "600519", "name": "贵州茅台", "score": 8, "hits": ["多头"],
+                  "rank": 1, "pct": 2.5}]
+        card = feishu.build_afterclose_card(stats, picks, ["行业Top5: 白酒"], "AI 总结" * 500)
+        assert card["header"]["title"]["content"].startswith("📊 A股盘后复盘")
+        # AI 摘要超长截断
+        ai_div = [e for e in card["elements"] if isinstance(e.get("text"), dict)]
+        assert any("..." in d["text"]["content"] for d in ai_div if len(d["text"]["content"]) > 800)
+        assert any("贵州茅台" in d["text"]["content"] for d in ai_div)
+
+    def test_save_afterclose_report(self, tmp_path):
+        import daily_scan
+
+        stats = {"total": 5000, "up": 2500, "down": 2000, "flat": 500,
+                 "limit_up": 40, "limit_down": 10, "total_amount_yi": 15000.0}
+        picks = [{"code": "600519", "name": "贵州茅台", "score": 8, "hits": ["多头"],
+                  "rank": 1, "pct": 2.5}]
+        old = daily_scan.REPORTS
+        daily_scan.REPORTS = tmp_path
+        try:
+            from datetime import datetime
+
+            fp = daily_scan.save_afterclose_report(
+                stats, picks, ["行业Top5: 白酒"], [], "AI 复盘正文", datetime.now()
+            )
+            content = fp.read_text(encoding="utf-8")
+        finally:
+            daily_scan.REPORTS = old
+        assert fp.exists()
+        assert "盘后复盘日报" in content
+        assert "+2.50%" in content
+        assert "AI 复盘正文" in content
