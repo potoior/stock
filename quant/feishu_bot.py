@@ -783,10 +783,7 @@ def handler_watchlist(action: str, codes: list = None, session_id: str = "cli") 
             return handler_analyze(items[0]["code"])
         # 多只:compare_stocks 最多 8 只
         codes = [it["code"] for it in items[:8]]
-        if len(items) > 8:
-            extra = f"\n\n(自选共 {len(items)} 只,仅分析前 8。看其余: '分析自选 9-16')"
-        else:
-            extra = ""
+        extra = f"\n\n(自选共 {len(items)} 只,仅分析前 8。看其余: '分析自选 9-16')" if len(items) > 8 else ""
         return handler_compare_stocks(codes) + extra
 
     if not codes:
@@ -809,10 +806,7 @@ def handler_watchlist(action: str, codes: list = None, session_id: str = "cli") 
             else:
                 continue
         # 拿名称:用户输入是名称就用它,是代码就用空名(后续可拿实时名补)
-        if c.isdigit():
-            name = ""
-        else:
-            name = c
+        name = "" if c.isdigit() else c
         resolved.append((code, name))
 
     if not resolved:
@@ -1299,7 +1293,7 @@ def _cross_ref_search(strategy_id: str, lib: dict) -> str:
                 sid = (st.get("id") or "").lower()
                 eid = (st.get("engine_id") or "").lower()
                 # 精确匹配 id 或 engine_id,或者 id 以 strategy_id 为前缀(如 macd_8 匹配 macd)
-                if target == sid or target == eid or sid.startswith(target + "_") or eid == target:
+                if target in (sid, eid) or sid.startswith(target + "_") or eid == target:
                     hits.append({
                         "source_id": src.get("id", ""),
                         "source_name": src.get("name", ""),
@@ -1500,7 +1494,7 @@ def _lookup_library_strategy(strategy_id: str) -> list[dict]:
             for st in cat.get("strategies", []):
                 sid = (st.get("id") or "").lower()
                 eid = (st.get("engine_id") or "").lower()
-                if target == sid or target == eid or sid.startswith(target + "_") or eid == target:
+                if target in (sid, eid) or sid.startswith(target + "_") or eid == target:
                     hits.append({
                         "source_id": src.get("id", ""),
                         "source_name": src.get("name", ""),

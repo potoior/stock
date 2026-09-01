@@ -61,9 +61,7 @@ def is_trading_day(now=None) -> bool:
     # 检查节假日表是否覆盖当前年份(避免跨年时未更新导致误判)
     if str(now.year) not in {s[:4] for s in HOLIDAYS}:
         log.warning("HOLIDAYS 未覆盖 %d 年,请更新 daily_scan.py 的 HOLIDAYS_%d", now.year, now.year)
-    if today in HOLIDAYS:
-        return False
-    return True
+    return today not in HOLIDAYS
 
 
 def fetch_market_page(page=1, num=100, sort="amount", asc=0):

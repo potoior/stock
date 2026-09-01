@@ -346,10 +346,7 @@ def gen_yujie_chart(code: str, score: float, hits: list, detail: dict) -> io.Byt
         )
 
         # 右上角命中规则文本框
-        if hits:
-            hit_text = "命中规则:\n" + "\n".join(f"[+] {h}" for h in hits)
-        else:
-            hit_text = "未命中任何规则"
+        hit_text = "命中规则:\n" + "\n".join(f"[+] {h}" for h in hits) if hits else "未命中任何规则"
         ax.text(
             0.98, 0.02, hit_text, transform=ax.transAxes,
             fontsize=8, va="bottom", ha="right",
@@ -442,7 +439,7 @@ def gen_backtest_chart(strategy_id: str) -> io.BytesIO | None:
 
         h = target.get("horizons", {})
         baseline = rep.get("baseline", {})
-        horizons = sorted([int(x) for x in h.keys()])
+        horizons = sorted([int(x) for x in h])
         rets = [h[str(horizon)].get("mean_ret", 0) * 100 for horizon in horizons]
         bases = [baseline.get(str(horizon), 0) * 100 for horizon in horizons]
         excess = [r - b for r, b in zip(rets, bases, strict=False)]
