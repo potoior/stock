@@ -12,6 +12,7 @@
 import io
 import json
 import logging
+import threading
 from collections import OrderedDict
 from datetime import datetime
 from pathlib import Path
@@ -34,15 +35,17 @@ _FONT_INIT = False
 # gen_kline_chart 2-3 秒,同股同日重复分析时复用省 70% 时间
 _IMG_CACHE: OrderedDict[tuple[str, str, str], bytes] = OrderedDict()
 _IMG_CACHE_MAX = 30  # 最多缓存 30 张图,真 LRU(命中时 move_to_end)
+_IMG_CACHE_LOCK = threading.Lock()  # 飞书 Bot 多线程处理消息,需保护 OrderedDict
 
 
 def _img_cache_get(chart_type: str, code: str) -> bytes | None:
     """读缓存,命中时 move_to_end 实现 LRU(最近访问的在尾部,淘汰从头部)。"""
     today = datetime.now().strftime("%Y%m%d")
     key = (chart_type, code, today)
-    val = _IMG_CACHE.get(key)
-    if val is not None:
-        _IMG_CACHE.move_to_end(key)  # 命中时移到尾部,LRU
+    with _IMG_CACHE_LOCK:
+        val = _IMG_CACHE.get(key)
+        if val is not None:
+            _IMG_CACHE.move_to_end(key)  # 命中时移到尾部,LRU
     return val
 
 
@@ -50,15 +53,16 @@ def _img_cache_put(chart_type: str, code: str, png: bytes) -> None:
     """存当日缓存,超限时从头部淘汰最久未访问的(真 LRU)。"""
     today = datetime.now().strftime("%Y%m%d")
     key = (chart_type, code, today)
-    _IMG_CACHE[key] = png
-    _IMG_CACHE.move_to_end(key)  # 新写入也放尾部
-    # 超限:先清跨日旧数据,再淘汰头部最久未访问的
-    if len(_IMG_CACHE) > _IMG_CACHE_MAX:
-        for k in list(_IMG_CACHE.keys()):
-            if k[2] != today:
-                del _IMG_CACHE[k]
-    while len(_IMG_CACHE) > _IMG_CACHE_MAX:
-        _IMG_CACHE.popitem(last=False)  # 头部 = 最久未访问
+    with _IMG_CACHE_LOCK:
+        _IMG_CACHE[key] = png
+        _IMG_CACHE.move_to_end(key)  # 新写入也放尾部
+        # 超限:先清跨日旧数据,再淘汰头部最久未访问的
+        if len(_IMG_CACHE) > _IMG_CACHE_MAX:
+            for k in list(_IMG_CACHE.keys()):
+                if k[2] != today:
+                    del _IMG_CACHE[k]
+        while len(_IMG_CACHE) > _IMG_CACHE_MAX:
+            _IMG_CACHE.popitem(last=False)  # 头部 = 最久未访问
 
 
 def _init_font():

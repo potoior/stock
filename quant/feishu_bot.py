@@ -253,6 +253,7 @@ HISTORY_EXPIRE_DAYS = 7
 # 配合 _save_history 写时同步更新缓存,高频对话省 sqlite 读
 _HISTORY_CACHE: OrderedDict[str, list] = OrderedDict()
 _HISTORY_CACHE_MAX = 32
+_HISTORY_CACHE_LOCK = threading.Lock()  # 不同 session 并发访问需保护 OrderedDict
 
 
 def _load_history(session_id: str) -> list:
@@ -261,10 +262,11 @@ def _load_history(session_id: str) -> list:
     命中缓存时跳过 sqlite 读(高频对话加速),未命中读 sqlite 并入缓存。
     """
     # 1. 先查 LRU 缓存
-    cached = _HISTORY_CACHE.get(session_id)
-    if cached is not None:
-        _HISTORY_CACHE.move_to_end(session_id)
-        return cached
+    with _HISTORY_CACHE_LOCK:
+        cached = _HISTORY_CACHE.get(session_id)
+        if cached is not None:
+            _HISTORY_CACHE.move_to_end(session_id)
+            return cached
     # 2. 未命中,读 sqlite
     try:
         conn = _history_db()
@@ -288,15 +290,17 @@ def _load_history(session_id: str) -> list:
 
 def _put_history_cache(session_id: str, history: list) -> None:
     """写入 LRU 缓存(超限时淘汰最久未访问的)。"""
-    _HISTORY_CACHE[session_id] = history
-    _HISTORY_CACHE.move_to_end(session_id)
-    while len(_HISTORY_CACHE) > _HISTORY_CACHE_MAX:
-        _HISTORY_CACHE.popitem(last=False)
+    with _HISTORY_CACHE_LOCK:
+        _HISTORY_CACHE[session_id] = history
+        _HISTORY_CACHE.move_to_end(session_id)
+        while len(_HISTORY_CACHE) > _HISTORY_CACHE_MAX:
+            _HISTORY_CACHE.popitem(last=False)
 
 
 def _invalidate_history_cache(session_id: str) -> None:
     """清除某 session 的缓存(重置/清空时调用)。"""
-    _HISTORY_CACHE.pop(session_id, None)
+    with _HISTORY_CACHE_LOCK:
+        _HISTORY_CACHE.pop(session_id, None)
 
 
 # 历史里 assistant 消息裁剪阈值(超长截断到摘要,避免回测/策略大全等长回复撑爆历史)

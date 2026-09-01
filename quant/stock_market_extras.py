@@ -10,6 +10,7 @@
 
 import json
 import logging
+import threading
 import urllib.request
 
 log = logging.getLogger("stock_market_extras")
@@ -346,37 +347,48 @@ MARKET_FS = "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23,m:0+t:81+s:2048"
 _MARKET_SNAPSHOT: list[dict] | None = None
 _MARKET_SNAPSHOT_TS: float = 0.0
 _MARKET_SNAPSHOT_TTL = 300  # 5 分钟
+_MARKET_SNAPSHOT_LOCK = threading.Lock()  # 防多线程并发重复拉取 60 页(18s)
 
 
 def _get_market_snapshot() -> list[dict]:
-    """获取全市场行情快照(5 分钟缓存),返回所有 A 股的 PE/PB/市值原始数据。"""
+    """获取全市场行情快照(5 分钟缓存),返回所有 A 股的 PE/PB/市值原始数据。
+
+    Double-checked locking: 先无锁检查缓存(快),过期时加锁再检查一次(防
+    多线程都进入拉取临界区,重复拉 60 页浪费 18s 网络)。
+    """
     global _MARKET_SNAPSHOT, _MARKET_SNAPSHOT_TS
     import time
     now = time.time()
+    # 第一次检查(无锁,快路径)
     if _MARKET_SNAPSHOT is not None and now - _MARKET_SNAPSHOT_TS < _MARKET_SNAPSHOT_TTL:
         return _MARKET_SNAPSHOT
-    # 重新拉取
-    out: list[dict] = []
-    for pn in range(1, 61):  # 最多 60 页 × 20 = 1200 只(覆盖主要 A 股)
-        url = (
-            f"http://push2.eastmoney.com/api/qt/clist/get?pn={pn}&pz=20&po=1&np=1"
-            f"&fltt=2&invt=2&fid=f3&fs={MARKET_FS}"
-            f"&fields=f12,f14,f2,f3,f162,f167,f116"
-        )
-        data = None
-        for _ in range(2):
-            data = _get_json(url, referer="https://data.eastmoney.com/")
-            if data:
+    # 加锁后再次检查(防 thundering herd)
+    with _MARKET_SNAPSHOT_LOCK:
+        now = time.time()
+        if _MARKET_SNAPSHOT is not None and now - _MARKET_SNAPSHOT_TS < _MARKET_SNAPSHOT_TTL:
+            return _MARKET_SNAPSHOT
+        # 重新拉取
+        out: list[dict] = []
+        for pn in range(1, 61):  # 最多 60 页 × 20 = 1200 只(覆盖主要 A 股)
+            url = (
+                f"http://push2.eastmoney.com/api/qt/clist/get?pn={pn}&pz=20&po=1&np=1"
+                f"&fltt=2&invt=2&fid=f3&fs={MARKET_FS}"
+                f"&fields=f12,f14,f2,f3,f162,f167,f116"
+            )
+            data = None
+            for _ in range(2):
+                data = _get_json(url, referer="https://data.eastmoney.com/")
+                if data:
+                    break
+                time.sleep(1.0)
+            if not data or not data.get("data") or not data["data"].get("diff"):
                 break
-            time.sleep(1.0)
-        if not data or not data.get("data") or not data["data"].get("diff"):
-            break
-        for r in data["data"]["diff"]:
-            out.append(r)
-        time.sleep(0.3)
-    _MARKET_SNAPSHOT = out
-    _MARKET_SNAPSHOT_TS = now
-    return out
+            for r in data["data"]["diff"]:
+                out.append(r)
+            time.sleep(0.3)
+        _MARKET_SNAPSHOT = out
+        _MARKET_SNAPSHOT_TS = now
+        return out
 
 
 def screen_stocks(

@@ -367,3 +367,63 @@ def test_combo_backtest_no_on2_index(monkeypatch):
     for sid in ["macd", "kdj", "boll", "dmi", "psy"]:
         assert sid in r["per_strategy"]
         assert r["per_strategy"][sid]["signal_count"] >= 0
+
+
+# ---------------- 第六批: 线程安全测试 ----------------
+
+
+def test_img_cache_thread_safe():
+    """_IMG_CACHE 多线程并发读写不应抛 RuntimeError(OrderedDict mutated)。
+    修复前: 无锁保护,并发 move_to_end + popitem 会触发 RuntimeError。
+    """
+    import threading
+
+    import feishu_image
+
+    feishu_image._IMG_CACHE.clear()
+    errors = []
+
+    def worker(idx):
+        try:
+            for i in range(50):
+                feishu_image._img_cache_put("kline", f"60000{i % 5}", b"x" * 100)
+                feishu_image._img_cache_get("kline", f"60000{i % 5}")
+        except Exception as e:
+            errors.append(e)
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert not errors, f"并发访问 _IMG_CACHE 抛异常: {errors[:3]}"
+    # 缓存不应超过 _IMG_CACHE_MAX
+    assert len(feishu_image._IMG_CACHE) <= feishu_image._IMG_CACHE_MAX
+
+
+def test_history_cache_thread_safe():
+    """_HISTORY_CACHE 多线程并发读写不应抛 RuntimeError。
+    修复前: 无锁保护,不同 session 并发访问会触发 RuntimeError。
+    """
+    import threading
+
+    import feishu_bot
+
+    feishu_bot._HISTORY_CACHE.clear()
+    errors = []
+
+    def worker(sid):
+        try:
+            for i in range(30):
+                feishu_bot._put_history_cache(f"sess{sid}", [{"role": "u", "content": str(i)}])
+                feishu_bot._load_history(f"sess{sid}")
+        except Exception as e:
+            errors.append(e)
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert not errors, f"并发访问 _HISTORY_CACHE 抛异常: {errors[:3]}"
+    assert len(feishu_bot._HISTORY_CACHE) <= feishu_bot._HISTORY_CACHE_MAX
