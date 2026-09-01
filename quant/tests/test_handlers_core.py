@@ -68,27 +68,28 @@ def test_handler_yujie_with_data(tmp_path, monkeypatch):
 
 
 # ============ handler_portfolio ============
+# 已升级为完整持仓管理(buy/sell/list/clear),详见 test_portfolio_tool.py
 
 
-def test_handler_portfolio_no_db(tmp_path, monkeypatch):
-    """无持仓 db 应返回提示。"""
-    monkeypatch.setattr(feishu_bot, "AGENT_DB", tmp_path / "nonexistent.db")
-    out = feishu_bot.handler_portfolio()
-    assert "暂无" in out or "📭" in out
+def test_handler_portfolio_empty(tmp_path, monkeypatch):
+    """无持仓应返回提示。"""
+    monkeypatch.setattr(feishu_bot, "PORTFOLIO_DB", tmp_path / "portfolio.db")
+    out = feishu_bot.handler_portfolio("list", session_id="s1")
+    assert "无持仓" in out or "📭" in out
 
 
 def test_handler_portfolio_with_data(tmp_path, monkeypatch):
-    """有持仓数据应返回持仓列表。"""
-    db = tmp_path / "agent_data.db"
-    conn = sqlite3.connect(str(db))
-    conn.execute("""CREATE TABLE positions(
-        code TEXT, qty INTEGER, cost REAL, buy_date TEXT)""")
-    conn.execute("INSERT INTO positions VALUES(?,?,?,?)",
-                 ("600519", 100, 1500.0, "20260101"))
-    conn.commit()
-    conn.close()
-    monkeypatch.setattr(feishu_bot, "AGENT_DB", db)
-    out = feishu_bot.handler_portfolio()
+    """有持仓数据应返回持仓列表(实时价 mock)。"""
+    db = tmp_path / "portfolio.db"
+    monkeypatch.setattr(feishu_bot, "PORTFOLIO_DB", db)
+    import strategy_engine as se
+
+    monkeypatch.setattr(
+        se, "fetch_realtime",
+        lambda codes: [{"code": "600519", "name": "贵州茅台", "price": 1500.0, "pct": 0.5}],
+    )
+    feishu_bot.portfolio_buy("s1", "600519", "贵州茅台", 100, 1400.0, "20260101")
+    out = feishu_bot.handler_portfolio("list", session_id="s1")
     assert "600519" in out
 
 

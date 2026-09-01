@@ -59,8 +59,25 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "get_portfolio",
-            "description": "查询当前模拟盘持仓:股票代码、数量、成本、买入日期。用户问'持仓/仓位/portfolio/股票池'时调用。",
-            "parameters": {"type": "object", "properties": {}}
+            "description": (
+                "模拟持仓管理(按用户隔离)。用户表达'买入/建仓/加仓/卖出/清仓/持仓/仓位'意图时调用。"
+                "buy=记录买入(需要code和qty,price可选默认实时价,已有持仓自动加权平均成本);"
+                "sell=卖出(qty不传=全部卖出);list=查看持仓和实时盈亏;clear=清空所有持仓。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["buy", "sell", "list", "clear"],
+                        "description": "操作类型"
+                    },
+                    "code": {"type": "string", "description": "6位代码或中文简称"},
+                    "qty": {"type": "number", "description": "股数(buy必填;sell可选,默认全部)"},
+                    "price": {"type": "number", "description": "买入价格(buy可选,默认实时价)"}
+                },
+                "required": ["action"]
+            }
         }
     },
     {
@@ -518,7 +535,7 @@ SYSTEM_PROMPT = """你是 A 股量化分析助手(飞书群聊 Bot),有 32 个�
   · 回复时逐条标注信号来源策略名,如"MACD: 零下空头",不要只给汇总数字
 - get_market_status(): 今日市场概况(涨跌停/成交额)
 - get_yujie_picks(min_score?, hit_rule?): 今日玉姐精选(盘前09:25结果,默认Top10+图)
-- get_portfolio(): 模拟盘持仓
+- get_portfolio(action, code?, qty?, price?): 模拟持仓管理,买入(加权平均成本)/卖出/查持仓实时盈亏/清仓
 - get_finance(code): 财务数据(PE/PB/市值/ROE/毛利率/EPS/营收/净利润)
 - compare_stocks(codes): 多股对比(最多8只),PE/PB/ROE对比表
 - analyze_sector(sector): 板块分析(白酒/银行/医药/新能源/半导体/消费/军工/地产/电力/有色)
@@ -593,6 +610,7 @@ SYSTEM_PROMPT = """你是 A 股量化分析助手(飞书群聊 Bot),有 32 个�
 【操作类授权】
 - 用户明确意图(如"关闭X策略"、"BOLL周期改成30")才调用
 - 模糊请求(如"看看策略")只调查询类
+- 买入/卖出/清仓是模拟记账,用户明确表达(如"买入茅台100股")即调用 get_portfolio
 
 【意图判别(重要,避免答非所问)】
 - 查文档: "策略有哪些/是什么/详情/在哪些书里" → get_strategy_library

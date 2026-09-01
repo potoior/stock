@@ -8,7 +8,7 @@
   analyze_stock(code)  个股技术面分析(45策略信号)
   get_market_status()  今日市场概况
   get_yujie_picks()    今日玉姐精选 Top10
-  get_portfolio()      当前模拟盘持仓
+  get_portfolio()      模拟持仓管理(买入/卖出/持仓/清仓)
 
 启动:
   python feishu_bot.py                  前台长连接运行
@@ -516,6 +516,109 @@ def watchlist_group_remove(session_id: str, code: str) -> str:
     return watchlist_remove(group_key, code)
 
 
+# ============ 模拟持仓 ============
+
+PORTFOLIO_DB = ENGINE_HOME / "portfolio.db"
+
+
+def _portfolio_db():
+    """模拟持仓 sqlite,按 session_id(用户)隔离。"""
+    conn = sqlite3.connect(str(PORTFOLIO_DB), timeout=10)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=10000")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS positions (
+            session_id TEXT,
+            code TEXT,
+            name TEXT,
+            qty REAL,
+            cost REAL,
+            buy_date TEXT,
+            ts INTEGER,
+            PRIMARY KEY (session_id, code)
+        )
+    """)
+    conn.commit()
+    return conn
+
+
+def portfolio_buy(session_id: str, code: str, name: str, qty: float, cost: float, buy_date: str = "") -> str:
+    """买入(建仓/加仓)。已有持仓则加权平均成本。"""
+    conn = _portfolio_db()
+    row = conn.execute(
+        "SELECT qty, cost FROM positions WHERE session_id=? AND code=?",
+        (session_id, code),
+    ).fetchone()
+    if row:
+        old_qty, old_cost = row
+        new_qty = old_qty + qty
+        new_cost = (old_qty * old_cost + qty * cost) / new_qty
+        conn.execute(
+            "UPDATE positions SET qty=?, cost=?, buy_date=? WHERE session_id=? AND code=?",
+            (new_qty, new_cost, buy_date, session_id, code),
+        )
+    else:
+        conn.execute(
+            "INSERT INTO positions(session_id, code, name, qty, cost, buy_date, ts) VALUES(?,?,?,?,?,?,?)",
+            (session_id, code, name, qty, cost, buy_date, int(time.time())),
+        )
+    conn.commit()
+    conn.close()
+    return f"✅ 买入 {code} {name} {qty:g}股 @ {cost:.2f}"
+
+
+def portfolio_sell(session_id: str, code: str, qty: float = 0) -> str:
+    """卖出持仓(默认全部)。"""
+    conn = _portfolio_db()
+    row = conn.execute(
+        "SELECT qty, name FROM positions WHERE session_id=? AND code=?",
+        (session_id, code),
+    ).fetchone()
+    if not row:
+        conn.close()
+        return f"⚠️ 持仓中没有 {code}"
+    hold_qty, name = row
+    if qty <= 0 or qty >= hold_qty:
+        conn.execute(
+            "DELETE FROM positions WHERE session_id=? AND code=?", (session_id, code)
+        )
+        out = f"✅ 清仓 {code} {name} {hold_qty:g}股"
+    else:
+        conn.execute(
+            "UPDATE positions SET qty=? WHERE session_id=? AND code=?",
+            (hold_qty - qty, session_id, code),
+        )
+        out = f"✅ 卖出 {code} {name} {qty:g}股(剩 {hold_qty - qty:g}股)"
+    conn.commit()
+    conn.close()
+    return out
+
+
+def portfolio_list(session_id: str) -> list[dict]:
+    """列出持仓,返回 [{code, name, qty, cost, buy_date}]。"""
+    try:
+        conn = _portfolio_db()
+        rows = conn.execute(
+            "SELECT code, name, qty, cost, buy_date FROM positions WHERE session_id=? ORDER BY ts",
+            (session_id,),
+        ).fetchall()
+        conn.close()
+        return [
+            {"code": r[0], "name": r[1], "qty": r[2], "cost": r[3], "buy_date": r[4]}
+            for r in rows
+        ]
+    except Exception:
+        return []
+
+
+def portfolio_clear(session_id: str) -> str:
+    conn = _portfolio_db()
+    cur = conn.execute("DELETE FROM positions WHERE session_id=?", (session_id,))
+    conn.commit()
+    conn.close()
+    return f"✅ 已清空 {cur.rowcount} 条持仓"
+
+
 
 # ============ 配置 ============
 
@@ -559,7 +662,7 @@ def route(text: str) -> tuple[str, str]:
 
     # 4. 持仓查询
     if any(k in text for k in CMD_PORTFOLIO):
-        return "portfolio", handler_portfolio()
+        return "portfolio", handler_portfolio("list", session_id=_current_session_id())
 
     # 5. AI 自由问答
     return "ai", handler_ai(text)
@@ -856,26 +959,116 @@ def handler_watchlist(action: str, codes: list = None, session_id: str = "cli") 
                 f"add/remove/list/analyze 或 group_add/group_remove/group_list/group_analyze")
 
 
-def handler_portfolio() -> str:
-    """持仓查询。"""
-    if not AGENT_DB.exists():
-        return "📭 暂无持仓数据库(agent_data.db 不存在)。"
-    try:
-        conn = sqlite3.connect(str(AGENT_DB), timeout=5)
-        rows = conn.execute("SELECT code, qty, cost, buy_date FROM positions").fetchall()
-        conn.close()
-        if not rows:
-            return "📭 当前无持仓。"
-        lines = ["💼 当前持仓:"]
-        total_cost = 0.0
-        for code, qty, cost, buy_date in rows:
-            lines.append(f"  • {code}  {qty}股 @ {cost:.2f}  (买入日 {buy_date})")
-            total_cost += cost * qty
-        lines.append(f"\n总成本: {total_cost:.2f}")
-        lines.append("(实时市值需联网查价,请用 /api/portfolio 接口获取完整盈亏)")
+def handler_portfolio(action: str = "list", code: str = "", qty: float = 0,
+                      price: float = 0, session_id: str = "cli") -> str:
+    """模拟持仓管理:buy/sell/list/clear,按 session_id 隔离。
+
+    - buy: code 必填,qty 必填(股),price 可选(默认实时价),已有持仓加权平均成本
+    - sell: code 必填,qty 可选(默认全部卖出)
+    - list: 持仓 + 实时盈亏
+    """
+    if action == "list":
+        items = portfolio_list(session_id)
+        if not items:
+            return "📭 当前无持仓。\n用 \"买入 茅台 100股\" 或 \"买入 600519 100股 价格1500\" 建仓。"
+        # 批量查实时价算盈亏
+        rt_map = {}
+        try:
+            import strategy_engine as se
+            rt_list = se.fetch_realtime([it["code"] for it in items])
+            rt_map = {r["code"]: r for r in rt_list}
+        except Exception:
+            pass
+        lines = [f"💼 当前持仓({len(items)} 只):"]
+        total_cost = total_mv = 0.0
+        for it in items:
+            r = rt_map.get(it["code"], {})
+            px = r.get("price") or 0
+            pct = r.get("pct", 0)
+            mv = px * it["qty"]
+            pnl = (px - it["cost"]) * it["qty"]
+            pnl_pct = (px / it["cost"] - 1) * 100 if it["cost"] else 0
+            total_cost += it["cost"] * it["qty"]
+            total_mv += mv
+            emoji = "🔴" if pnl < 0 else "🟢"
+            lines.append(
+                f"  • {it['code']} {it['name'] or r.get('name','')} {it['qty']:g}股"
+                f" 成本{it['cost']:.2f} → 现价{px:.2f}({pct:+.2f}%)"
+                f" {emoji}{pnl:+.0f}元({pnl_pct:+.1f}%)"
+            )
+        if total_cost > 0 and rt_map:
+            total_pnl = total_mv - total_cost
+            lines.append(f"\n总成本 {total_cost:.0f} → 总市值 {total_mv:.0f},"
+                         f"浮动盈亏 {total_pnl:+.0f} 元")
         return "\n".join(lines)
-    except Exception as e:
-        return f"❌ 查询持仓出错: {e}"
+
+    if action == "clear":
+        return portfolio_clear(session_id)
+
+    if action == "sell":
+        if not code:
+            return "❌ 卖出需要股票代码,如 '卖出 600519'"
+        resolved = _resolve_stock_arg(code)
+        if not resolved:
+            return f"❌ 无法识别股票: {code}"
+        code, name = resolved
+        return portfolio_sell(session_id, code, qty)
+
+    if action != "buy":
+        return f"❌ 未知 action: {action},应为 buy/sell/list/clear"
+
+    # ---- buy ----
+    if not code:
+        return "❌ 买入需要股票代码,如 '买入 600519 100股'"
+    if qty <= 0:
+        return "❌ 买入需要数量,如 '买入 600519 100股'"
+    resolved = _resolve_stock_arg(code)
+    if not resolved:
+        return f"❌ 无法识别股票: {code}"
+    code, name = resolved
+    # 价格:未指定则用实时价
+    cost = price
+    if cost <= 0:
+        try:
+            import strategy_engine as se
+            rt = se.fetch_realtime([code])
+            if rt:
+                cost = rt[0].get("price") or 0
+        except Exception:
+            cost = 0
+        if not cost or cost <= 0:
+            return f"❌ 无法获取 {code} 实时价,请指定价格: '买入 {code} {qty:g}股 价格X'"
+    portfolio_buy(session_id, code, name, qty, cost, datetime.now().strftime("%Y-%m-%d"))
+    return (
+        f"✅ 已记录买入 {code} {name} {qty:g}股 @ {cost:.2f}\n"
+        f"发送 '持仓' 查看盈亏"
+    )
+
+
+def _resolve_stock_arg(arg: str):
+    """把用户输入(代码/中文简称)解析成 (code, name),失败返回 None。"""
+    arg = (arg or "").strip()
+    if not arg:
+        return None
+    if arg.isdigit() and len(arg) == 6:
+        # 代码 → 拿名称
+        name = ""
+        try:
+            import strategy_engine as se
+            rt = se.fetch_realtime([arg])
+            if rt:
+                name = rt[0].get("name", "")
+        except Exception:
+            pass
+        return arg, name
+    try:
+        from stock_names import resolve_code
+        code = resolve_code(arg)
+        if code:
+            return code, arg
+    except ImportError:
+        pass
+    return None
 
 
 def handler_finance(code: str) -> str:
@@ -2332,7 +2525,13 @@ TOOL_HANDLERS = {
     "get_yujie_picks": lambda args: handler_yujie(
         args.get("min_score", 0), args.get("hit_rule", "")
     ),
-    "get_portfolio": lambda args: handler_portfolio(),
+    "get_portfolio": lambda args: handler_portfolio(
+        args.get("action", "list"),
+        code=args.get("code", ""),
+        qty=args.get("qty", 0),
+        price=args.get("price", 0),
+        session_id=_current_session_id(),
+    ),
     "get_finance": lambda args: handler_finance(args.get("code", "")),
     "compare_stocks": lambda args: handler_compare_stocks(args.get("codes", [])),
     "analyze_sector": lambda args: handler_analyze_sector(args.get("sector", "")),

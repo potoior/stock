@@ -28,6 +28,7 @@ quant/
 ├── daily_scan.py          # 每日 09:25 盘前日报 + 15:05 盘后复盘 + 飞书推送(systemd timer)
 ├── news_monitor.py        # 自选股新闻监控(群共享池,11:45/20:30 推送新消息)
 ├── news_reasoning.py      # 新闻掘金·因果推理(新闻→概念落地→成分股→因果链,21:30 推送)
+├── watchlist_check.py     # 持仓与自选每日体检(盈亏+卖出信号,15:30 推送)
 ├── strategy_library.json  # 策略大全(4 来源 73 策略)
 ├── data_fetcher.py        # 数据获取(腾讯/新浪)
 ├── api.py                 # FastAPI 服务(/api/* 端点)
@@ -92,6 +93,7 @@ systemctl --user list-timers daily-afterclose.timer news-monitor.timer
 - **daily-afterclose**: `daily-afterclose.timer`(Mon-Fri 15:05) 盘后复盘,日志同 daily-scan
 - **news-monitor**: `news-monitor.timer`(Mon-Fri 11:45/20:30) 群共享自选池新闻监控推送,日志写 `/tmp/news_monitor.log`
 - **news-reasoning**: `news-reasoning.timer`(Mon-Fri 21:30) 新闻掘金·因果推理推送,日志写 `/tmp/news_reasoning.log`
+- **watchlist-check**: `watchlist-check.timer`(Mon-Fri 15:30) 持仓与自选股体检推送,日志写 `/tmp/watchlist_check.log`
 - 配置文件 `config.json` 和 `.env` 在 `.gitignore` 中,**不要提交**
 
 ### 测试
