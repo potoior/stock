@@ -145,6 +145,36 @@ def _make_bulk_df(codes, n=120, seed=42):
     return df
 
 
+def _bulk_rows(codes, n=120, seed=42):
+    """构造批量拉取的原始行元组(cursor.fetchall 风格),数据同 _make_bulk_df。"""
+    df = _make_bulk_df(codes, n=n, seed=seed)
+    desc = [(c, None) for c in df.columns]
+    return desc, list(df.itertuples(index=False, name=None))
+
+
+def _fake_connect(fake_rows, bulk_codes=None):
+    """构造按查询类型分发的 fake sqlite 连接(GROUP BY / 批量拉取)。"""
+
+    def connect(*args, **kwargs):
+        def execute(query, params=None):
+            cur = MagicMock()
+            if "group by" in query.lower():
+                cur.fetchall.return_value = fake_rows
+            else:
+                codes = bulk_codes if bulk_codes is not None else [r[0] for r in fake_rows]
+                desc, rows = _bulk_rows(codes)
+                cur.description = desc
+                cur.fetchall.return_value = rows
+            return cur
+
+        conn = MagicMock()
+        conn.execute.side_effect = execute
+        conn.close = lambda: None
+        return conn
+
+    return connect
+
+
 def test_scan_all_cached_with_limit(monkeypatch):
     """scan_all_cached 用 limit=10 应只扫 10 只,返回结构正确。"""
     from datetime import datetime, timedelta
@@ -155,19 +185,7 @@ def test_scan_all_cached_with_limit(monkeypatch):
     # mock sqlite GROUP BY 返回 10 只假股票(code, last_date)
     fake_rows = [(f"60000{i}", recent) for i in range(10)]
 
-    def fake_connect(*args, **kwargs):
-        conn = MagicMock()
-        conn.execute.return_value.fetchall.return_value = fake_rows
-        conn.close = lambda: None
-        return conn
-
-    # mock pd.read_sql 批量返回(新版用 IN(...) 一次拉全部 candidates)
-    def fake_read_sql(query, conn, params=None):
-        codes = params if params else []
-        return _make_bulk_df(codes)
-
-    monkeypatch.setattr("sqlite3.connect", fake_connect)
-    monkeypatch.setattr("pandas.read_sql", fake_read_sql)
+    monkeypatch.setattr("sqlite3.connect", _fake_connect(fake_rows))
     result = yujie_scan.scan_all_cached(top_n=5, min_score=0, limit=10)
     assert "scanned" in result
     assert "hits_count" in result
@@ -182,18 +200,7 @@ def test_scan_all_cached_hits_structure(monkeypatch):
     import yujie_scan
     fake_rows = [("600519", "20260820")]
 
-    def fake_connect(*args, **kwargs):
-        conn = MagicMock()
-        conn.execute.return_value.fetchall.return_value = fake_rows
-        conn.close = lambda: None
-        return conn
-
-    def fake_read_sql(query, conn, params=None):
-        codes = params if params else ["600519"]
-        return _make_bulk_df(codes)
-
-    monkeypatch.setattr("sqlite3.connect", fake_connect)
-    monkeypatch.setattr("pandas.read_sql", fake_read_sql)
+    monkeypatch.setattr("sqlite3.connect", _fake_connect(fake_rows))
     result = yujie_scan.scan_all_cached(top_n=5, min_score=0, limit=1)
     for h in result["hits"]:
         assert "code" in h
@@ -211,18 +218,7 @@ def test_scan_all_cached_progress_callback(monkeypatch):
     fake_rows = [(f"60000{i}", recent) for i in range(10)]
     call_log = []
 
-    def fake_connect(*args, **kwargs):
-        conn = MagicMock()
-        conn.execute.return_value.fetchall.return_value = fake_rows
-        conn.close = lambda: None
-        return conn
-
-    def fake_read_sql(query, conn, params=None):
-        codes = params if params else []
-        return _make_bulk_df(codes)
-
-    monkeypatch.setattr("sqlite3.connect", fake_connect)
-    monkeypatch.setattr("pandas.read_sql", fake_read_sql)
+    monkeypatch.setattr("sqlite3.connect", _fake_connect(fake_rows))
 
     def cb(scanned, total, hits_count):
         call_log.append((scanned, total, hits_count))

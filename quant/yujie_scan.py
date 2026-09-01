@@ -485,11 +485,16 @@ def scan_all_cached(
             conn.close()
             return {"scanned": 0, "hits_count": 0, "hits": [], "elapsed_sec": 0.0}
         placeholders = ",".join("?" * len(candidates))
-        bulk_df = pd.read_sql(
-            f"SELECT code, date, open, close, high, low, volume FROM daily WHERE code IN ({placeholders})",
-            conn,
-            params=candidates,
+        # 优化: 320 天日期过滤(评分只需 320 天历史)全量 357 万行→78 万行;
+        # fetchall+DataFrame 替代 pd.read_sql(后者逐行 Python 转换,130s→1s)
+        date_cutoff = (datetime.now() - timedelta(days=320)).strftime("%Y%m%d")
+        cur = conn.execute(
+            f"SELECT code, date, open, close, high, low, volume FROM daily "
+            f"WHERE code IN ({placeholders}) AND date >= ?",
+            [*candidates, date_cutoff],
         )
+        cols = [d[0] for d in cur.description]
+        bulk_df = pd.DataFrame(cur.fetchall(), columns=cols)
         bulk_df["date"] = pd.to_datetime(bulk_df["date"], format="%Y%m%d", errors="coerce")
     finally:
         conn.close()

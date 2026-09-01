@@ -19,6 +19,8 @@ def init_db():
             PRIMARY KEY (code, date)
         )
     """)
+    # 与 strategy_engine._ensure_daily_table 保持一致(加速 WHERE code=? / GROUP BY code)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_daily_code_date ON daily(code, date)")
     conn.commit()
     return conn
 
