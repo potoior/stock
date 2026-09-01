@@ -25,7 +25,8 @@ quant/
 ├── strategy_engine.py     # 54 策略信号引擎(23 原有 + 22 新增 + 5 补齐 + 4 经典形态:K线/顶背离/缺口)
 ├── backtest_builtin.py    # 回测引擎(workers=1,非线程安全)
 ├── yujie_scan.py          # 玉姐精选评分(10 条规则)
-├── daily_scan.py          # 每日 09:00 全市场扫描 + 飞书日报(systemd timer)
+├── daily_scan.py          # 每日 09:25 盘前日报 + 15:05 盘后复盘 + 飞书推送(systemd timer)
+├── news_monitor.py        # 自选股新闻监控(群共享池,11:45/20:30 推送新消息)
 ├── strategy_library.json  # 策略大全(4 来源 73 策略)
 ├── data_fetcher.py        # 数据获取(腾讯/新浪)
 ├── api.py                 # FastAPI 服务(/api/* 端点)
@@ -66,10 +67,13 @@ systemctl --user restart feishu-bot.service
 systemctl --user status feishu-bot.service
 journalctl --user -u feishu-bot -f
 
-# daily-scan 定时器(每个交易日 09:00 自动跑)
+# daily-scan 定时器(盘前日报,每个交易日 09:25 自动跑)
 systemctl --user list-timers daily-scan.timer
 systemctl --user start daily-scan.service   # 立即手动触发一次
 journalctl --user -u daily-scan -f
+
+# 盘后复盘(daily-afterclose.timer,每个交易日 15:05)与自选股新闻监控(news-monitor.timer,11:45/20:30)
+systemctl --user list-timers daily-afterclose.timer news-monitor.timer
 
 # CLI 测试 Agent(不走飞书)
 .venv/bin/python feishu_bot.py --agent "分析茅台"
@@ -83,7 +87,9 @@ journalctl --user -u daily-scan -f
 ### 部署
 - **systemd user service**,配置在 `~/.config/systemd/user/feishu-bot.service` 和 `quant-api.service`
 - 都 `enabled`,Restart=on-failure
-- **daily-scan**: `daily-scan.timer`(Mon-Fri 09:00 CST) 触发 `daily-scan.service`(oneshot),日志写 `/tmp/daily_scan.log`
+- **daily-scan**: `daily-scan.timer`(Mon-Fri 09:25 CST) 触发 `daily-scan.service`(oneshot),日志写 `/tmp/daily_scan.log`
+- **daily-afterclose**: `daily-afterclose.timer`(Mon-Fri 15:05) 盘后复盘,日志同 daily-scan
+- **news-monitor**: `news-monitor.timer`(Mon-Fri 11:45/20:30) 群共享自选池新闻监控推送,日志写 `/tmp/news_monitor.log`
 - 配置文件 `config.json` 和 `.env` 在 `.gitignore` 中,**不要提交**
 
 ### 测试
