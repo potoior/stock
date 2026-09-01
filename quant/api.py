@@ -745,62 +745,33 @@ def index():
 _daily_scan_state = {"next_run": None, "last_run": None, "last_status": "idle"}
 
 
-def _start_periodic_scheduler(state, env_prefix, default_time, run_fn, delay_seconds=0):
-    """通用定时器：每个交易日指定时间执行 run_fn()。
+def _start_daily_scan_scheduler():
+    """只更新 next_run 状态供前端展示,实际调度交给 systemd timer(daily-scan.timer)。
 
-    env_prefix: 读取 {env_prefix}_ENABLED / {env_prefix}_TIME 两个环境变量
-    delay_seconds: 在指定时间上额外延迟的秒数(避免两个调度器同时启动撞车)
+    历史问题: 此处曾用线程在 09:35 跑 daily_scan.run_once(),但 systemd
+    daily-scan.timer 也在 09:35 触发 daily-scan.service,两个都 enabled,
+    会重复抓全市场(双倍新浪限流)+ 重复 AI 调用 + 重复写日报。
+    现已禁用内部调度,只保留状态字段给 /api/daily-scan/status 用。
     """
-    import os
     import threading
     import time as _time
     from datetime import datetime, timedelta
 
-    enabled = os.environ.get(f"{env_prefix}_ENABLED", "1") == "1"
-    if not enabled:
-        state["last_status"] = "disabled"
-        return
-    scan_time = os.environ.get(f"{env_prefix}_TIME", default_time)
-    hh, mm = scan_time.split(":")
-
-    def loop():
+    def _update_next_run():
+        """后台线程:每天更新 next_run 为下一个工作日 09:35。"""
         while True:
             now = datetime.now()
-            target = now.replace(hour=int(hh), minute=int(mm), second=delay_seconds, microsecond=0)
+            target = now.replace(hour=9, minute=35, second=0, microsecond=0)
             if now >= target:
                 target = target + timedelta(days=1)
-            state["next_run"] = target.strftime("%Y-%m-%d %H:%M:%S")
-            _time.sleep((target - now).total_seconds())
-            if datetime.now().weekday() >= 5:
-                continue
-            state["last_status"] = "running"
-            state["last_run"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            try:
-                run_fn()
-                state["last_status"] = "ok"
-            except Exception as e:
-                state["last_status"] = f"error: {e}"
+            # 跳过周末
+            while target.weekday() >= 5:
+                target = target + timedelta(days=1)
+            _daily_scan_state["next_run"] = target.strftime("%Y-%m-%d %H:%M:%S")
+            # 每小时更新一次(跨日时刷新)
+            _time.sleep(3600)
 
-    threading.Thread(target=loop, name=f"{env_prefix.lower()}_scheduler", daemon=True).start()
-
-
-def _start_daily_scan_scheduler():
-    """每个交易日 09:35 跑 daily_scan(已合并 yujie 全市场扫描,同时更新两个状态)。
-
-    时间选 09:35(开盘后 5 分钟)而非 09:00,原因:
-    - 9:00 集合竞价刚开始,新浪接口被限流(HTTP 456),大量页面拉取失败
-    - 9:00 时多数股票涨跌幅/成交额都是 0(集合竞价未撮合),数据无意义
-    - 9:30 开盘 + 5 分钟稳定,数据可靠
-    """
-
-    def _run():
-        import daily_scan
-        daily_scan.run_once(limit=0, top=5, news_limit=20)
-        # daily_scan 内部已调 yujie_scan.run_once,同步状态
-        _yujie_state["last_status"] = "ok"
-        _yujie_state["last_run"] = _daily_scan_state.get("last_run")
-
-    _start_periodic_scheduler(_daily_scan_state, "DAILY_SCAN", "09:35", _run, delay_seconds=0)
+    threading.Thread(target=_update_next_run, name="daily_scan_status", daemon=True).start()
 
 
 @app.get("/api/daily-scan/status")
@@ -851,9 +822,19 @@ def daily_scan_reports():
 
 @app.post("/api/daily-scan/run")
 def daily_scan_run():
-    """手动触发一次每日扫描（异步，后台线程执行）。"""
+    """手动触发一次每日扫描（异步，后台线程执行）。
+
+    防并发: 如果上次扫描仍在 running,拒绝重复触发(避免并发抓全市场 +
+    重复 AI 调用 + 重复写日报)。
+    """
     import threading
     from datetime import datetime
+
+    if _daily_scan_state.get("last_status") == "running":
+        return {
+            "started": False,
+            "message": "上次扫描仍在进行中,请稍后再试(查看 /api/daily-scan/status)",
+        }
 
     def _run():
         _daily_scan_state["last_status"] = "running"
