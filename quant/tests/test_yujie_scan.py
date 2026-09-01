@@ -147,9 +147,13 @@ def _make_bulk_df(codes, n=120, seed=42):
 
 def test_scan_all_cached_with_limit(monkeypatch):
     """scan_all_cached 用 limit=10 应只扫 10 只,返回结构正确。"""
+    from datetime import datetime, timedelta
+
     import yujie_scan
+    # 用相对日期(3 天前),确保在 scan_all_cached 的 7 天窗口内
+    recent = (datetime.now() - timedelta(days=3)).strftime("%Y%m%d")
     # mock sqlite GROUP BY 返回 10 只假股票(code, last_date)
-    fake_rows = [(f"60000{i}", "20260820") for i in range(10)]
+    fake_rows = [(f"60000{i}", recent) for i in range(10)]
 
     def fake_connect(*args, **kwargs):
         conn = MagicMock()
@@ -200,8 +204,11 @@ def test_scan_all_cached_hits_structure(monkeypatch):
 
 def test_scan_all_cached_progress_callback(monkeypatch):
     """progress_callback 应被调用。"""
+    from datetime import datetime, timedelta
+
     import yujie_scan
-    fake_rows = [(f"60000{i}", "20260820") for i in range(10)]
+    recent = (datetime.now() - timedelta(days=3)).strftime("%Y%m%d")
+    fake_rows = [(f"60000{i}", recent) for i in range(10)]
     call_log = []
 
     def fake_connect(*args, **kwargs):

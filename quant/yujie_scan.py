@@ -466,8 +466,9 @@ def scan_all_cached(
             "SELECT code, MAX(date) as last FROM daily GROUP BY code"
         ).fetchall()
         # 1b. 过滤:最新日期近 7 日内(避免陈旧缓存)
-        today = datetime.now().strftime("%Y%m%d")
-        cutoff_today = str(int(today) - 7) if today.isdigit() else today
+        # 用 timedelta 正确处理月份边界(int 减法会得到 "20260894" 这种无效日期)
+        from datetime import timedelta
+        cutoff_today = (datetime.now() - timedelta(days=7)).strftime("%Y%m%d")
         # 兼容 (code, last) 和 (code, n, last) 两种 row 格式
         candidates = []
         for row in rows:
