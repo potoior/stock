@@ -107,7 +107,7 @@ systemctl --user list-timers daily-afterclose.timer news-monitor.timer
   - 数据查询: `analyze_stock` / `get_market_status` / `get_yujie_picks` / `get_portfolio`
   - 策略查询: `list_strategies` / `get_strategy_library` / `get_yujie_detail` / `analyze_with_strategy` / `analyze_with_yujie`
   - 策略操作: `toggle_strategy` / `set_strategy_params` / `enable_library_strategy`
-  - 回测寻优选股: `backtest_strategy` / `grid_search_strategy` / `scan_with_strategy`(全市场策略选股,耗时5-30分钟)
+  - 回测寻优选股: `backtest_strategy` / `grid_search_strategy` / `scan_with_strategy`(全市场策略选股) / `scan_combo`(多策略组合选股,AND共振/OR宽松,耗时5-30分钟)
   - 自选股: `watchlist`(add/remove/list)
   - 财务: `get_finance`(单股 PE/PB/市值/ROE/毛利率/净利率/EPS/营收/净利润)
   - 批量: `compare_stocks`(多股对比) / `analyze_sector`(板块成分股) / `query_history_picks`(历史玉姐复盘)

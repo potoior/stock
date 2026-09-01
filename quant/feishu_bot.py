@@ -2255,6 +2255,90 @@ def handler_scan_with_strategy(
         return f"❌ 策略选股出错: {e}"
 
 
+def handler_scan_combo(
+    strategy_ids: list[str], mode: str = "and", top_n: int = 20,
+    min_amount_yi: float = 0.5, limit: int = 0
+) -> str:
+    """多策略组合选股:AND=共振(全部触发), OR=任一触发。耗时约 5-30 分钟。"""
+    try:
+        import strategy_engine as se
+        log.info(
+            "开始组合选股 %s [%s], top_n=%d, min_amount_yi=%s, limit=%d",
+            strategy_ids, mode, top_n, min_amount_yi, limit,
+        )
+
+        chat_id = _current_chat_id()
+        bot_ref = _current_bot()
+        last_progress_ts = [0.0]
+
+        def _progress_cb(scanned, total, hits_count):
+            import time as _t
+            now = _t.time()
+            if now - last_progress_ts[0] < 30 and scanned != total:
+                return
+            last_progress_ts[0] = now
+            pct = scanned * 100 // total if total else 0
+            if bot_ref and chat_id:
+                try:
+                    bot_ref._send_text(
+                        chat_id,
+                        f"⏳ 组合选股进度: {scanned}/{total} ({pct}%) | 命中 {hits_count} 只",
+                    )
+                except Exception:
+                    pass
+
+        result = se.scan_combo_strategies(
+            strategy_ids=strategy_ids,
+            top_n=top_n,
+            min_amount_yi=min_amount_yi,
+            limit=limit,
+            mode=mode,
+            progress_callback=_progress_cb if (bot_ref and chat_id) else None,
+        )
+        if "error" in result:
+            return f"❌ {result['error']}"
+
+        hits = result.get("hits", [])
+        mode_label = "共振(全部触发)" if mode == "and" else "任一触发"
+        if not hits:
+            return (
+                f"🔍 **组合选股 {' + '.join(strategy_ids)} [{mode_label}]**\n"
+                f"- 扫描股票数: {result.get('scanned', 0)}\n"
+                f"- 命中: 0 只 | 耗时: {result.get('elapsed_sec', 0):.0f}s\n"
+                + ("条件较严,可尝试 OR 模式或减少策略数量" if mode == "and" else "")
+            )
+
+        # 批量补股票名
+        try:
+            import stock_names as sn
+            codes = [h["code"] for h in hits]
+            name_map = sn.lookup_names(codes) if hasattr(sn, "lookup_names") else {}
+            for h in hits:
+                h["name"] = name_map.get(h["code"], "") or h.get("name", "")
+        except Exception:
+            pass
+
+        lines = [
+            f"🔍 **组合选股 {' + '.join(strategy_ids)} [{mode_label}]**",
+            f"- 扫描股票数: {result.get('scanned', 0)} | 命中: {result.get('hits_count', 0)} 只"
+            f" | 耗时: {result.get('elapsed_sec', 0):.0f}s",
+            "",
+            "| 代码 | 名称 | 现价 | 涨幅 | 成交额(亿) | 触发策略 |",
+            "|---|---|---|---|---|---|",
+        ]
+        for h in hits:
+            reason = h.get("reason", "")
+            if len(reason) > 40:
+                reason = reason[:38] + ".."
+            lines.append(
+                f"| {h['code']} | {h.get('name', '-')} | {h['price']} | "
+                f"{h['pct']:+.2f}% | {h['amount_yi']} | {reason} |"
+            )
+        return "\n".join(lines)
+    except Exception as e:
+        return f"❌ 组合选股出错: {e}"
+
+
 def handler_analyze_news_impact() -> str:
     """新闻驱动选股(因果推理):新闻 → 受益概念落地 → 真实成分股 → 多段因果推理。"""
     try:
@@ -2581,6 +2665,13 @@ TOOL_HANDLERS = {
         float(args.get("min_amount_yi", 0.5)),
         int(args.get("limit", 0)),
     ),
+    "scan_combo": lambda args: handler_scan_combo(
+        args.get("strategy_ids", []),
+        args.get("mode", "and"),
+        int(args.get("top_n", 20)),
+        float(args.get("min_amount_yi", 0.5)),
+        int(args.get("limit", 0)),
+    ),
     "get_stock_news": lambda args: handler_get_stock_news(
         args.get("code", ""), int(args.get("num", 15))
     ),
@@ -2618,7 +2709,7 @@ TOOL_HANDLERS = {
 MAX_AGENT_STEPS = 6  # 最多 6 步推理(避免无限循环)
 
 # 耗时工具(超过 10 秒),需先发"思考中"提示用户
-SLOW_TOOLS = {"backtest_strategy", "grid_search_strategy", "scan_with_strategy", "scan_with_yujie", "combo_backtest"}
+SLOW_TOOLS = {"backtest_strategy", "grid_search_strategy", "scan_with_strategy", "scan_with_yujie", "combo_backtest", "scan_combo"}
 
 # 工具结果回灌给 LLM 时的字符上限(防止上下文污染,OpenClaw 风格)
 TOOL_RESULT_MAX_CHARS = 6000

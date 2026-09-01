@@ -2879,6 +2879,166 @@ def scan_with_strategy(
     }
 
 
+def scan_combo_strategies(
+    strategy_ids: list[str],
+    top_n: int = 20,
+    min_amount_yi: float = 0.5,
+    limit: int = 0,
+    mode: str = "and",
+    progress_callback=None,
+) -> dict:
+    """全市场多策略组合扫描,返回同时/任一触发 buy 信号的股票。
+
+    多策略共振选股:单一策略噪音大,多条件交叉验证胜率高。
+
+    Args:
+        strategy_ids: 策略 id 列表(2-5 个)
+        mode: and=全部触发(共振,信号少而精) / or=任一触发(宽松)
+        其余同 scan_with_strategy
+
+    Returns: {"strategies": [...], "mode", "scanned", "hits_count", "hits", "elapsed_sec"}
+    """
+    import sqlite3
+    import time as _time
+
+    t0 = _time.time()
+
+    # 1. 校验策略 id(复用单策略扫描的白名单)
+    builtin_ids = {
+        "macd", "kdj", "ma_stop", "boll", "dmi", "psy", "bias", "sar",
+        "bbiboll", "tower", "ma_combo", "two_line", "life_line", "three_third",
+        "sparrow", "bounce", "volume_div", "resonance", "dmi_psy", "rsi",
+        "bottom", "top", "zt",
+        "trend_follow", "pyramid", "stop_profit", "plan_trade",
+        "high_volume", "demon_stock", "dragon_pullback",
+        "support_resistance", "range_trade",
+        "bottom_ma", "top_weekly", "top_monthly",
+        "zhuang_test", "zhuang_build", "zhuang_pull", "zhuang_ship", "zhuang_wash",
+        "zt_type", "zt_unsealed", "zt_pull",
+        "pe_select", "roe_pe",
+        "daban", "fupan", "bottom_time",
+        "kline_pattern", "macd_top_divergence", "rsi_top_divergence", "gap",
+    }
+    no_scan = {"shareholder_select", "policy_select"}
+    bad = [s for s in strategy_ids if s not in builtin_ids]
+    if bad:
+        return {"error": f"未知策略 id: {bad},必须是内置策略"}
+    need_net = [s for s in strategy_ids if s in no_scan]
+    if need_net:
+        return {"error": f"策略 {need_net} 需联网,不适合全市场扫描"}
+    if not 2 <= len(strategy_ids) <= 5:
+        return {"error": "策略数须 2-5 个"}
+
+    # 2. 候选池(同单策略扫描)
+    from datetime import datetime as _dt
+    from datetime import timedelta as _td
+    conn = sqlite3.connect(str(CACHE_DB), timeout=30)
+    try:
+        latest_date = conn.execute("SELECT MAX(date) FROM daily").fetchone()[0]
+        if not latest_date:
+            conn.close()
+            return {"error": "daily 表为空,请先运行 daily_scan 抓取数据"}
+        if isinstance(latest_date, str):
+            cutoff = (_dt.strptime(latest_date, "%Y%m%d") - _td(days=7)).strftime("%Y%m%d")
+        else:
+            cutoff = latest_date
+        rows = conn.execute(
+            "SELECT DISTINCT code FROM daily WHERE date >= ?",
+            (cutoff,),
+        ).fetchall()
+    finally:
+        conn.close()
+    candidates = [row[0] for row in rows]
+    if limit and limit < len(candidates):
+        candidates = candidates[:limit]
+
+    # 3. 每只股票跑多策略(指标依赖取并集,只算一次)
+    fns = []
+    for sid in strategy_ids:
+        fn = globals().get(f"strategy_{sid}")
+        if fn is None:
+            return {"error": f"策略函数 strategy_{sid} 不存在"}
+        fns.append((sid, fn))
+    all_deps = set()
+    for sid in strategy_ids:
+        all_deps.update(_STRATEGY_DEPS.get(sid, ()))
+
+    hits = []
+    scanned = 0
+    total = len(candidates)
+    last_progress_at = 0
+    for code in candidates:
+        scanned += 1
+        if scanned % 50 == 0:
+            _time.sleep(0.001)
+        if progress_callback and (scanned - last_progress_at >= 200 or scanned == total):
+            try:
+                progress_callback(scanned, total, len(hits))
+            except Exception:
+                pass
+            last_progress_at = scanned
+        try:
+            df = get_daily_data(code, days=320)
+            if len(df) < 60:
+                continue
+            close = df["close"]
+            i = len(df) - 1
+            price = float(close.iloc[i])
+            ctx = {
+                "i": i, "price": price, "df": df, "close": close,
+                "code": code, "realtime": None,
+            }
+            for ind in all_deps:
+                ctx[ind] = _compute_indicator(df, ind)
+
+            # 逐策略检查
+            fired = []  # [(sid, reason)]
+            for sid, fn in fns:
+                params = {**DEFAULT_STRATEGY_PARAMS.get(sid, {})}
+                sg, reason = fn(ctx, params)
+                if sg == "buy":
+                    fired.append((sid, reason))
+
+            if mode == "and":
+                if len(fired) != len(fns):
+                    continue
+            else:  # or
+                if not fired:
+                    continue
+
+            # 成交额 + 涨幅过滤
+            last_row = df.iloc[i]
+            prev_close = float(close.iloc[i - 1]) if i >= 1 else price
+            pct = (price - prev_close) / prev_close * 100 if prev_close > 0 else 0
+            amount_yi = float(last_row["volume"] * price) / 1e8 if "volume" in df.columns else 0
+            if amount_yi < min_amount_yi:
+                continue
+
+            hits.append({
+                "code": code,
+                "name": "",
+                "price": round(price, 2),
+                "pct": round(pct, 2),
+                "signals": [sid for sid, _ in fired],
+                "reason": "; ".join(f"{sid}: {r}" for sid, r in fired),
+                "amount_yi": round(amount_yi, 2),
+            })
+        except Exception:
+            continue
+
+    hits.sort(key=lambda x: x["pct"], reverse=True)
+    hits = hits[:top_n]
+
+    return {
+        "strategies": strategy_ids,
+        "mode": mode,
+        "scanned": scanned,
+        "hits_count": len(hits),
+        "hits": hits,
+        "elapsed_sec": round(_time.time() - t0, 1),
+    }
+
+
 if __name__ == "__main__":
     import sys
 

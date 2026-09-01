@@ -372,6 +372,32 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "scan_combo",
+            "description": (
+                "多策略组合选股:全市场扫描同时/任一触发多个策略 buy 信号的股票(交叉验证,共振选股)。"
+                "耗时约 5-30 分钟。用户说'找MACD金叉+KDJ超卖的股票/多策略共振选股/同时触发X和Y的股票'时调用。"
+                "AND 模式=全部触发(少而精), OR 模式=任一触发(宽松)。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "strategy_ids": {
+                        "type": "array", "items": {"type": "string"},
+                        "description": "策略id列表(2-5个),如 ['macd','kdj']"
+                    },
+                    "mode": {"type": "string", "enum": ["and", "or"],
+                             "description": "and=全部触发(共振), or=任一触发", "default": "and"},
+                    "top_n": {"type": "integer", "description": "返回前 N 只(按涨幅降序)", "default": 20},
+                    "min_amount_yi": {"type": "number", "description": "最小成交额(亿)过滤", "default": 0.5},
+                    "limit": {"type": "integer", "description": "限制扫描股票数(调试用),0=全市场", "default": 0}
+                },
+                "required": ["strategy_ids"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "get_stock_news",
             "description": "查询个股相关新闻(东财搜索接口,实时抓取)。用户问'X股票有什么新闻/X最近消息/X公司动态/跟X相关的新闻'时调用。返回最近 N 条提到该股票名或代码的新闻(已过滤无关列表新闻)。",
             "parameters": {
@@ -528,7 +554,7 @@ TOOLS = [
         }
     },
 ]
-SYSTEM_PROMPT = """你是 A 股量化分析助手(飞书群聊 Bot),有 32 个工具。回复严格 ≤400 字,markdown 格式,只给关键结论+数字,加风险提示。
+SYSTEM_PROMPT = """你是 A 股量化分析助手(飞书群聊 Bot),有 33 个工具。回复严格 ≤400 字,markdown 格式,只给关键结论+数字,加风险提示。
 
 【数据查询】
 - analyze_stock(code): 个股技术面分析+K线图。code 支持中文简称/拼音/6位代码
@@ -564,6 +590,9 @@ SYSTEM_PROMPT = """你是 A 股量化分析助手(飞书群聊 Bot),有 32 个�
   · mode: and=同日同时触发, or=任一触发
   · 示例: "组合回测MACD和BOLL" / "MACD+KDJ同时触发效果"
 - scan_with_strategy(strategy_id, top_n?, min_amount_yi?, limit?): 全市场扫描某策略选股(5-30分钟)
+- scan_combo(strategy_ids, mode?, top_n?, ...): 多策略组合选股(交叉验证,5-30分钟)
+  · mode: and=全部触发(共振,少而精), or=任一触发(宽松)
+  · 示例: "找MACD金叉+KDJ超卖的股票" / "多策略共振选股"
 - scan_with_yujie(top_n?, min_score?, limit?): 全市场玉姐评分实时扫描(1-3分钟)
   · 与 get_yujie_picks 区别: 这是实时重跑全市场评分,不是盘前缓存
 
