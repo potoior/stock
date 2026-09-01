@@ -2406,7 +2406,7 @@ MAX_AGENT_STEPS = 6  # 最多 6 步推理(避免无限循环)
 SLOW_TOOLS = {"backtest_strategy", "grid_search_strategy", "scan_with_strategy", "scan_with_yujie", "combo_backtest"}
 
 # 工具结果回灌给 LLM 时的字符上限(防止上下文污染,OpenClaw 风格)
-TOOL_RESULT_MAX_CHARS = 3000
+TOOL_RESULT_MAX_CHARS = 6000
 
 # 工具 schema 索引(name → parameters),用于参数预校验(Hermes 风格)
 _TOOL_SCHEMA: dict[str, dict] = {

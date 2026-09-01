@@ -510,6 +510,7 @@ def scan_all_cached(
             if df is None or len(df) < 60:
                 return "", 0, [], None
             sc, hits, detail = score_stock(code, params, df=df)
+            _time.sleep(0.001)  # 让出 GIL(同上,防 ws 心跳饿死)
         except Exception:
             sc, hits, detail = 0, [], None
         return code, sc, hits, detail
@@ -518,6 +519,9 @@ def scan_all_cached(
     with ThreadPoolExecutor(max_workers=16) as ex:
         futs = {ex.submit(_worker, c): c for c in candidates}
         for fut in futs:
+            # 让出 GIL:给 ws 心跳线程喘息窗口,防止长扫描期间 ping timeout 断连
+            if scanned[0] % 10 == 0:
+                _time.sleep(0.001)
             try:
                 code, sc, hits, detail = fut.result()
             except Exception:

@@ -426,10 +426,10 @@ def test_truncate_result_exact_limit():
 
 def test_truncate_result_over_limit():
     """超上限截断 + 标注原始长度。"""
-    s = "x" * 5000
+    s = "x" * 7000
     out = _truncate_tool_result(s)
     assert len(out) < len(s)
-    assert "5000" in out
+    assert "7000" in out
     assert "已截断" in out
     assert out.startswith("xxx")
 

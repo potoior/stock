@@ -2797,6 +2797,9 @@ def scan_with_strategy(
     last_progress_at = 0  # 上次发进度的 scanned 值
     for code in candidates:
         scanned += 1
+        # 让出 GIL:给 ws 心跳线程喘息窗口,防止长扫描期间 ping timeout 断连
+        if scanned % 50 == 0:
+            _time.sleep(0.001)
         # 进度回调:每 200 只或完成时发一次
         if progress_callback and (scanned - last_progress_at >= 200 or scanned == total):
             try:
