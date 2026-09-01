@@ -1,6 +1,6 @@
-"""每日 9:35 全市场扫描 + 玉姐精选 + 新闻综合日报
+"""每日 9:25 全市场扫描 + 玉姐精选 + 新闻综合日报
 
-流程（每个交易日 09:35,开盘后 5 分钟数据稳定）：
+流程（每个交易日 09:25,开盘后 5 分钟数据稳定）：
   1. 爬取全 A 股（≈5500 只）实时行情，统计涨跌分布 / 涨停跌停 / 板块热度
   2. 调用 yujie_scan.run_once() 跑玉姐精选全市场打分（数据共用 stock_cache.db）
   3. 取玉姐 Top N 作为候选，附加 strategy_engine.analyze 完整策略信号
@@ -10,7 +10,7 @@
 
 用法：
   python daily_scan.py                       # 立即跑一次
-  python daily_scan.py --schedule "09:35"    # 纯 Python 定时，每天 09:35 自动跑
+  python daily_scan.py --schedule "09:25"    # 纯 Python 定时，每天 09:25 自动跑
   python daily_scan.py --limit 1000          # 仅抓前1000只（调试加速）
   python daily_scan.py --top 10              # 对玉姐 Top 10 跑策略信号
 """
@@ -277,7 +277,7 @@ def build_prompt(stats, cands, news, date_str):
 ## 一、全市场扫描
 - 总数 {stats["total"]} 只：上涨 {stats["up"]}，下跌 {stats["down"]}，平 {stats["flat"]}
 - 涨停 {stats["limit_up"]} 只，跌停 {stats["limit_down"]} 只
-- 全市场成交额约 {stats["total_amount_yi"]:.0f} 亿
+- 全市场成交额约 {stats["total_amount_yi"]:.0f} 亿{"（注：当前为集合竞价时段，成交额仅含竞价量，个股涨跌幅为开盘缺口）" if stats.get("premarket") else ""}
 
 ## 二、玉姐精选 Top 候选（按评分排序，含策略信号）
 {chr(10).join(lines_c) if lines_c else "（无候选）"}
@@ -303,6 +303,8 @@ def run_once(limit, top, news_limit):
         print("行情抓取失败")
         return
     stats = market_stats(rows)
+    # 盘前(9:30 前)运行:成交额仅含集合竞价量,标注给 AI 正确解读
+    stats["premarket"] = now.hour < 9 or (now.hour == 9 and now.minute < 30)
     print(
         f"抓取 {stats['total']} 只: 涨{stats['up']}/跌{stats['down']}/平{stats['flat']} "
         f"涨停{stats['limit_up']}/跌停{stats['limit_down']} 成交{stats['total_amount_yi']:.0f}亿"

@@ -1,6 +1,6 @@
 """玉姐精选：每日全市场扫描打分
 
-每天早上 09:35（服务进程内调度,开盘后 5 分钟数据稳定）按玉姐的条件对全 A 股打分，
+每天早上 09:25（服务进程内调度,开盘后 5 分钟数据稳定）按玉姐的条件对全 A 股打分，
 返回全部命中股票（按分数降序）。所有规则参数可配置（config.json -> yujie）。
 
 打分规则（对应玉姐同花顺条件，默认满分 12）:
@@ -348,6 +348,30 @@ def get_rank(code, date_str=None):
 # ---------------- 全市场扫描 ----------------
 
 
+def _prev_day_amounts() -> dict:
+    """上一交易日各股成交额(亿元,close*volume 近似),供盘前流动性过滤。
+
+    盘前(9:30 前)运行时实时接口只有集合竞价量,0.5亿门槛会过滤掉几乎所有股票;
+    回退用 daily 缓存的上一交易日数据。
+    """
+    import sqlite3
+
+    from strategy_engine import CACHE_DB
+
+    try:
+        conn = sqlite3.connect(str(CACHE_DB), timeout=30)
+        prev = conn.execute(
+            "SELECT MAX(date) FROM daily WHERE date < ?", (datetime.now().strftime("%Y%m%d"),)
+        ).fetchone()[0]
+        if not prev:
+            return {}
+        rows = conn.execute("SELECT code, close, volume FROM daily WHERE date = ?", (prev,)).fetchall()
+        conn.close()
+        return {c: float(close or 0) * float(v or 0) / 1e8 for c, close, v in rows}
+    except Exception:
+        return {}
+
+
 def run_once(limit: int = 0) -> int:
     params = get_params()
     date_str = datetime.now().strftime("%Y%m%d")
@@ -367,6 +391,10 @@ def run_once(limit: int = 0) -> int:
 
     excl = params["scope"].get("exclude_sz_code", [])
     min_amt = float(params["scope"].get("min_amount_yi", 0.5))
+    # 盘前(9:30 前)运行:实时成交额只有竞价量,回退用上一交易日成交额过滤流动性
+    now_dt = datetime.now()
+    premarket = now_dt.hour < 9 or (now_dt.hour == 9 and now_dt.minute < 30)
+    prev_amt = _prev_day_amounts() if premarket else {}
     pool = []
     for r in rows:
         code = norm_code(r.get("symbol", ""))[-6:].zfill(6)
@@ -376,6 +404,8 @@ def run_once(limit: int = 0) -> int:
         if any(code.startswith(p) for p in excl):
             continue
         amt_yi = float(r.get("amount") or 0) / 1e8
+        if premarket:
+            amt_yi = prev_amt.get(code, 0)
         if amt_yi < min_amt:
             continue
         pool.append((code, name, float(r.get("trade") or 0), float(r.get("changepercent") or 0)))

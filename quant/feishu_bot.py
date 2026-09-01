@@ -623,7 +623,7 @@ def handler_market() -> str:
     if not report.exists():
         return (
             "今日市场日报尚未生成。\n"
-            "运行 `python daily_scan.py` 生成,或等待 09:35 自动任务。\n"
+            "运行 `python daily_scan.py` 生成,或等待 09:25 自动任务。\n"
             "如需实时抓取,请直接输入股票代码进行分析。"
         )
     try:
@@ -677,7 +677,7 @@ def handler_yujie(min_score: float = 0, hit_rule: str = "") -> str:
         if not picks:
             return (
                 "今日玉姐精选尚未生成。\n"
-                "运行 `python yujie_scan.py` 或等待 09:35 自动任务。"
+                "运行 `python yujie_scan.py` 或等待 09:25 自动任务。"
             )
 
         # 过滤
@@ -1182,7 +1182,7 @@ def handler_query_history_picks(date: str) -> str:
         return (
             f"❌ {date_str} 没有玉姐精选数据。\n"
             f"最近可查日期: {available}\n"
-            "提示: 玉姐精选每日 09:35 自动生成,历史数据需当天跑过才有。"
+            "提示: 玉姐精选每日 09:25 自动生成,历史数据需当天跑过才有。"
         )
 
     # Top10 列表(精简: 默认只展开 top 5 详情,避免超 600 字截断)
@@ -2234,7 +2234,7 @@ def handler_screen_stocks(
 def handler_scan_with_yujie(top_n: int = 20, min_score: float = 5.0, limit: int = 0) -> str:
     """全市场玉姐评分实时扫描(用 daily 表已缓存数据,不联网,耗时 1-3 分钟)。
 
-    与 get_yujie_picks(盘前 09:35 扫描结果)区别:这里实时重跑全市场评分。
+    与 get_yujie_picks(盘前 09:25 扫描结果)区别:这里实时重跑全市场评分。
     """
     try:
         import yujie_scan

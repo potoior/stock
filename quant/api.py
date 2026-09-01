@@ -748,8 +748,8 @@ _daily_scan_state = {"next_run": None, "last_run": None, "last_status": "idle"}
 def _start_daily_scan_scheduler():
     """只更新 next_run 状态供前端展示,实际调度交给 systemd timer(daily-scan.timer)。
 
-    历史问题: 此处曾用线程在 09:35 跑 daily_scan.run_once(),但 systemd
-    daily-scan.timer 也在 09:35 触发 daily-scan.service,两个都 enabled,
+    历史问题: 此处曾用线程在 09:25 跑 daily_scan.run_once(),但 systemd
+    daily-scan.timer 也在 09:25 触发 daily-scan.service,两个都 enabled,
     会重复抓全市场(双倍新浪限流)+ 重复 AI 调用 + 重复写日报。
     现已禁用内部调度,只保留状态字段给 /api/daily-scan/status 用。
     """
@@ -758,7 +758,7 @@ def _start_daily_scan_scheduler():
     from datetime import datetime, timedelta
 
     def _update_next_run():
-        """后台线程:每天更新 next_run 为下一个工作日 09:35。"""
+        """后台线程:每天更新 next_run 为下一个工作日 09:25。"""
         while True:
             now = datetime.now()
             target = now.replace(hour=9, minute=35, second=0, microsecond=0)
@@ -1017,7 +1017,7 @@ def builtin_grid():
 
 
 def _start_yujie_scheduler():
-    """玉姐精选已合并入 daily_scan 调度器(9:35 一起跑),这里不再独立调度。
+    """玉姐精选已合并入 daily_scan 调度器(9:25 一起跑),这里不再独立调度。
     保留函数只是为了向后兼容外部调用。
     """
     return
