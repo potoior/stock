@@ -596,8 +596,8 @@ def handler_analyze(code: str) -> str:
             f"综合判断: **{verdict}** (买{s.get('buy',0)}/卖{s.get('sell',0)}/观{s.get('hold',0)})",
             "",
         ]
-        buys = r.get("buy_reasons", [])[:5]
-        sells = r.get("sell_reasons", [])[:5]
+        buys = r.get("buy_reasons", [])[:10]
+        sells = r.get("sell_reasons", [])[:10]
         if buys:
             lines.append("✅ 买入信号:")
             for b in buys:
