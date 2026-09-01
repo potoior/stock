@@ -102,3 +102,43 @@ def test_analyze_insufficient_history(monkeypatch):
     monkeypatch.setattr("strategy_engine.fetch_realtime", lambda codes: [])
     r = se.analyze("999999", use_ai=False)
     assert "error" in r
+
+
+# ---------- verdict_from_votes 回归测试 ----------
+
+
+def test_verdict_stalemate_is_hold():
+    """买8/卖7/观38:多空对峙必须观望,不能判买入(2026-09 均胜电子案例)。"""
+    verdict, _ = se.verdict_from_votes(8, 7, 53)
+    assert verdict == "观望"
+
+
+def test_verdict_40pct_threshold_buy():
+    """达 40% 阈值直接定方向。"""
+    verdict, _ = se.verdict_from_votes(21, 5, 53)
+    assert verdict == "买入"
+    verdict, _ = se.verdict_from_votes(5, 21, 53)
+    assert verdict == "卖出"
+
+
+def test_verdict_weak_fallback_needs_2x_margin():
+    """弱回退:3+票且 2 倍优势才给方向。"""
+    verdict, _ = se.verdict_from_votes(6, 3, 53)
+    assert verdict == "买入"
+    verdict, _ = se.verdict_from_votes(3, 6, 53)
+    assert verdict == "卖出"
+    # 一票之差不给方向
+    verdict, _ = se.verdict_from_votes(4, 3, 53)
+    assert verdict == "观望"
+
+
+def test_verdict_all_hold():
+    """全观望 → 观望。"""
+    verdict, _ = se.verdict_from_votes(0, 0, 53)
+    assert verdict == "观望"
+
+
+def test_verdict_min_three_votes():
+    """不足 3 票不给方向。"""
+    verdict, _ = se.verdict_from_votes(2, 0, 5)
+    assert verdict == "观望"

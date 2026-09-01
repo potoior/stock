@@ -2386,6 +2386,25 @@ def judge_custom_with_ai(code, ctx, custom_strats, use_ai=True):
 # ---------------- 主分析入口 ----------------
 
 
+def verdict_from_votes(buy_n: int, sell_n: int, total_n: int) -> tuple:
+    """从策略投票数生成综合判断(verdict, icon)。
+
+    动态阈值:方向票需达到启用策略的 40%,且持有 ≥3 票偏向(避免 1 票定方向);
+    未达阈值时走弱回退:需 ≥3 票且是对方 2 倍以上,否则多空对峙 → 观望。
+    (修复: 买8/卖7/观38 这种对峙票型曾被判"买入",误导模拟盘和用户)
+    """
+    min_votes = max(3, int(total_n * 0.4))
+    if buy_n >= min_votes and buy_n > sell_n:
+        return "买入", "⬆"
+    if sell_n >= min_votes and sell_n > buy_n:
+        return "卖出", "⇅"
+    if buy_n >= 3 and buy_n >= sell_n * 2:
+        return "买入", "⬆"
+    if sell_n >= 3 and sell_n >= buy_n * 2:
+        return "卖出", "⇅"
+    return "观望", "⏸"
+
+
 def analyze(code: str, use_ai: bool = True) -> dict:
     rt = fetch_realtime([code])
     realtime = rt[0] if rt else None
@@ -2580,18 +2599,8 @@ def analyze(code: str, use_ai: bool = True) -> dict:
     buy_n, sell_n, hold_n = len(buy_sigs), len(sell_sigs), len(hold_sigs)
     total_n = len(signals)
 
-    # 动态阈值：方向票需达到启用策略的40%，且持有≥3票偏向（避免1票定方向）
-    min_votes = max(3, int(total_n * 0.4))
-    if buy_n >= min_votes and buy_n > sell_n:
-        verdict, icon = "买入", "⬆"
-    elif sell_n >= min_votes and sell_n > buy_n:
-        verdict, icon = "卖出", "⬇"
-    elif buy_n > sell_n and buy_n >= 3:
-        verdict, icon = "买入", "⬆"
-    elif sell_n > buy_n and sell_n >= 3:
-        verdict, icon = "卖出", "⬇"
-    else:
-        verdict, icon = "观望", "⏸"
+    # 动态阈值:40% 方向票定方向;弱回退需 2 倍压倒性优势(详见 verdict_from_votes)
+    verdict, icon = verdict_from_votes(buy_n, sell_n, total_n)
 
     kdf = df.tail(120)[["date", "open", "close", "high", "low", "volume"]].copy()
     kdf["date"] = kdf["date"].dt.strftime("%Y-%m-%d")
