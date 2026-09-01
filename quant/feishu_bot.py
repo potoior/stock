@@ -2062,6 +2062,21 @@ def handler_scan_with_strategy(
         return f"❌ 策略选股出错: {e}"
 
 
+def handler_analyze_news_impact() -> str:
+    """新闻驱动选股(因果推理):新闻 → 受益概念落地 → 真实成分股 → 多段因果推理。"""
+    try:
+        import news_reasoning
+        from ai_decider import AIDecider
+
+        events = news_reasoning.run(decider=AIDecider())
+        if not events:
+            return "今日新闻中未发现具有明确驱动逻辑的可交易事件。"
+        return news_reasoning.format_text(events)
+    except Exception as e:
+        log.error("analyze_news_impact 异常: %s\n%s", e, traceback.format_exc())
+        return f"❌ 新闻因果推理失败: {e}"
+
+
 def handler_get_stock_news(code: str, num: int = 15) -> str:
     """查询个股相关新闻(东财搜索接口,实时抓取)。
 
@@ -2370,6 +2385,7 @@ TOOL_HANDLERS = {
     "get_stock_news": lambda args: handler_get_stock_news(
         args.get("code", ""), int(args.get("num", 15))
     ),
+    "analyze_news_impact": lambda args: handler_analyze_news_impact(),
     # 市场数据 skill(新)
     "get_lhb": lambda args: handler_get_lhb(
         args.get("date", ""), int(args.get("top_n", 20))

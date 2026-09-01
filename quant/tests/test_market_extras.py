@@ -419,11 +419,11 @@ def test_scan_with_yujie_in_slow_tools():
     assert "scan_with_yujie" in feishu_bot.SLOW_TOOLS
 
 
-def test_tool_count_31():
-    """工具总数应为 31(30 旧 + 1 条件选股)。"""
+def test_tool_count_32():
+    """工具总数应为 32(31 旧 + 1 新闻因果推理)。"""
     import feishu_bot
-    assert len(feishu_bot.TOOLS) == 31
-    assert len(feishu_bot.TOOL_HANDLERS) == 31
+    assert len(feishu_bot.TOOLS) == 32
+    assert len(feishu_bot.TOOL_HANDLERS) == 32
 
 
 # ---------------- 板块资金流 / 市场情绪 ----------------

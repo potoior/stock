@@ -365,6 +365,14 @@ TOOLS = [
                 },
                 "required": ["code"]
             }
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "analyze_news_impact",
+            "description": "新闻驱动选股(因果推理):抓取当日新闻,LLM 筛选有明确驱动逻辑的可交易事件,匹配受益概念板块的真实成分股(含当日涨幅/主力净流入),做多段因果链推理(事件→传导→个股)并给出重点股票与推荐理由。耗时约 1-3 分钟。用户问'今天新闻利好什么股票/新闻里有什么机会/新闻掘金'时调用。",
+            "parameters": {"type": "object", "properties": {}}
         }
     },
     # ---------- 市场数据(新) ----------
@@ -503,7 +511,7 @@ TOOLS = [
         }
     },
 ]
-SYSTEM_PROMPT = """你是 A 股量化分析助手(飞书群聊 Bot),有 31 个工具。回复严格 ≤400 字,markdown 格式,只给关键结论+数字,加风险提示。
+SYSTEM_PROMPT = """你是 A 股量化分析助手(飞书群聊 Bot),有 32 个工具。回复严格 ≤400 字,markdown 格式,只给关键结论+数字,加风险提示。
 
 【数据查询】
 - analyze_stock(code): 个股技术面分析+K线图。code 支持中文简称/拼音/6位代码
@@ -544,6 +552,7 @@ SYSTEM_PROMPT = """你是 A 股量化分析助手(飞书群聊 Bot),有 31 个�
 
 【新闻资讯】
 - get_stock_news(code, num?): 个股新闻(东财搜索,strict过滤无关列表新闻)
+- analyze_news_impact(): 新闻掘金(因果推理):当天新闻 → 受益概念 → 真实成分股+当日数据 → 多段因果链推理,耗时 1-3 分钟
 
 【市场数据(实时)】
 - get_lhb(date?, top_n?): 龙虎榜
