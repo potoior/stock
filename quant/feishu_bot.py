@@ -65,7 +65,26 @@ REPORTS_DIR = ENGINE_HOME / "reports"
 AGENT_DB = ENGINE_HOME / "agent_data.db"
 
 # 结构化工具调用日志(JSONL),便于审计/统计(OpenClaw 风格)
-TOOL_AUDIT_LOG = Path("/tmp/feishu_bot_audit.jsonl")
+TOOL_AUDIT_LOG = ENGINE_HOME / "logs" / "feishu_bot_audit.jsonl"
+TOOL_AUDIT_MAX_BYTES = 10 * 1024 * 1024  # 单文件 10MB,超出轮转
+TOOL_AUDIT_KEEP = 3  # 保留备份数
+
+
+def _rotate_audit_log_if_needed() -> None:
+    """审计日志超过大小上限时轮转(xxx.1 最新 → xxx.3 最旧)。失败不影响主流程。"""
+    try:
+        if not TOOL_AUDIT_LOG.exists() or TOOL_AUDIT_LOG.stat().st_size < TOOL_AUDIT_MAX_BYTES:
+            return
+        for i in range(TOOL_AUDIT_KEEP - 1, 0, -1):
+            src = Path(f"{TOOL_AUDIT_LOG}.{i}")
+            dst = Path(f"{TOOL_AUDIT_LOG}.{i + 1}")
+            if src.exists():
+                if dst.exists():
+                    dst.unlink()
+                src.rename(dst)
+        TOOL_AUDIT_LOG.rename(Path(f"{TOOL_AUDIT_LOG}.1"))
+    except Exception:
+        pass
 
 
 def _log_tool_call(session_id: str, step: int, fn_name: str, fn_args: dict,
@@ -84,6 +103,8 @@ def _log_tool_call(session_id: str, step: int, fn_name: str, fn_args: dict,
             "duration_ms": duration_ms,
             "error": error,
         }
+        TOOL_AUDIT_LOG.parent.mkdir(parents=True, exist_ok=True)
+        _rotate_audit_log_if_needed()
         with open(TOOL_AUDIT_LOG, "a", encoding="utf-8") as f:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
     except Exception:

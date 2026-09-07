@@ -720,6 +720,19 @@ def test_log_tool_call_failure_silent(tmp_path, monkeypatch):
     _log_tool_call("s", 1, "x", {}, 0, 0, error=None)
 
 
+def test_audit_log_rotation(tmp_path, monkeypatch):
+    """日志超过大小上限应轮转,保留指定份数。"""
+    log_file = tmp_path / "audit.jsonl"
+    monkeypatch.setattr(feishu_bot, "TOOL_AUDIT_LOG", log_file)
+    monkeypatch.setattr(feishu_bot, "TOOL_AUDIT_MAX_BYTES", 100)
+    for i in range(1, 6):
+        _log_tool_call("s", i, "x", {}, 0, 0, error=None)
+    # 主文件 + 3 个备份
+    assert log_file.exists()
+    backups = [p for p in tmp_path.iterdir() if str(p).startswith(str(log_file) + ".")]
+    assert len(backups) == 3
+
+
 # ============ 历史压缩(Compaction) ============
 
 

@@ -136,7 +136,7 @@ systemctl --user list-timers daily-afterclose.timer news-monitor.timer
 - `RotatingFileHandler` `/tmp/feishu_bot.log` 5MB×3
 - 同时输出控制台(journalctl 可查)
 - 工具调用记 `Agent step N 调用 X(args)`
-- **结构化审计日志**: `/tmp/feishu_bot_audit.jsonl`(JSONL,每行一次工具调用,含 ts/session_id/step/tool/args/result_size/duration_ms/error)
+- **结构化审计日志**: `quant/logs/feishu_bot_audit.jsonl`(JSONL,每行一次工具调用,含 ts/session_id/step/tool/args/result_size/duration_ms/error;10MB 轮转保留 3 份)
 
 ### 数据缓存
 - `stock_cache.db`: 日 K 线(`daily` 表,~440 万行 405MB,正常)+ 玉姐精选 + AI 缓存 + 股票名(17 行)+ 财务数据

@@ -60,6 +60,7 @@ def test_run_once_empty_watchlist(monkeypatch, capsys):
 
 def test_run_once_first_time_baseline(monkeypatch, tmp_path):
     """首次监控只建基线不推送。"""
+    ts = (datetime.now() - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
     monkeypatch.setattr(nm, "DB_PATH", tmp_path / "news_monitor.db")
     monkeypatch.setattr(
         nm, "load_group_watchlist",
@@ -67,7 +68,7 @@ def test_run_once_first_time_baseline(monkeypatch, tmp_path):
     )
     monkeypatch.setattr(
         nm, "fetch_stock_news",
-        lambda code, num=10: [{"title": "t", "url": "http://x/1", "time": "2026-09-01 10:00"}],
+        lambda code, num=10: [{"title": "t", "url": "http://x/1", "time": ts}],
     )
     nm.run_once(dry_run=True)
     # 基线已建立
@@ -76,15 +77,18 @@ def test_run_once_first_time_baseline(monkeypatch, tmp_path):
 
 def test_run_once_pushes_new(monkeypatch, tmp_path, capsys):
     """第二次运行有新消息时输出。"""
+    ts = (datetime.now() - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
     monkeypatch.setattr(nm, "DB_PATH", tmp_path / "news_monitor.db")
     monkeypatch.setattr(
         nm, "load_group_watchlist",
         lambda: [{"code": "600519", "name": "贵州茅台"}],
     )
-    items = [{"title": "新闻1", "url": "http://x/1", "time": "2026-09-01 10:00"}]
+    items = [{"title": "新闻1", "url": "http://x/1", "time": ts}]
     monkeypatch.setattr(nm, "fetch_stock_news", lambda code, num=10: items)
     nm.run_once(dry_run=True)  # 首次:建基线
-    items.append({"title": "新闻2", "url": "http://x/2", "time": "2026-09-01 11:00"})
+    items.append(
+        {"title": "新闻2", "url": "http://x/2", "time": datetime.now().strftime("%Y-%m-%d %H:%M")}
+    )
     nm.run_once(dry_run=True)  # 第二次:应推送新闻2
     out = capsys.readouterr().out
     assert "新闻2" in out
