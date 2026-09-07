@@ -2174,21 +2174,25 @@ def handler_grid_search(strategy_id: str, sample: int = 400) -> str:
         target = strategies.get(strategy_id) if isinstance(strategies, dict) else None
         if not target:
             return f"❌ 寻优完成但未找到策略 {strategy_id}"
-        # grid 结构: {sid: {configs, sensitivity, default_excess, best_params, best_excess, ...}}
         lines = [f"🔍 **策略 {strategy_id} 网格寻优结果**"]
-        if "default_excess" in target:
-            lines.append(f"默认参数超额: {target['default_excess']*100:+.2f}%")
-        if "best_params" in target:
-            lines.append(f"最优参数: {target['best_params']}")
-        if "best_excess" in target:
-            lines.append(f"最优超额: {target['best_excess']*100:+.2f}%")
-        sens = target.get("sensitivity", []) or target.get("configs", [])
-        if sens:
-            lines.append("\n参数敏感性(按超额排序 Top5):")
-            for r in sens[:5]:
-                params = r.get("params", {})
-                excess = r.get("excess", 0)
-                lines.append(f"  - {params}: {excess*100:+.2f}%")
+        configs = sorted(target.get("configs", []), key=lambda r: r.get("excess", 0), reverse=True)
+        if configs:
+            best = configs[0]
+            lines.append(
+                f"最优参数: {best.get('params')} (超额 {best.get('excess', 0)*100:+.2f}%,"
+                f"触发 {best.get('n', 0)} 次)"
+            )
+        if len(configs) > 1:
+            worst = configs[-1]
+            lines.append(f"最差参数: {worst.get('params')} (超额 {worst.get('excess', 0)*100:+.2f}%)")
+        lines.append(f"\n参数敏感性(均值超额,共 {target.get('total_configs', len(configs))} 组配置):")
+        for pname, vals in (target.get("sensitivity") or {}).items():
+            ranked = sorted(vals.items(), key=lambda kv: kv[1], reverse=True)
+            summary = ", ".join(f"{k}={v*100:+.2f}%" for k, v in ranked)
+            lines.append(f"  - {pname}: {summary}")
+        lines.append("\nTop5 配置:")
+        for r in configs[:5]:
+            lines.append(f"  - {r.get('params')}: {r.get('excess', 0)*100:+.2f}%")
         return "\n".join(lines)
     except Exception as e:
         return f"❌ 寻优出错: {e}"
@@ -2373,6 +2377,7 @@ def handler_scan_combo(
     """多策略组合选股:AND=共振(全部触发), OR=任一触发。耗时约 10 秒-3 分钟。"""
     try:
         import strategy_engine as se
+        mode = (mode or "and").lower()
         log.info(
             "开始组合选股 %s [%s], top_n=%d, min_amount_yi=%s, limit=%d",
             strategy_ids, mode, top_n, min_amount_yi, limit,
@@ -2938,31 +2943,51 @@ class FeishuAgent:
     def __init__(self):
         import os
 
-        from ai_decider import load_env
+        from ai_decider import build_endpoints, load_env
         load_env()
+        self.endpoints = build_endpoints()
         self.api_key = os.environ.get("AI_API_KEY", "")
-        self.base_url = os.environ.get("AI_BASE_URL", "")
-        self.model = os.environ.get("AI_MODEL", "")
+        self.base_url = self.endpoints[0]["url"]
+        self.model = self.endpoints[0]["model"]
         if not self.api_key or not self.base_url:
             raise RuntimeError("AI_API_KEY/AI_BASE_URL 未配置(检查 .env)")
 
+    def _post_llm(self, payload: dict, timeout: int = 60):
+        """依次尝试主/备网关 POST。返回 (response|None, 最后状态码)。
+
+        200 返回;404/429/5xx/网络异常切换下一端点;其余 4xx(配置类)不切换。
+        """
+        import httpx
+        resp = None
+        last_code = None
+        for ep in self.endpoints:
+            headers = {
+                "Authorization": f"Bearer {ep['key']}",
+                "Content-Type": "application/json",
+            }
+            try:
+                with httpx.Client(timeout=timeout, trust_env=False) as c:
+                    resp = c.post(ep["url"], json={**payload, "model": ep["model"]}, headers=headers)
+                last_code = resp.status_code
+                if resp.status_code == 200 or (
+                    resp.status_code < 500 and resp.status_code not in (404, 429)
+                ):
+                    return resp, last_code
+            except (httpx.ConnectError, httpx.ReadTimeout, httpx.RemoteProtocolError):
+                continue  # 网络异常 → 试下一端点
+            resp = None  # 404/429/5xx → 试下一端点
+        return resp, last_code
+
     def _summarize_with_llm(self, text: str, max_tokens: int = 300) -> str:
         """调 LLM 做摘要,失败抛异常。无 tools,纯文本。"""
-        import httpx
         payload = {
-            "model": self.model,
             "messages": [{"role": "user", "content": text}],
             "temperature": 0.2,
             "max_tokens": max_tokens,
         }
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-        }
-        with httpx.Client(timeout=30, trust_env=False) as c:
-            r = c.post(self.base_url, json=payload, headers=headers)
-        if r.status_code != 200:
-            raise RuntimeError(f"LLM 摘要 HTTP {r.status_code}")
+        r, code = self._post_llm(payload, timeout=30)
+        if r is None or r.status_code != 200:
+            raise RuntimeError(f"LLM 摘要 HTTP {code}")
         return (r.json()["choices"][0]["message"]["content"] or "").strip()
 
     def _compact_history(self, history: list) -> list:
@@ -3011,7 +3036,6 @@ class FeishuAgent:
         Returns:
             (reply_text, new_history, images)  images 是 PNG bytes 列表
         """
-        import httpx
 
         # 每轮对话前清空图片队列
         _pending_images.clear()
@@ -3028,7 +3052,6 @@ class FeishuAgent:
 
         for step in range(MAX_AGENT_STEPS):
             payload = {
-                "model": self.model,
                 "messages": messages,
                 "tools": TOOLS,
                 "tool_choice": "auto",
@@ -3037,32 +3060,19 @@ class FeishuAgent:
                 # 提高到 32768 保证思考完仍有内容;回复超长由 REPLY_HARD_LIMIT_CHARS 兜底
                 "max_tokens": 32768,
             }
-            headers = {
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json",
-            }
 
             try:
                 # 重试 2 次(共 3 次尝试):网络抖动/网关 5xx/间歇性 404,指数退避 1s/2s
-                # 404 纳入重试: 网关(负载均衡)偶发 404 是瞬时的,重试即恢复(8-24 事故)
+                # 每次尝试内部会先主后备切换(_post_llm),全部失败才进入下一次重试
                 r = None
                 llm_start = time.time()
                 last_code = None
                 for attempt in range(3):
-                    try:
-                        with httpx.Client(timeout=60, trust_env=False) as c:
-                            r = c.post(self.base_url, json=payload, headers=headers)
-                        last_code = r.status_code
-                        # 404(网关瞬时)/ 5xx(服务过载)重试;其余 2xx/4xx 不重试
-                        if r.status_code != 404 and r.status_code < 500:
-                            break
-                        log.warning("LLM 调用 %d,重试 %d/3", r.status_code, attempt + 1)
-                        r = None
-                        time.sleep(2 ** attempt)  # 1s, 2s
-                    except (httpx.ConnectError, httpx.ReadTimeout, httpx.RemoteProtocolError) as e:
-                        log.warning("LLM 网络异常 %s,重试 %d/3", e, attempt + 1)
-                        r = None
-                        time.sleep(2 ** attempt)  # 1s, 2s
+                    r, last_code = self._post_llm(payload, timeout=60)
+                    if r is not None:
+                        break
+                    log.warning("LLM 调用 %s,重试 %d/3", last_code, attempt + 1)
+                    time.sleep(2 ** attempt)  # 1s, 2s
                 if r is None:
                     _incr_stats("llm_calls", 1)
                     _incr_stats("llm_failures", 1)

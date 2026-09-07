@@ -126,6 +126,7 @@ systemctl --user list-timers daily-afterclose.timer news-monitor.timer
 - **回复长度**: 正常回复不截断,`_reply_text` 按 4000 字/条分段发送;12000 字兜底保险丝
 - **图片缓存**: 同股同日 K 线图复用(_IMG_CACHE 30 张 LRU),玉姐图带 score 不缓存
 - **LLM 重试**: 5xx/网络异常重试 1 次,4xx 不重试,失败给友好提示
+- **AI 网关故障切换**: 主网关(AI_BASE_URL)503/429/网络异常时自动切备用网关(AI_FALLBACK_URL/MODEL/API_KEY,本地代理 127.0.0.1:3456),Agent 主循环与 AIDecider 共用 `ai_decider.build_endpoints()`,4xx 配置类错误不切换
 
 ### 操作类工具授权
 - 用户明确表达意图(如"关闭 X 策略")才调用

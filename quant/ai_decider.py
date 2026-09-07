@@ -56,26 +56,35 @@ def load_api_key():
     return config["provider"]["sensenova"]["options"]["apiKey"]
 
 
+def build_endpoints(model=None) -> list[dict]:
+    """构建 [主网关, 备用网关] 端点列表。
+
+    供 AIDecider / feishu_bot.FeishuAgent 共用:主网关 5xx/429/网络异常时自动切备用。
+    """
+    api_key = load_api_key()
+    endpoints = [
+        {
+            "url": os.environ.get("AI_BASE_URL", DEFAULT_BASE_URL),
+            "model": model or os.environ.get("AI_MODEL", DEFAULT_MODEL),
+            "key": api_key,
+        }
+    ]
+    fallback_url = os.environ.get("AI_FALLBACK_URL")
+    if fallback_url:
+        endpoints.append(
+            {
+                "url": fallback_url,
+                "model": os.environ.get("AI_FALLBACK_MODEL", DEFAULT_MODEL),
+                "key": os.environ.get("AI_FALLBACK_API_KEY") or api_key,
+            }
+        )
+    return endpoints
+
+
 class AIDecider:
     def __init__(self, model=None):
-        self.api_key = load_api_key()
         # 端点列表: 主网关 + 可选备用网关(主网关 5xx/429/网络异常时自动切换)
-        self.endpoints = [
-            {
-                "url": os.environ.get("AI_BASE_URL", DEFAULT_BASE_URL),
-                "model": model or os.environ.get("AI_MODEL", DEFAULT_MODEL),
-                "key": self.api_key,
-            }
-        ]
-        fallback_url = os.environ.get("AI_FALLBACK_URL")
-        if fallback_url:
-            self.endpoints.append(
-                {
-                    "url": fallback_url,
-                    "model": os.environ.get("AI_FALLBACK_MODEL", DEFAULT_MODEL),
-                    "key": os.environ.get("AI_FALLBACK_API_KEY") or self.api_key,
-                }
-            )
+        self.endpoints = build_endpoints(model)
         # 向后兼容: 外部引用 base_url/model 的代码仍可用
         self.base_url = self.endpoints[0]["url"]
         self.model = self.endpoints[0]["model"]

@@ -620,6 +620,7 @@ def test_react_clears_images_between_steps(monkeypatch):
     agent.api_key = "fake"
     agent.base_url = "http://fake"
     agent.model = "fake"
+    agent.endpoints = [{"url": "http://fake", "model": "fake", "key": "fake"}]
 
     reply, _history, images = agent.chat("正弦电气呢", session_id="test")
     assert "分析完成" in reply
@@ -675,6 +676,7 @@ def test_react_keeps_parallel_images(monkeypatch):
     agent.api_key = "fake"
     agent.base_url = "http://fake"
     agent.model = "fake"
+    agent.endpoints = [{"url": "http://fake", "model": "fake", "key": "fake"}]
 
     reply, _history, images = agent.chat("分析茅台和市场", session_id="test")
     assert "完成" in reply
@@ -743,6 +745,7 @@ def _make_agent_with_mock_llm(summary_text: str):
     agent.api_key = "fake"
     agent.base_url = "http://fake"
     agent.model = "fake"
+    agent.endpoints = [{"url": "http://fake", "model": "fake", "key": "fake"}]
     agent._summarize_with_llm = lambda text, max_tokens=300: summary_text
     return agent
 
@@ -778,6 +781,7 @@ def test_compact_llm_failure_degrades():
     agent.api_key = "fake"
     agent.base_url = "http://fake"
     agent.model = "fake"
+    agent.endpoints = [{"url": "http://fake", "model": "fake", "key": "fake"}]
 
     def raise_fn(text, max_tokens=300):
         raise RuntimeError("LLM down")
@@ -1252,6 +1256,8 @@ def _make_bare_agent():
     agent.api_key = "fake"
     agent.base_url = "http://fake"
     agent.model = "fake"
+    agent.endpoints = [{"url": "http://fake", "model": "fake", "key": "fake"}]
+    agent.endpoints = [{"url": "http://fake", "model": "fake", "key": "fake"}]
     return agent
 
 
@@ -1443,3 +1449,46 @@ def test_process_message_image_type_fallback(monkeypatch):
     monkeypatch.setattr(bot, "_reply_text", lambda chat_id, text: replies.append(text))
     bot._process_message("chat1", "image", "{}", "user1", "p2p")
     assert replies and "仅支持文本提问" in replies[0]
+
+
+def test_agent_llm_failover_to_fallback(monkeypatch):
+    """主网关 503 时 Agent 应自动切备用网关拿到 200。"""
+    import httpx
+
+    calls = []
+
+    class FakeResp:
+        def __init__(self, status, data=None):
+            self.status_code = status
+            self._data = data
+
+        def json(self):
+            return self._data
+
+    class FakeClient:
+        def __init__(self, *a, **kw):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            pass
+
+        def post(self, url, json=None, headers=None):
+            calls.append(url)
+            if "fallback" in url:
+                return FakeResp(200, {"choices": [{"message": {"content": "备用网关回复"}}]})
+            return FakeResp(503)
+
+    monkeypatch.setattr(httpx, "Client", FakeClient)
+    monkeypatch.setattr(feishu_bot.time, "sleep", lambda s: None)
+    agent = _make_bare_agent()
+    agent.endpoints = [
+        {"url": "http://primary/v1/chat/completions", "model": "m1", "key": "k1"},
+        {"url": "http://fallback/v1/chat/completions", "model": "m2", "key": "k2"},
+    ]
+    reply, _history, _images = agent.chat("继续", session_id="test")
+    assert reply == "备用网关回复"
+    assert "http://primary/v1/chat/completions" in calls
+    assert "http://fallback/v1/chat/completions" in calls
