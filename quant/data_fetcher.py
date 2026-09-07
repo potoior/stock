@@ -92,23 +92,6 @@ def get_daily_data(code, start_date="20220101", end_date=None):
     return result
 
 
-def get_backtrader_data(code, start_date="20220101", end_date=None):
-    df = get_daily_data(code, start_date, end_date)
-    df = df.rename(
-        columns={
-            "open": "open",
-            "close": "close",
-            "high": "high",
-            "low": "low",
-            "volume": "volume",
-            "date": "datetime",
-        }
-    )
-    df["openinterest"] = 0
-    df = df.set_index("datetime")
-    return df[["open", "high", "low", "close", "volume", "openinterest"]]
-
-
 def fetch_realtime(codes):
     import urllib.request
 
