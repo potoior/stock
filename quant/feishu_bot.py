@@ -247,7 +247,7 @@ def _set_current_bot(bot):
 # 保留最近 MAX_HISTORY_TURNS 轮(1 轮 = user + assistant 两条消息)
 # 超过 HISTORY_EXPIRE_DAYS 天未活跃的 session 自动清理(启动时跑一次)
 HISTORY_DB = ENGINE_HOME / "agent_history.db"
-MAX_HISTORY_TURNS = 8
+MAX_HISTORY_TURNS = 12
 HISTORY_EXPIRE_DAYS = 7
 
 # 进程级 LRU 缓存: 最近 N 个 session 的 history(读命中跳过 sqlite)
@@ -305,27 +305,37 @@ def _invalidate_history_cache(session_id: str) -> None:
 
 
 # 历史里 assistant 消息裁剪阈值(超长截断到摘要,避免回测/策略大全等长回复撑爆历史)
-HISTORY_MSG_MAX_CHARS = 500
-HISTORY_MSG_KEEP_CHARS = 200
+HISTORY_MSG_MAX_CHARS = 2000
+# 裁剪时保留的字符合额:头部 + 尾部(结论/表格末行常在尾部,纯砍头会丢关键信息)
+HISTORY_MSG_KEEP_HEAD = 1300
+HISTORY_MSG_KEEP_TAIL = 500
+
+# 飞书最终回复兜底截断(正常长度走 _reply_text 分段,此为防 LLM 失控的保险丝)
+REPLY_HARD_LIMIT_CHARS = 12000
 
 # 历史压缩(Compaction, OpenClaw 风格):历史达到 N 条时,把最旧的几轮用 LLM 总结成 1 条
-# 触发阈值: 16 条(8 轮);压缩后: 1 条摘要 + 最近 12 条(6 轮)原文
-# 注: 阈值/保留比例影响压缩频率 —— 旧参数(10/8)压缩后 1 轮即再触发,
-# 每轮多烧一次 LLM 调用;16/12 压缩后需 2 轮才再触发,省一半压缩调用
-COMPACTION_THRESHOLD = 16
-COMPACTION_KEEP_RECENT = 12
+# 触发阈值: 24 条(12 轮);压缩后: 1 条摘要 + 最近 18 条(9 轮)原文
+# 注: 大上下文模型(1M)下放宽,压缩频率不高(压缩后 3 轮才再触发,省 LLM 调用)
+COMPACTION_THRESHOLD = 24
+COMPACTION_KEEP_RECENT = 18
 
 
 def _truncate_history(history: list) -> list:
-    """裁剪历史中的超长 assistant 消息,保留首部 N 字 + 截断标记。
+    """裁剪历史中的超长 assistant 消息,保留头尾 + 截断标记。
 
     user 消息通常很短不裁剪,只裁 assistant(可能含完整回测报告/策略列表)。
+    结论和表格末行常在消息尾部,纯砍头会丢关键信息,故保留头部+尾部。
     """
     out = []
     for m in history:
         c = m.get("content", "")
         if m.get("role") == "assistant" and len(c) > HISTORY_MSG_MAX_CHARS:
-            c = c[:HISTORY_MSG_KEEP_CHARS] + "...(已截断)"
+            c = (
+                c[:HISTORY_MSG_KEEP_HEAD]
+                + "\n…(中间省略)…\n"
+                + c[-HISTORY_MSG_KEEP_TAIL:]
+                + "…(已截断)"
+            )
             out.append({**m, "content": c})
         else:
             out.append(m)
@@ -1378,7 +1388,7 @@ def handler_query_history_picks(date: str) -> str:
             "提示: 玉姐精选每日 09:25 自动生成,历史数据需当天跑过才有。"
         )
 
-    # Top10 列表(精简: 默认只展开 top 5 详情,避免超 600 字截断)
+    # Top10 列表(精简: 默认只展开 top 5 详情,控制篇幅保持可读)
     top = picks[:10]
     show_n = min(5, len(top))  # 展开前 5,与 handler_yujie 一致
     lines = [f"📅 {date_str} 玉姐精选(共 {len(picks)} 只,显示前 {show_n})"]
@@ -1890,7 +1900,7 @@ def handler_analyze_with_yujie(code: str) -> str:
                 miss_rules.append(r)
         total_possible = sum(r["score"] for r in rules)
 
-        # 5. 组装输出(精简版,防超 600 字截断)
+        # 5. 组装输出(精简版,控制篇幅保持可读)
         lines = [
             f"📊 {code} {name} {emoji} {price:.2f} ({pct:+.2f}%)",
             f"🎯 **玉姐评分: {score:g} 分** / 满分 {total_possible:g} 分",
@@ -1902,7 +1912,7 @@ def handler_analyze_with_yujie(code: str) -> str:
                 lines.append(f"- {r['name']} +{r['score']}")
 
         if miss_rules:
-            # 未命中规则只列名,不展开 desc,避免超 600 字
+            # 未命中规则只列名,不展开 desc,控制篇幅
             miss_names = "、".join(r["name"] for r in miss_rules)
             lines.append(f"\n⚪ **未命中**({len(miss_rules)}条): {miss_names}")
 
@@ -2125,7 +2135,7 @@ def handler_combo_backtest(
         baseline = report["baseline"]
 
         mode_label = "同日同时触发(AND)" if mode == "and" else "任一触发(OR)"
-        # 多策略(>=4)时用紧凑格式防超 600 字
+        # 多策略(>=4)时用紧凑格式,控制篇幅
         compact = len(strategy_ids) >= 4
         lines = [
             f"📊 **多策略组合回测** {' + '.join(strategy_ids)} [{mode_label}]",
@@ -2358,7 +2368,7 @@ def handler_get_stock_news(code: str, num: int = 15) -> str:
     """查询个股相关新闻(东财搜索接口,实时抓取)。
 
     输出精简: 默认只展开 top 8 条(title+time+source+summary),url 单独行省略
-    避免超 600 字硬截断(15 条全展开 ~2500 字会被截到只剩 3-4 条)
+    控制篇幅保持可读(15 条全展开 ~2500 字过长)
     """
     try:
         import stock_names as sn
@@ -2385,7 +2395,7 @@ def handler_get_stock_news(code: str, num: int = 15) -> str:
         except Exception:
             pass
 
-        # 4. 输出精简: 只展开 top 8(超 600 字会被截断),summary 截到 80 字
+        # 4. 输出精简: 只展开 top 8,summary 截到 80 字
         show_n = min(8, len(news))
         lines = [f"📰 **{resolved}{(' ' + stock_name) if stock_name else ''} 相关新闻**"
                  f"(共 {len(news)} 条,显示前 {show_n})"]
@@ -2712,7 +2722,7 @@ MAX_AGENT_STEPS = 6  # 最多 6 步推理(避免无限循环)
 SLOW_TOOLS = {"backtest_strategy", "grid_search_strategy", "scan_with_strategy", "scan_with_yujie", "combo_backtest", "scan_combo", "screen_stocks"}
 
 # 工具结果回灌给 LLM 时的字符上限(防止上下文污染,OpenClaw 风格)
-TOOL_RESULT_MAX_CHARS = 6000
+TOOL_RESULT_MAX_CHARS = 10000
 
 # 工具 schema 索引(name → parameters),用于参数预校验(Hermes 风格)
 _TOOL_SCHEMA: dict[str, dict] = {
@@ -2919,7 +2929,7 @@ class FeishuAgent:
                 "tool_choice": "auto",
                 "temperature": 0.3,
                 # 推理模型思考也占 token:1024 会"思考耗尽"输出空内容(8-27 事故),
-                # 提高到 32768 保证思考完仍有内容;回复另有 600 字硬截断兜底
+                # 提高到 32768 保证思考完仍有内容;回复超长由 REPLY_HARD_LIMIT_CHARS 兜底
                 "max_tokens": 32768,
             }
             headers = {
@@ -3343,10 +3353,11 @@ class FeishuBotClient:
             if not reply or not reply.strip():
                 reply = "⚠️ 刚才没能生成有效回复,请换个问法或稍后重试。"
             log.info("回复长度 %d, 附图 %d 张", len(reply), len(images))
-            # 最终回复硬截断:超 600 字截断,避免飞书消息过长
-            if len(reply) > 600:
-                reply = reply[:590] + "\n\n…(内容过长已截断,详情可继续问)"
-                log.info("回复截断 %d → 600", len(reply))
+            # 超长内容交给 _reply_text 按段落自动分段发送(4000 字/条);
+            # 此处仅防 LLM 失控输出超长内容的兜底截断
+            if len(reply) > REPLY_HARD_LIMIT_CHARS:
+                reply = reply[:REPLY_HARD_LIMIT_CHARS] + "\n\n…(内容过长已截断,详情可继续问)"
+                log.info("回复截断 %d → %d", len(reply), REPLY_HARD_LIMIT_CHARS)
             self._reply_text(chat_id, reply)
             # 发送图片
             for png in images:

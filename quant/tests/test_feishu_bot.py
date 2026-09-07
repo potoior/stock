@@ -38,15 +38,21 @@ from feishu_bot import (
 
 
 def test_truncate_history_long_assistant():
-    """超过 500 字的 assistant 消息应被裁剪到 200 字 + 截断标记。"""
-    long_content = "A" * 800
+    """超过 HISTORY_MSG_MAX_CHARS 的 assistant 消息应被裁剪,保留头尾 + 截断标记。"""
+    head = "H" * 1300
+    tail = "T" * 500
+    long_content = head + "M" * 500 + tail  # 2300 字,超阈值
     h = [
         {"role": "user", "content": "问"},
         {"role": "assistant", "content": long_content},
     ]
     out = _truncate_history(h)
-    assert len(out[1]["content"]) < 250  # 200 字 + 截断标记
-    assert "已截断" in out[1]["content"]
+    content = out[1]["content"]
+    assert "已截断" in content
+    assert "中间省略" in content
+    assert content.startswith(head)  # 头部保留
+    assert content.rstrip("…(已截断)").endswith(tail)  # 尾部保留(结论常在尾部)
+    assert len(content) < len(long_content)
     assert out[0]["content"] == "问"  # user 不裁剪
 
 
@@ -64,7 +70,7 @@ def test_save_history_truncates(tmp_path, monkeypatch):
     """_save_history 落盘时应自动裁剪。"""
     db = tmp_path / "test_history.db"
     monkeypatch.setattr(feishu_bot, "HISTORY_DB", db)
-    long_content = "X" * 1000
+    long_content = "X" * 2500
     h = [
         {"role": "user", "content": "Q"},
         {"role": "assistant", "content": long_content},
@@ -76,8 +82,8 @@ def test_save_history_truncates(tmp_path, monkeypatch):
     row = conn.execute("SELECT history_json FROM agent_history WHERE session_id=?", ("test_session",)).fetchone()
     conn.close()
     loaded = json.loads(row[0])
-    assert len(loaded[1]["content"]) < 250
     assert "已截断" in loaded[1]["content"]
+    assert len(loaded[1]["content"]) < len(long_content)
 
 
 def test_save_history_max_turns(tmp_path, monkeypatch):
@@ -426,10 +432,10 @@ def test_truncate_result_exact_limit():
 
 def test_truncate_result_over_limit():
     """超上限截断 + 标注原始长度。"""
-    s = "x" * 7000
+    s = "x" * 12000
     out = _truncate_tool_result(s)
     assert len(out) < len(s)
-    assert "7000" in out
+    assert "12000" in out
     assert "已截断" in out
     assert out.startswith("xxx")
 

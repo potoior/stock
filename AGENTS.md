@@ -113,16 +113,17 @@ systemctl --user list-timers daily-afterclose.timer news-monitor.timer
   - 批量: `compare_stocks`(多股对比) / `analyze_sector`(板块成分股) / `query_history_picks`(历史玉姐复盘)
   - 新闻: `get_stock_news`(个股新闻,东财搜索接口,strict 过滤无关列表新闻)
   - 市场数据: `get_lhb`(龙虎榜) / `get_north_flow`(北向资金) / `get_main_flow`(主力资金流) / `get_concept_sectors`(板块反查) / `get_index`(指数行情)
-- **跨轮记忆**: `session_id = f"{chat_id}:{sender}"`,sqlite `agent_history.db`,最近 6 轮
-  - assistant >500 字裁到 200 字 + 截断标记
+- **跨轮记忆**: `session_id = f"{chat_id}:{sender}"`,sqlite `agent_history.db`,最近 12 轮
+  - assistant >2000 字裁到头 1300 + 尾 500(保留头尾,结论不丢)+ 截断标记
   - >7 天自动过期(`_purge_old_history` 启动时清理)
-  - **历史压缩**(Compaction): >=10 条触发 LLM 总结旧轮成 1 条摘要,保留最近 8 条原文,失败降级硬截断
+  - **历史压缩**(Compaction): >=24 条触发 LLM 总结旧轮成 1 条摘要,保留最近 18 条原文,失败降级硬截断
 - **重置命令**: 整句精确匹配(去标点),不用子串匹配(避免"重置 BOLL 参数"误判)
 - **会话级并发锁**: 同 session_id 串行,防连发消息 race
 - **参数 schema 预校验**: 对照 TOOLS schema,不合法直接回灌不执行
 - **工具错误自愈**: 错误回灌"请用正确参数重试",LLM 自行修正
 - **GOAP Scratchpad**: 复杂多步任务先写 Goal+Actions 规划
-- **工具结果截断**: 超 3000 字截断,防上下文污染
+- **工具结果截断**: 超 10000 字截断,防上下文污染
+- **回复长度**: 正常回复不截断,`_reply_text` 按 4000 字/条分段发送;12000 字兜底保险丝
 - **图片缓存**: 同股同日 K 线图复用(_IMG_CACHE 30 张 LRU),玉姐图带 score 不缓存
 - **LLM 重试**: 5xx/网络异常重试 1 次,4xx 不重试,失败给友好提示
 
