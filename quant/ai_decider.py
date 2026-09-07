@@ -59,8 +59,26 @@ def load_api_key():
 class AIDecider:
     def __init__(self, model=None):
         self.api_key = load_api_key()
-        self.base_url = os.environ.get("AI_BASE_URL", DEFAULT_BASE_URL)
-        self.model = model or os.environ.get("AI_MODEL", DEFAULT_MODEL)
+        # 端点列表: 主网关 + 可选备用网关(主网关 5xx/429/网络异常时自动切换)
+        self.endpoints = [
+            {
+                "url": os.environ.get("AI_BASE_URL", DEFAULT_BASE_URL),
+                "model": model or os.environ.get("AI_MODEL", DEFAULT_MODEL),
+                "key": self.api_key,
+            }
+        ]
+        fallback_url = os.environ.get("AI_FALLBACK_URL")
+        if fallback_url:
+            self.endpoints.append(
+                {
+                    "url": fallback_url,
+                    "model": os.environ.get("AI_FALLBACK_MODEL", DEFAULT_MODEL),
+                    "key": os.environ.get("AI_FALLBACK_API_KEY") or self.api_key,
+                }
+            )
+        # 向后兼容: 外部引用 base_url/model 的代码仍可用
+        self.base_url = self.endpoints[0]["url"]
+        self.model = self.endpoints[0]["model"]
 
     def generate(self, prompt, timeout=90):
         """通用文本生成（新闻分析等非交易场景），返回模型原始文本。"""
@@ -115,26 +133,36 @@ class AIDecider:
     def _call_api(self, prompt, timeout=60):
         import httpx
 
-        headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
-        payload = {
-            "model": self.model,
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.3,
-            "max_tokens": 4096,
-        }
-        try:
-            with httpx.Client(timeout=timeout, trust_env=False) as client:
-                resp = client.post(self.base_url, json=payload, headers=headers)
-                if resp.status_code == 200:
-                    msg = resp.json()["choices"][0]["message"]
-                    content = msg.get("content") or ""
-                    reasoning = msg.get("reasoning") or ""
-                    return content + "\n" + reasoning
-                if resp.status_code in (429, 503, 500):
-                    return f"API限流: {resp.status_code}"
-                return f"API错误: {resp.status_code}"
-        except Exception as e:
-            return f"调用失败: {e}"
+        errors = []
+        all_rate_limited = True
+        for ep in self.endpoints:
+            headers = {"Authorization": f"Bearer {ep['key']}", "Content-Type": "application/json"}
+            payload = {
+                "model": ep["model"],
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.3,
+                "max_tokens": 4096,
+            }
+            try:
+                with httpx.Client(timeout=timeout, trust_env=False) as client:
+                    resp = client.post(ep["url"], json=payload, headers=headers)
+                    if resp.status_code == 200:
+                        msg = resp.json()["choices"][0]["message"]
+                        content = msg.get("content") or ""
+                        reasoning = msg.get("reasoning") or ""
+                        return content + "\n" + reasoning
+                    if resp.status_code in (429, 503, 500):
+                        errors.append(f"{ep['url']} -> HTTP {resp.status_code}")
+                        continue
+                    return f"API错误: {resp.status_code}"
+            except Exception as e:
+                all_rate_limited = False
+                errors.append(f"{ep['url']} -> {e}")
+        if errors:
+            # 全部端点都是 429/5xx 时保留"API限流"前缀,调用方的退避重试逻辑依赖它
+            prefix = "API限流" if all_rate_limited else "调用失败"
+            return f"{prefix}: {'; '.join(errors)}"
+        return "调用失败: 无可用端点"
 
     def _parse_response(self, text):
         try:
