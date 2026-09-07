@@ -3264,6 +3264,26 @@ def _is_duplicate_message(msg_id: str) -> bool:
         return False
 
 
+def _extract_post_text(content: dict) -> str:
+    """从富文本(post)消息中提取纯文本。
+
+    post 结构: {"post": {"zh_cn": {"title": ..., "content": [[{tag,...}, ...], ...]}}}
+    支持 zh_cn/zh_tw/en_us 等任意语言 key,取第一个。@提及丢弃(通常是 @机器人)。
+    """
+    post = (content or {}).get("post") or {}
+    data = next(iter(post.values()), {})
+    lines = []
+    for para in data.get("content", []):
+        parts = []
+        for item in para:
+            if item.get("tag") == "text":
+                parts.append(item.get("text", ""))
+            elif item.get("tag") == "a":
+                parts.append(item.get("text", "") or item.get("href", ""))
+        lines.append("".join(parts))
+    return "\n".join(lines).strip()
+
+
 class FeishuBotClient:
     """飞书长连接机器人客户端。"""
 
@@ -3381,17 +3401,18 @@ class FeishuBotClient:
     ) -> None:
         """实际的消息处理(在线程池中执行)。"""
         try:
-            # 仅处理文本消息
-            if msg_type != "text":
-                self._reply_text(chat_id, "目前仅支持文本提问,例如:\n- 分析 600519\n- 市场\n- 玉姐\n- 持仓")
-                return
-
-            # 解析消息内容
+            # 解析消息内容(text=普通文本 / post=富文本,其余类型不支持)
             try:
                 content = json.loads(content_str)
-                text = content.get("text", "").strip()
             except Exception:
-                text = ""
+                content = None
+            if msg_type == "text":
+                text = (content.get("text") or "").strip() if content else ""
+            elif msg_type == "post":
+                text = _extract_post_text(content or {})
+            else:
+                self._reply_text(chat_id, "目前仅支持文本提问,例如:\n- 分析 600519\n- 市场\n- 玉姐\n- 持仓")
+                return
 
             # 去掉 @机器人 的 mention tag (飞书文本里以 @_<user_id> 形式存在)
             text = re.sub(r"@_\w+\s*", "", text).strip()

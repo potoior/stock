@@ -13,6 +13,7 @@ from unittest.mock import patch
 import feishu_bot
 import stock_names
 from feishu_bot import (
+    _extract_post_text,
     _get_session_lock,
     _incr_stats,
     _is_reset_command,
@@ -1361,3 +1362,84 @@ def test_chat_404_all_retries_fail(monkeypatch):
     reply, _history, _images = agent.chat("继续", session_id="test")
     assert "404" in reply
     assert calls["n"] == 3, f"应重试 3 次,实际 {calls['n']}"
+
+
+# ============ 富文本(post)消息处理 ============
+
+
+def test_extract_post_text_basic():
+    """富文本提取:文本段拼接,@提及丢弃,链接保留文字。"""
+    content = {
+        "post": {
+            "zh_cn": {
+                "title": "",
+                "content": [
+                    [
+                        {"tag": "text", "text": "分析一下 "},
+                        {"tag": "text", "text": "600519"},
+                    ],
+                    [
+                        {"tag": "text", "text": "顺便看看 "},
+                        {"tag": "a", "text": "新闻链接", "href": "http://x"},
+                    ],
+                ],
+            }
+        }
+    }
+    assert _extract_post_text(content) == "分析一下 600519\n顺便看看 新闻链接"
+
+
+def test_extract_post_text_at_dropped():
+    """@提及(通常是 @机器人)应被丢弃。"""
+    content = {
+        "post": {
+            "zh_cn": {
+                "content": [
+                    [
+                        {"tag": "at", "user_id": "ou_x", "user_name": "stock机器人"},
+                        {"tag": "text", "text": " 分析 600519"},
+                    ]
+                ]
+            }
+        }
+    }
+    assert _extract_post_text(content) == "分析 600519"
+
+
+def test_extract_post_text_empty():
+    """空结构返回空串。"""
+    assert _extract_post_text({}) == ""
+    assert _extract_post_text({"post": {"zh_cn": {"content": []}}}) == ""
+
+
+def _make_bot_client():
+    import feishu_bot as fb
+
+    return fb.FeishuBotClient.__new__(fb.FeishuBotClient)
+
+
+def test_process_message_post_type_processed(monkeypatch, tmp_path):
+    """富文本消息应提取文字走 Agent,而不是回'仅支持文本提问'。"""
+    bot = _make_bot_client()
+    monkeypatch.setattr(feishu_bot, "AGENT_DB", tmp_path / "agent_history.db")
+    replies = []
+    monkeypatch.setattr(bot, "_reply_text", lambda chat_id, text: replies.append(text))
+    monkeypatch.setattr(
+        feishu_bot.FeishuAgent, "chat",
+        lambda self, text, history=None, session_id="": ("收到: " + text, [], []),
+    )
+    content = json.dumps({
+        "post": {"zh_cn": {"content": [[{"tag": "text", "text": "分析 600519"}]]}}
+    })
+    bot._process_message("chat1", "post", content, "user1", "p2p")
+    assert replies and replies[0] == "收到: 分析 600519"
+    assert all("仅支持文本提问" not in r for r in replies)
+
+
+def test_process_message_image_type_fallback(monkeypatch):
+    """图片等其他类型仍回兜底提示。"""
+    bot = _make_bot_client()
+    replies = []
+    monkeypatch.setattr(bot, "_reply_text", lambda chat_id, text: replies.append(text))
+    bot._process_message("chat1", "image", "{}", "user1", "p2p")
+    assert replies and "仅支持文本提问" in replies[0]
