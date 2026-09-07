@@ -2173,12 +2173,12 @@ def handler_scan_with_strategy(
     """全市场扫描指定策略,返回当日触发 buy 信号的股票列表(选股)。
 
     与 analyze_with_strategy(判断个股) 反向:这里是"给定策略找股票"。
-    耗时约 5-30 分钟(全市场 4700 只),单线程跑(策略函数非线程安全)。
+    耗时约 10 秒-3 分钟(全市场约 4700 只,批量拉取),单线程跑(策略函数非线程安全)。
     """
     try:
         import strategy_engine as se
         log.info(
-            "开始策略选股 %s, top_n=%d, min_amount_yi=%s, limit=%d (耗时约 5-30 分钟)",
+            "开始策略选股 %s, top_n=%d, min_amount_yi=%s, limit=%d",
             strategy_id, top_n, min_amount_yi, limit,
         )
 
@@ -2259,7 +2259,7 @@ def handler_scan_combo(
     strategy_ids: list[str], mode: str = "and", top_n: int = 20,
     min_amount_yi: float = 0.5, limit: int = 0
 ) -> str:
-    """多策略组合选股:AND=共振(全部触发), OR=任一触发。耗时约 5-30 分钟。"""
+    """多策略组合选股:AND=共振(全部触发), OR=任一触发。耗时约 10 秒-3 分钟。"""
     try:
         import strategy_engine as se
         log.info(
@@ -2709,7 +2709,7 @@ TOOL_HANDLERS = {
 MAX_AGENT_STEPS = 6  # 最多 6 步推理(避免无限循环)
 
 # 耗时工具(超过 10 秒),需先发"思考中"提示用户
-SLOW_TOOLS = {"backtest_strategy", "grid_search_strategy", "scan_with_strategy", "scan_with_yujie", "combo_backtest", "scan_combo"}
+SLOW_TOOLS = {"backtest_strategy", "grid_search_strategy", "scan_with_strategy", "scan_with_yujie", "combo_backtest", "scan_combo", "screen_stocks"}
 
 # 工具结果回灌给 LLM 时的字符上限(防止上下文污染,OpenClaw 风格)
 TOOL_RESULT_MAX_CHARS = 6000

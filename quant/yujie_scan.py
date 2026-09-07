@@ -12,7 +12,7 @@
   6. 突破信号(金叉+突破)  +2   价格突破近N日高点 且 MACD 金叉
   7. RSI 金叉             +1   RSI6 上穿 RSI12
   8. 日线多线多头         +1   MA5>MA10>MA20>MA60
-  9. 120日低位区          +1   现价 ≤ (高+低)×低位比例
+  9. 120日低位区          +1   现价 ≤ 低点 + (高-低)×低位比例
   10. 距高点回撤≥阈值     +1   距120日高点回撤 ≥ 阈值
 
 用法：
@@ -485,6 +485,7 @@ def scan_all_cached(
 
     t0 = _time.time()
     params = get_params()
+    min_amt = float(params["scope"].get("min_amount_yi", 0.5))
 
     # 1. 从 daily 表取所有有缓存的股票(同 scan_with_strategy 优化思路)
     # 优化: 不用 N+1 sqlite(每只单独 connect + read_sql),改为先拿 candidates 再批量拉
@@ -508,6 +509,20 @@ def scan_all_cached(
                 candidates.append(code)
         if limit and limit < len(candidates):
             candidates = candidates[:limit]
+
+        # 跳过 ST/退市(名字来自 stock_names sqlite 缓存,不联网;未命中缓存的保留)
+        # 与 run_once 盘前扫描口径一致
+        try:
+            import stock_names
+
+            _name_map = stock_names.lookup_names(candidates)
+            candidates = [
+                c for c in candidates
+                if "ST" not in (_name_map.get(c, "") or "") and "退" not in (_name_map.get(c, "") or "")
+            ]
+        except Exception:
+            pass
+
 
         # 1c. 一次性批量拉取 candidates 的全部历史数据(避免 N+1)
         # 用 IN(...) 限制只拉所需股票,320 天 × N 只
@@ -543,6 +558,10 @@ def scan_all_cached(
         try:
             df = grouped.get(code)
             if df is None or len(df) < 60:
+                return "", 0, [], None
+            # 流动性过滤(末日 close×volume 近似,与 run_once 口径一致)
+            amt_yi = float(df["close"].iloc[-1]) * float(df["volume"].iloc[-1]) / 1e8
+            if amt_yi < min_amt:
                 return "", 0, [], None
             sc, hits, detail = score_stock(code, params, df=df)
             _time.sleep(0.001)  # 让出 GIL(同上,防 ws 心跳饿死)

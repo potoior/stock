@@ -104,6 +104,49 @@ def test_analyze_insufficient_history(monkeypatch):
     assert "error" in r
 
 
+# ---------- 盘中实时价修正 ----------
+
+
+def test_analyze_realtime_price_updates_today_bar(monkeypatch):
+    """盘中:最后一根是当日 bar 时,实时价应参与信号计算(不再用过期缓存价)。"""
+    from datetime import datetime
+
+    df = _make_df(n=200)
+    # 最后一根改成今天
+    today = datetime.now()
+    df.loc[len(df) - 1, "date"] = today
+    df["close"] = df["close"].astype(float)
+    df.loc[len(df) - 1, "close"] = 9.0  # 缓存里的旧价
+
+    monkeypatch.setattr("strategy_engine.get_daily_data", lambda code, days=320: df)
+    monkeypatch.setattr(
+        "strategy_engine.fetch_realtime",
+        lambda codes: [{"code": "000001", "name": "测试", "price": 12.34, "pct": 1.2}],
+    )
+    r = se.analyze("000001", use_ai=False)
+    # 实时价应反映在 indicators 和 kline 最后一根
+    assert r["kline"][-1]["close"] == 12.34
+    # 信号计算用的的是实时价
+    assert r["indicators"]["ma5"] == round(
+        float(df["close"].iloc[-5:].mean()), 2
+    )
+
+
+def test_analyze_realtime_price_ignores_historical_bar(monkeypatch):
+    """最后一根不是当日 bar(如昨日收盘后),不能篡改历史 bar。"""
+    df = _make_df(n=200)  # 日期全是 2023 年
+    df.loc[len(df) - 1, "close"] = 9.0
+    original_close = float(df["close"].iloc[-1])
+
+    monkeypatch.setattr("strategy_engine.get_daily_data", lambda code, days=320: df)
+    monkeypatch.setattr(
+        "strategy_engine.fetch_realtime",
+        lambda codes: [{"code": "000001", "name": "测试", "price": 12.34, "pct": 1.2}],
+    )
+    r = se.analyze("000001", use_ai=False)
+    assert r["kline"][-1]["close"] == original_close
+
+
 # ---------- verdict_from_votes 回归测试 ----------
 
 

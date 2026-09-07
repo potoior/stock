@@ -120,7 +120,7 @@ def test_kline_pattern_doji_neutral():
 
 
 def test_kline_pattern_hammer_bull():
-    """锤头(小实体在上,长下影)→ 看涨形态。"""
+    """锤头(小实体在上,长下影)→ 看涨形态。阳线版本。"""
     n = 80
     df = _make_df(n=n, seed=42)
     last = n - 1
@@ -136,8 +136,25 @@ def test_kline_pattern_hammer_bull():
     assert "锤头" in rsn
 
 
+def test_kline_pattern_hammer_bearish_candle():
+    """锤头经典定义不限阴阳线:阴线锤头也应识别。"""
+    n = 80
+    df = _make_df(n=n, seed=42)
+    last = n - 1
+    base = df["close"].iloc[last - 1]
+    # 阴线锤头:开 > 收(小阴),长下影
+    _set_kline(df, last,
+               open_=base * 0.99,
+               close=base * 0.98,  # 小阴
+               high=base * 0.995,
+               low=base * 0.94)    # 长下影
+    ctx = _ctx(df, i=last)
+    sg, rsn = se.strategy_kline_pattern(ctx, se.DEFAULT_STRATEGY_PARAMS["kline_pattern"])
+    assert "锤头" in rsn
+
+
 def test_kline_pattern_shooting_star_bear():
-    """流星(小实体在下,长上影)→ 看跌形态。"""
+    """流星(小实体在下,长上影)→ 看跌形态。阴线版本。"""
     n = 80
     df = _make_df(n=n, seed=42)
     last = n - 1
@@ -145,6 +162,23 @@ def test_kline_pattern_shooting_star_bear():
     _set_kline(df, last,
                open_=base * 1.01,
                close=base * 1.005,  # 小阴
+               high=base * 1.06,  # 长上影
+               low=base * 1.0)
+    ctx = _ctx(df, i=last)
+    sg, rsn = se.strategy_kline_pattern(ctx, se.DEFAULT_STRATEGY_PARAMS["kline_pattern"])
+    assert "流星" in rsn
+
+
+def test_kline_pattern_shooting_star_bullish_candle():
+    """流星经典定义不限阴阳线:阳线流星也应识别。"""
+    n = 80
+    df = _make_df(n=n, seed=42)
+    last = n - 1
+    base = df["close"].iloc[last - 1]
+    # 阳线流星:收 > 开(小阳),长上影
+    _set_kline(df, last,
+               open_=base * 1.005,
+               close=base * 1.01,  # 小阳
                high=base * 1.06,  # 长上影
                low=base * 1.0)
     ctx = _ctx(df, i=last)
@@ -268,31 +302,108 @@ def test_kline_pattern_no_pattern_normal():
 # ---------------- MACD 顶背离 ----------------
 
 
+def test_find_top_divergence_detects_real_divergence():
+    """构造教科书式顶背离(价创新高+指标高点下降)→ 应检出(回归测试,修复前恒 False)。"""
+    n = 60
+    price = np.full(n, 10.0)
+    price[20] = 12.0  # 前高
+    price[21:] = 11.0
+    price[-1] = 12.5  # 末日新高
+    ind = np.full(n, 1.0)
+    ind[20] = 3.0  # 前高处指标高
+    ind[-1] = 2.0  # 新高处指标低 → 顶背离
+    div, p1, p0, i1, i0 = se._find_top_divergence(pd.Series(price), pd.Series(ind), n=n)
+    assert div is True
+    assert p1 == 12.5 and p0 == 12.0
+    assert i1 == 2.0 and i0 == 3.0
+
+
+def test_find_top_divergence_no_divergence_when_indicator_rises():
+    """价格新高但指标也新高 → 无背离。"""
+    n = 60
+    price = np.full(n, 10.0)
+    price[20] = 12.0
+    price[21:] = 11.0
+    price[-1] = 12.5
+    ind = np.full(n, 1.0)
+    ind[20] = 2.0
+    ind[-1] = 3.0  # 指标随价格创新高
+    div, *_ = se._find_top_divergence(pd.Series(price), pd.Series(ind), n=n)
+    assert div is False
+
+
+def test_find_top_divergence_stale_peak_no_signal():
+    """当前高点太久远(> recency 日)是陈旧形态,不应再发信号。"""
+    n = 60
+    price = np.full(n, 10.0)
+    price[10] = 12.0   # 前高
+    price[11:] = 11.0
+    price[22] = 12.5   # 38 天前创新高,之后一直未收复
+    ind = np.full(n, 1.0)
+    ind[10] = 3.0
+    ind[22] = 2.0  # 形态上是顶背离
+    div, p1, *_ = se._find_top_divergence(pd.Series(price), pd.Series(ind), n=n, recency=20)
+    assert div is False
+    assert p1 is None  # 陈旧形态直接返回无信号
+    # 放宽时效约束后应能检出
+    div, *_ = se._find_top_divergence(pd.Series(price), pd.Series(ind), n=n, recency=60)
+    assert div is True
+
+
+def test_find_bottom_divergence_detects_real_divergence():
+    """构造教科书式底背离(价创新低+指标低点抬升)→ 应检出。"""
+    n = 60
+    price = np.full(n, 10.0)
+    price[20] = 8.0  # 前低
+    price[21:] = 9.0
+    price[-1] = 7.5  # 末日创新低
+    ind = np.full(n, 1.0)
+    ind[20] = 0.5  # 前低处指标低
+    ind[-1] = 0.8  # 新低处指标高 → 底背离
+    div, p1, p0, i1, i0 = se._find_bottom_divergence(pd.Series(price), pd.Series(ind), n=n)
+    assert div is True
+    assert p1 == 7.5 and p0 == 8.0
+    assert i1 == 0.8 and i0 == 0.5
+
+
 def test_macd_top_divergence_detected():
     """构造 MACD 顶背离(价创新高但 DIF 下降)→ sell。"""
     n = 80
     df = _make_df(n=n, seed=42)
-    # 让价格逐步创新高,但 MACD DIF 在第二个高点更低
-    # 简单做法:末日价格远高于 30 日前,但 MACD 在 30 日前更高
-    base_idx = n - 30
-    base_close = df["close"].iloc[base_idx]
-    # 末日价格创新高
-    df.loc[n - 1, "close"] = base_close * 1.15
-    df.loc[n - 1, "high"] = base_close * 1.16
+    # 价格:前高(窗口内)→ 回落 → 末日创新高
+    close = np.full(n, 10.0)
+    close[40] = 12.0
+    close[41:] = 11.0
+    close[n - 1] = 12.5
+    df["close"] = close
     ctx = _ctx(df, i=n - 1)
+    # 直接注入 DIF:末日(新高)DIF 低于前高处 DIF → 顶背离
+    macd_diff = np.full(n, 1.0)
+    macd_diff[40] = 3.0
+    macd_diff[n - 1] = 2.0
+    ctx["macd_diff"] = pd.Series(macd_diff)
     sg, rsn = se.strategy_macd_top_divergence(ctx, se.DEFAULT_STRATEGY_PARAMS["macd_top_divergence"])
-    # 由于构造数据未必能精确产生顶背离,宽松断言:返回 sell 或 hold 但不报错
-    assert sg in ("sell", "hold")
-    assert isinstance(rsn, str)
+    assert sg == "sell"
+    assert "顶背离" in rsn
 
 
 def test_macd_top_divergence_no_divergence():
     """无顶背离(MACD 也创新高)→ hold。"""
-    df = _make_df(n=250, seed=42, trend=0.05)  # 上升趋势
-    ctx = _ctx(df)
+    n = 80
+    df = _make_df(n=n, seed=42)
+    close = np.full(n, 10.0)
+    close[40] = 12.0
+    close[41:] = 11.0
+    close[n - 1] = 12.5
+    df["close"] = close
+    ctx = _ctx(df, i=n - 1)
+    # DIF 随价格创新高 → 无背离
+    macd_diff = np.full(n, 1.0)
+    macd_diff[40] = 2.0
+    macd_diff[n - 1] = 3.0
+    ctx["macd_diff"] = pd.Series(macd_diff)
     sg, rsn = se.strategy_macd_top_divergence(ctx, se.DEFAULT_STRATEGY_PARAMS["macd_top_divergence"])
-    # 强趋势下不应有顶背离
-    assert sg in ("hold", "sell")
+    assert sg == "hold"
 
 
 def test_macd_top_divergence_data_insufficient():
@@ -314,6 +425,97 @@ def test_rsi_top_divergence_data_insufficient():
     sg, rsn = se.strategy_rsi_top_divergence(ctx, se.DEFAULT_STRATEGY_PARAMS["rsi_top_divergence"])
     assert sg == "hold"
     assert "数据不足" in rsn
+
+
+def test_rsi_top_divergence_detected():
+    """构造 RSI 顶背离(价创新高但 RSI 下降)→ sell。"""
+    n = 80
+    df = _make_df(n=n, seed=42)
+    close = np.full(n, 10.0)
+    close[40] = 12.0
+    close[41:] = 11.0
+    close[n - 1] = 12.5
+    df["close"] = close
+    ctx = _ctx(df, i=n - 1)
+    # 直接注入 RSI:末日(新高)RSI 低于前高处 RSI → 顶背离
+    rsi = np.full(n, 50.0)
+    rsi[40] = 80.0
+    rsi[n - 1] = 60.0
+    ctx["rsi6"] = pd.Series(rsi)
+    sg, rsn = se.strategy_rsi_top_divergence(ctx, se.DEFAULT_STRATEGY_PARAMS["rsi_top_divergence"])
+    assert sg == "sell"
+    assert "顶背离" in rsn
+
+
+# ---------------- 底背离 ----------------
+
+
+def test_macd_bottom_divergence_detected():
+    """构造 MACD 底背离(价创新低但 DIF 抬升)→ buy。"""
+    n = 80
+    df = _make_df(n=n, seed=42)
+    close = np.full(n, 10.0)
+    close[40] = 8.0  # 前低(窗口内)
+    close[41:] = 9.0
+    close[n - 1] = 7.5  # 末日创新低
+    df["close"] = close
+    ctx = _ctx(df, i=n - 1)
+    macd_diff = np.full(n, 1.0)
+    macd_diff[40] = 0.3
+    macd_diff[n - 1] = 0.6  # 新低处 DIF 抬升 → 底背离
+    ctx["macd_diff"] = pd.Series(macd_diff)
+    sg, rsn = se.strategy_macd_bottom_divergence(ctx, se.DEFAULT_STRATEGY_PARAMS["macd_bottom_divergence"])
+    assert sg == "buy"
+    assert "底背离" in rsn
+
+
+def test_macd_bottom_divergence_no_divergence():
+    """价格新低但 DIF 也新低 → 跌势延续 → hold。"""
+    n = 80
+    df = _make_df(n=n, seed=42)
+    close = np.full(n, 10.0)
+    close[40] = 8.0
+    close[41:] = 9.0
+    close[n - 1] = 7.5
+    df["close"] = close
+    ctx = _ctx(df, i=n - 1)
+    macd_diff = np.full(n, 1.0)
+    macd_diff[40] = 0.6
+    macd_diff[n - 1] = 0.3  # DIF 随价格创新低
+    ctx["macd_diff"] = pd.Series(macd_diff)
+    sg, rsn = se.strategy_macd_bottom_divergence(ctx, se.DEFAULT_STRATEGY_PARAMS["macd_bottom_divergence"])
+    assert sg == "hold"
+
+
+def test_rsi_bottom_divergence_detected():
+    """构造 RSI 底背离(价创新低但 RSI 抬升)→ buy。"""
+    n = 80
+    df = _make_df(n=n, seed=42)
+    close = np.full(n, 10.0)
+    close[40] = 8.0
+    close[41:] = 9.0
+    close[n - 1] = 7.5
+    df["close"] = close
+    ctx = _ctx(df, i=n - 1)
+    rsi = np.full(n, 50.0)
+    rsi[40] = 20.0
+    rsi[n - 1] = 35.0  # 新低处 RSI 抬升 → 底背离
+    ctx["rsi6"] = pd.Series(rsi)
+    sg, rsn = se.strategy_rsi_bottom_divergence(ctx, se.DEFAULT_STRATEGY_PARAMS["rsi_bottom_divergence"])
+    assert sg == "buy"
+    assert "底背离" in rsn
+
+
+def test_bottom_divergence_strategies_registered():
+    """底背离策略应注册到 BUILTIN 且在扫描白名单中。"""
+    import re
+
+    src = open(se.__file__).read()
+    for sid in ("macd_bottom_divergence", "rsi_bottom_divergence"):
+        assert sid in se.DEFAULT_STRATEGY_PARAMS, f"{sid} 不在 DEFAULT_STRATEGY_PARAMS"
+        pattern = rf'\("{sid}\",\s*\"[^\"]+\",\s*strategy_{sid}\)'
+        assert re.search(pattern, src), f"{sid} 未注册到 BUILTIN"
+        assert sid in se.BUILTIN_STRATEGY_IDS, f"{sid} 不在扫描白名单"
 
 
 def test_rsi_top_divergence_normal_run():
@@ -413,7 +615,7 @@ def test_scan_with_strategy_accepts_kline_pattern():
     """scan_with_strategy 应接受 kline_pattern(不联网)。"""
     df = _make_df(n=120, seed=42)
     from unittest.mock import patch
-    with patch("strategy_engine.get_daily_data", return_value=df):
+    with patch("strategy_engine._bulk_fetch_daily", return_value={"600519": df.copy()}):
         with patch("sqlite3.connect") as mock_connect:
             mock_conn = mock_connect.return_value
             mock_conn.execute.return_value.fetchall.return_value = [
@@ -428,7 +630,7 @@ def test_scan_with_strategy_accepts_gap():
     """scan_with_strategy 应接受 gap(不联网)。"""
     df = _make_df(n=120, seed=42)
     from unittest.mock import patch
-    with patch("strategy_engine.get_daily_data", return_value=df):
+    with patch("strategy_engine._bulk_fetch_daily", return_value={"600519": df.copy()}):
         with patch("sqlite3.connect") as mock_connect:
             mock_conn = mock_connect.return_value
             mock_conn.execute.return_value.fetchall.return_value = [

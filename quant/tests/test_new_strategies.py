@@ -20,7 +20,7 @@ def _make_df(n=250, seed=42, trend=0.0):
     ).reset_index(drop=True)
 
 
-def _ctx(df, i=None):
+def _ctx(df, i=None, code="600519"):
     if i is None:
         i = len(df) - 1
     return {
@@ -28,6 +28,7 @@ def _ctx(df, i=None):
         "price": float(df["close"].iloc[i]),
         "df": df,
         "close": df["close"],
+        "code": code,
     }
 
 
@@ -193,6 +194,42 @@ def test_zt_low_volume_hold():
     sig, reason = se.strategy_zt(_ctx(df), {"zt_pct": 9.6, "min_vol_ratio": 1.5})
     assert sig == "hold"
     assert "量比" in reason or "不足" in reason
+
+
+def test_zt_gem_board_not_limit_up():
+    """创业板 +15% 未到 20% 涨停价,不应报涨停(回归:老 9.6% 阈值会误判)。"""
+    n = 30
+    close = np.full(n, 10.0)
+    close[-1] = 11.5  # +15%,未到 20% 板
+    volume = np.full(n, 1e6)
+    volume[-1] = 3e6  # 放量
+    df = pd.DataFrame({
+        "date": pd.date_range("2023-01-01", periods=n, freq="B").strftime("%Y%m%d"),
+        "open": close, "close": close, "high": close * 1.01, "low": close * 0.99,
+        "volume": volume,
+    })
+    params = {"zt_pct": 9.6, "min_vol_ratio": 1.5}
+    sig, reason = se.strategy_zt(_ctx(df, code="300001"), params)
+    assert sig == "hold"
+    assert "涨停封板" not in reason  # 未到 20% 板,绝不能报"涨停封板"
+
+
+def test_zt_gem_board_seals_at_20pct():
+    """创业板收盘达 20% 涨停价(12.00)应报涨停。"""
+    n = 30
+    close = np.full(n, 10.0)
+    close[-1] = 12.0  # 涨停价 round(10*1.2, 2) = 12.00
+    volume = np.full(n, 1e6)
+    volume[-1] = 3e6
+    df = pd.DataFrame({
+        "date": pd.date_range("2023-01-01", periods=n, freq="B").strftime("%Y%m%d"),
+        "open": close, "close": close, "high": close * 1.01, "low": close * 0.99,
+        "volume": volume,
+    })
+    params = {"zt_pct": 9.6, "min_vol_ratio": 1.5}
+    sig, reason = se.strategy_zt(_ctx(df, code="300001"), params)
+    assert sig == "buy"
+    assert "涨停" in reason
 
 
 # ---------------- 注册到 BUILTIN ----------------

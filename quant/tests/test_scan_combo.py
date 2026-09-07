@@ -61,8 +61,18 @@ def test_combo_no_scan_strategy(tmp_path, monkeypatch):
     db = tmp_path / "cache.db"
     monkeypatch.setattr(se, "CACHE_DB", db)
     _seed_daily(db, "600519", _rising_kline())
-    r = se.scan_combo_strategies(["macd", "policy_select"])
+    r = se.scan_combo_strategies(["macd", "policy_select"], mode="and")
     assert "error" in r
+
+
+def test_combo_rejects_inert_strategy(tmp_path, monkeypatch):
+    """观察型策略(只返回 hold,不产生买卖信号)不允许进组合扫描。"""
+    db = tmp_path / "cache.db"
+    monkeypatch.setattr(se, "CACHE_DB", db)
+    _seed_daily(db, "600519", _rising_kline())
+    r = se.scan_combo_strategies(["macd", "zt_pull"], mode="and")
+    assert "error" in r
+    assert "观察型" in r["error"]
 
 
 def test_combo_wrong_count(tmp_path, monkeypatch):
@@ -71,6 +81,26 @@ def test_combo_wrong_count(tmp_path, monkeypatch):
     _seed_daily(db, "600519", _rising_kline())
     assert "error" in se.scan_combo_strategies(["macd"], mode="and")
     assert "error" in se.scan_combo_strategies(["macd"] * 6, mode="and")
+
+
+def test_combo_invalid_mode(tmp_path, monkeypatch):
+    """mode 只允许 and/or,非法值应报错而非静默按 or 处理。"""
+    db = tmp_path / "cache.db"
+    monkeypatch.setattr(se, "CACHE_DB", db)
+    _seed_daily(db, "600519", _rising_kline())
+    r = se.scan_combo_strategies(["macd", "kdj"], mode="AND")
+    assert "error" in r
+    assert "mode" in r["error"]
+
+
+def test_combo_duplicate_strategy(tmp_path, monkeypatch):
+    """重复策略 id 应报错。"""
+    db = tmp_path / "cache.db"
+    monkeypatch.setattr(se, "CACHE_DB", db)
+    _seed_daily(db, "600519", _rising_kline())
+    r = se.scan_combo_strategies(["macd", "macd"], mode="and")
+    assert "error" in r
+    assert "重复" in r["error"]
 
 
 def test_combo_hits_structure(tmp_path, monkeypatch):

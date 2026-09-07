@@ -263,6 +263,27 @@ def test_demon_stock_overheated_sell():
     assert "过热" in reason
 
 
+def test_demon_stock_overheat_takes_priority_over_start():
+    """既满足启动(3连涨≥5%)又过热(5日累计≥30%)时应报 sell,不报 buy。"""
+    n = 30
+    close = np.full(n, 10.0)
+    close[-6] = 10.0
+    close[-5] = 10.2   # 5日累计 13.5/10.2-1 = 32.4% ≥ 30%(过热)
+    close[-4] = 11.0   # +7.8%
+    close[-3] = 11.6   # +5.5%
+    close[-2] = 12.4   # +6.9%
+    close[-1] = 13.5   # +8.9%  近3日各涨≥5%(启动)
+    df = pd.DataFrame({
+        "date": pd.date_range("2023-01-01", periods=n, freq="B").strftime("%Y%m%d"),
+        "open": close, "close": close, "high": close * 1.01, "low": close * 0.99,
+        "volume": [1e6] * n,
+    })
+    ctx = _ctx(df)
+    sg, reason = se.strategy_demon_stock(ctx, {"consec": 3, "consec_pct": 5, "hot": 5, "hot_pct": 30})
+    assert sg == "sell"
+    assert "过热" in reason
+
+
 def test_dragon_pullback_no_zt_hold():
     """近 30 日无涨停 → hold。"""
     df = _make_df(n=120, seed=42)
@@ -464,6 +485,29 @@ def test_zt_type_not_zt_hold():
     ctx = _ctx(df)
     sg, _ = se.strategy_zt_type(ctx, se.DEFAULT_STRATEGY_PARAMS["zt_type"])
     assert sg == "hold"
+
+
+def test_zt_type_gem_board_needs_20pct():
+    """创业板 +15%(未到 20% 板)不应判为涨停;一字板到 20% 涨停价 → buy。"""
+    n = 30
+    df = pd.DataFrame({
+        "date": pd.date_range("2023-01-01", periods=n, freq="B").strftime("%Y%m%d"),
+        "open": np.full(n, 10.0), "close": np.full(n, 10.0),
+        "high": np.full(n, 10.1), "low": np.full(n, 9.9),
+        "volume": [1e6] * n,
+    })
+    # +15%:老 9.6% 阈值会误判为涨停,修复后应 hold
+    df.loc[n - 1, "close"] = 11.5
+    ctx = _ctx(df, code="300001")
+    sg, _ = se.strategy_zt_type(ctx, se.DEFAULT_STRATEGY_PARAMS["zt_type"])
+    assert sg == "hold"
+    # 一字板到 20% 涨停价(12.00):应 buy,且展示的涨停价是真实的 12.00
+    for col in ("open", "close", "high", "low"):
+        df.loc[n - 1, col] = 12.0
+    ctx = _ctx(df, code="300001")
+    sg, reason = se.strategy_zt_type(ctx, se.DEFAULT_STRATEGY_PARAMS["zt_type"])
+    assert sg == "buy"
+    assert "涨停价12.00" in reason
 
 
 def test_zt_unsealed_open_board_sell():

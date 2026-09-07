@@ -356,7 +356,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "scan_with_strategy",
-            "description": "全市场扫描指定策略,返回当日触发 buy 信号的股票列表(选股)。耗时约 5-30 分钟(全市场约4700只)。用户问'用X策略选股/哪些股票今天触发X信号/X策略选股/X策略选哪些'时调用。注意:与 analyze_with_strategy(判断个股) 不同,本工具是反向操作(给定策略找股票)。",
+            "description": "全市场扫描指定策略,返回当日触发 buy 信号的股票列表(选股)。耗时约 10 秒-3 分钟(全市场约4700只,批量拉取)。用户问'用X策略选股/哪些股票今天触发X信号/X策略选股/X策略选哪些'时调用。注意:与 analyze_with_strategy(判断个股) 不同,本工具是反向操作(给定策略找股票)。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -375,7 +375,7 @@ TOOLS = [
             "name": "scan_combo",
             "description": (
                 "多策略组合选股:全市场扫描同时/任一触发多个策略 buy 信号的股票(交叉验证,共振选股)。"
-                "耗时约 5-30 分钟。用户说'找MACD金叉+KDJ超卖的股票/多策略共振选股/同时触发X和Y的股票'时调用。"
+                "耗时约 10 秒-3 分钟。用户说'找MACD金叉+KDJ超卖的股票/多策略共振选股/同时触发X和Y的股票'时调用。"
                 "AND 模式=全部触发(少而精), OR 模式=任一触发(宽松)。"
             ),
             "parameters": {
@@ -589,8 +589,8 @@ SYSTEM_PROMPT = """你是 A 股量化分析助手(飞书群聊 Bot),有 33 个�
 - combo_backtest(strategy_ids, mode?, horizon?, sample?): 多策略组合回测(AND/OR),耗时1-3分钟
   · mode: and=同日同时触发, or=任一触发
   · 示例: "组合回测MACD和BOLL" / "MACD+KDJ同时触发效果"
-- scan_with_strategy(strategy_id, top_n?, min_amount_yi?, limit?): 全市场扫描某策略选股(5-30分钟)
-- scan_combo(strategy_ids, mode?, top_n?, ...): 多策略组合选股(交叉验证,5-30分钟)
+- scan_with_strategy(strategy_id, top_n?, min_amount_yi?, limit?): 全市场扫描某策略选股(约10秒-3分钟)
+- scan_combo(strategy_ids, mode?, top_n?, ...): 多策略组合选股(交叉验证,约10秒-3分钟)
   · mode: and=全部触发(共振,少而精), or=任一触发(宽松)
   · 示例: "找MACD金叉+KDJ超卖的股票" / "多策略共振选股"
 - scan_with_yujie(top_n?, min_score?, limit?): 全市场玉姐评分实时扫描(1-3分钟)

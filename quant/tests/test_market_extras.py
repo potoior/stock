@@ -817,3 +817,53 @@ def test_handler_watchlist_group_in_p2p_rejected(monkeypatch):
     out = feishu_bot.handler_watchlist("group_list", session_id="user_x:user_x")
     assert "群聊" in out or "私聊" in out
     assert "加自选" in out  # 提示用个人自选
+
+
+# ---------------- _get_market_snapshot 快照修复 ----------------
+
+
+def test_snapshot_full_market_pagination(monkeypatch):
+    """快照应按 pz=100 拉全市场,遇到尾页(<100 只)提前结束。"""
+    import stock_market_extras as _sme
+
+    calls = []
+
+    def fake_get_json(url, *a, **k):
+        calls.append(url)
+        pn = len(calls)
+        if pn == 1:
+            diff = [{"f12": f"6000{pn:03d}", "f14": "股", "f2": 10, "f3": 1.0,
+                     "f162": 20.0, "f167": 5.0, "f116": 1e10}] * 100
+        else:
+            diff = [{"f12": f"6000{pn:03d}", "f14": "股", "f2": 10, "f3": 1.0,
+                     "f162": 20.0, "f167": 5.0, "f116": 1e10}] * 30  # 尾页
+        return {"data": {"diff": diff}}
+
+    monkeypatch.setattr(_sme, "_MARKET_SNAPSHOT", None)
+    monkeypatch.setattr(_sme, "_MARKET_SNAPSHOT_TS", 0.0)
+    monkeypatch.setattr(_sme, "_get_json", fake_get_json)
+    out = _sme._get_market_snapshot()
+    assert len(out) == 130  # 100 + 30
+    assert "pz=100" in calls[0]  # 全量分页,不是 pz=20
+
+
+def test_snapshot_empty_not_cached(monkeypatch):
+    """空结果(接口失败)不应缓存,下次调用立即重试。"""
+    import stock_market_extras as _sme
+
+    call_count = [0]
+
+    def fake_get_json(url, *a, **k):
+        call_count[0] += 1
+        return None  # 模拟接口 502
+
+    monkeypatch.setattr(_sme, "_MARKET_SNAPSHOT", None)
+    monkeypatch.setattr(_sme, "_MARKET_SNAPSHOT_TS", 0.0)
+    monkeypatch.setattr(_sme, "_get_json", fake_get_json)
+    # 第一次调用
+    out1 = _sme._get_market_snapshot()
+    assert out1 == []
+    # 第二次调用:如果空结果被缓存,不会再调 _get_json
+    out2 = _sme._get_market_snapshot()
+    assert out2 == []
+    assert call_count[0] == 4  # 两次调用 × (1次尝试+1次重试) = 未缓存,每次都重试

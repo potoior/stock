@@ -354,7 +354,9 @@ def _get_market_snapshot() -> list[dict]:
     """获取全市场行情快照(5 分钟缓存),返回所有 A 股的 PE/PB/市值原始数据。
 
     Double-checked locking: 先无锁检查缓存(快),过期时加锁再检查一次(防
-    多线程都进入拉取临界区,重复拉 60 页浪费 18s 网络)。
+    多线程都进入拉取临界区,重复拉 60 页浪费 20s 网络)。
+    60 页 × 100 只 = 6000 只容量,覆盖全市场(~5500 只)。
+    空结果(接口失败)不缓存,避免 5 分钟内一直"接口不可用"。
     """
     global _MARKET_SNAPSHOT, _MARKET_SNAPSHOT_TS
     import time
@@ -369,9 +371,9 @@ def _get_market_snapshot() -> list[dict]:
             return _MARKET_SNAPSHOT
         # 重新拉取
         out: list[dict] = []
-        for pn in range(1, 61):  # 最多 60 页 × 20 = 1200 只(覆盖主要 A 股)
+        for pn in range(1, 61):  # 60 页 × 100 = 6000 只容量,覆盖全市场
             url = (
-                f"http://push2.eastmoney.com/api/qt/clist/get?pn={pn}&pz=20&po=1&np=1"
+                f"http://push2.eastmoney.com/api/qt/clist/get?pn={pn}&pz=100&po=1&np=1"
                 f"&fltt=2&invt=2&fid=f3&fs={MARKET_FS}"
                 f"&fields=f12,f14,f2,f3,f162,f167,f116"
             )
@@ -385,7 +387,11 @@ def _get_market_snapshot() -> list[dict]:
                 break
             for r in data["data"]["diff"]:
                 out.append(r)
+            if len(data["data"]["diff"]) < 100:
+                break  # 尾页
             time.sleep(0.3)
+        if not out:
+            return out  # 空结果不缓存,下次调用立即重试
         _MARKET_SNAPSHOT = out
         _MARKET_SNAPSHOT_TS = now
         return out
@@ -413,7 +419,7 @@ def screen_stocks(
     Returns: list[dict] 或 {"error": str}(快照为空时)
              list 元素: {code, name, price, pct, pe_ttm, pb, total_mv_yi}
 
-    耗时: 首次 5-15 秒(拉 10 页),5 分钟内复用缓存秒回
+    耗时: 首次 20-40 秒(拉 60 页全市场),5 分钟内复用缓存秒回
     """
     snapshot = _get_market_snapshot()
     if not snapshot:

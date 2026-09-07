@@ -35,8 +35,13 @@ def compute_kdj(df, n=9, k1=3, d1=3):
 
 
 def compute_boll(df, period=20, std=2):
+    """BOLL 布林带(通达信口径)。
+
+    通达信公式: BOLL:MA(CLOSE,M); UB:BOLL+P*STD(CLOSE,M); LB:BOLL-P*STD(CLOSE,M)
+    STD 为"估算标准差"(样本标准差,分母 N-1)。
+    """
     mid = df["close"].rolling(period).mean()
-    sd = df["close"].rolling(period).std(ddof=0)
+    sd = df["close"].rolling(period).std(ddof=1)
     return mid + sd * std, mid, mid - sd * std
 
 
@@ -54,12 +59,13 @@ def compute_bias(df, p1=6, p2=12, p3=24):
 
 
 def compute_bbiboll(df, m1=3, m2=6, m3=12, m4=24, n=11, m=6):
+    """BBIBOLL 多空布林带(通达信口径),STD 同样用估算标准差(n-1)。"""
     ma1 = df["close"].rolling(m1).mean()
     ma2 = df["close"].rolling(m2).mean()
     ma3 = df["close"].rolling(m3).mean()
     ma4 = df["close"].rolling(m4).mean()
     bbi = (ma1 + ma2 + ma3 + ma4) / 4
-    sd = bbi.rolling(n).std(ddof=0)
+    sd = bbi.rolling(n).std(ddof=1)
     return bbi + sd * m, bbi, bbi - sd * m
 
 
@@ -161,19 +167,29 @@ def compute_mos_lows(df, diff=None, dea=None):
 
 
 def compute_dmi(df, n=14, m=6):
+    """DMI 趋向指标(通达信口径)。
+
+    通达信公式(EXPMEMA = Wilder 平滑,平滑系数 1/N):
+      MTR := EXPMEMA(MAX(MAX(H-L, ABS(H-REF(C,1))), ABS(L-REF(C,1))), N)
+      HD  := H-REF(H,1); LD := REF(L,1)-L
+      DMP := EXPMEMA(IF(HD>0 && HD>LD, HD, 0), N)
+      DMM := EXPMEMA(IF(LD>0 && LD>HD, LD, 0), N)
+      PDI := DMP*100/MTR; MDI := DMM*100/MTR
+      ADX := EXPMEMA(ABS(MDI-PDI)/(MDI+PDI)*100, M)
+    """
     high, low, close = df["high"], df["low"], df["close"]
     ph, pl, pc = high.shift(1), low.shift(1), close.shift(1)
     tr = pd.concat([high - low, (high - pc).abs(), (low - pc).abs()], axis=1).max(axis=1)
     hd, ld = high - ph, pl - low
     dmp = pd.Series(np.where((hd > 0) & (hd > ld), hd, 0), index=df.index)
     dmm = pd.Series(np.where((ld > 0) & (ld > hd), ld, 0), index=df.index)
-    mtr = tr.rolling(n).sum()
-    dmp_s = dmp.rolling(n).sum()
-    dmm_s = dmm.rolling(n).sum()
+    mtr = tr.ewm(alpha=1 / n, adjust=False).mean()
+    dmp_s = dmp.ewm(alpha=1 / n, adjust=False).mean()
+    dmm_s = dmm.ewm(alpha=1 / n, adjust=False).mean()
     pdi = pd.Series(np.where(mtr > 0, 100 * dmp_s / mtr, 0), index=df.index)
     mdi = pd.Series(np.where(mtr > 0, 100 * dmm_s / mtr, 0), index=df.index)
     dx = pd.Series(np.where(pdi + mdi > 0, 100 * (pdi - mdi).abs() / (pdi + mdi), 0), index=df.index)
-    adx = dx.rolling(m).mean()
+    adx = dx.ewm(alpha=1 / m, adjust=False).mean()
     return pdi, mdi, adx
 
 
@@ -263,7 +279,7 @@ DEFAULT_STRATEGY_PARAMS = {
     # 漫画书 量能/实战战法
     "high_volume": {"n": 20},
     "demon_stock": {"consec": 3, "consec_pct": 5, "hot": 5, "hot_pct": 30},
-    "dragon_pullback": {"lookback": 30, "zt_pct": 9.6, "band": 3, "vol_ratio": 1.5},
+    "dragon_pullback": {"lookback": 30, "band": 3, "vol_ratio": 1.5},
     "support_resistance": {"n": 20, "vol_ratio": 1.5},
     "range_trade": {"n": 20, "low_pct": 0.2, "high_pct": 0.2},
     # 操练大全15章 抄底
@@ -277,24 +293,26 @@ DEFAULT_STRATEGY_PARAMS = {
     "zhuang_pull": {"vol_ratio": 2, "rise_pct": 5, "n": 20},
     "zhuang_ship": {"high_pct": 0.7, "vol_ratio": 1.5, "stale_pct": 2, "n": 60},
     "zhuang_wash": {"rise_pct": 10, "shrink": 0.8, "pull_min": -8, "pull_max": -3},
-    # 操练大全20章 涨停细分
-    "zt_type": {"zt_pct": 9.6, "tolerance": 0.5},
-    "zt_unsealed": {"zt_pct": 9.6, "break_pct": 1, "vol_ratio": 2},
-    "zt_pull": {"zt_pct": 9.6, "pull_min": 5, "vol_ratio": 2, "body_ratio": 70},
+    # 操练大全20章 涨停细分(涨停判定用真实涨停价,无需 zt_pct)
+    "zt_type": {"tolerance": 0.5},
+    "zt_unsealed": {"break_pct": 1, "vol_ratio": 2},
+    "zt_pull": {"pull_min": 5, "vol_ratio": 2, "body_ratio": 70},
     # 操练大全14章 基本面
     "pe_select": {"low_pe": 15, "high_pe": 50},
     "roe_pe": {"roe_min": 15, "pe_max": 25, "roe_bad": 5, "pe_high": 50},
     # 漫画书 实战战法(剩余)
-    "daban": {"zt_pct": 9.6, "min_vol_ratio": 1.5, "consec": 2, "n": 10},
-    "fupan": {"n": 30, "zt_pct": 9.6, "support_pct": 5, "resistance_pct": 5, "rise_threshold": 20},
+    "daban": {"min_vol_ratio": 1.5, "consec": 2, "n": 10},
+    "fupan": {"n": 30, "support_pct": 5, "resistance_pct": 5, "rise_threshold": 20},
     # 操练大全15章 抄底(剩余)
     "bottom_time": {"n": 120, "tolerance": 2},
     # 操练大全14章 选股(剩余)
     "shareholder_select": {"concentrate": -5, "disperse": 10},
     "policy_select": {"num": 10, "min_positive": 2, "min_negative": 2},
-    # 经典 K 线形态 + 顶背离 + 缺口
+    # 经典 K 线形态 + 背离 + 缺口
     "kline_pattern": {},
-    "macd_top_divergence": {"n": 60},
-    "rsi_top_divergence": {"n": 60},
+    "macd_top_divergence": {"n": 60, "recency": 20},
+    "macd_bottom_divergence": {"n": 60, "recency": 20},
+    "rsi_top_divergence": {"n": 60, "recency": 20},
+    "rsi_bottom_divergence": {"n": 60, "recency": 20},
     "gap": {"gap_pct": 1.0, "vol_ratio": 1.5, "n": 20, "exhaustion_lookback": 5, "exhaustion_cum_pct": 20},
 }

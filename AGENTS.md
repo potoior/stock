@@ -22,7 +22,7 @@ quant/
 ├── stock_names.py         # 股票名称解析(腾讯 smartbox + sqlite 缓存)
 ├── stock_finance.py       # 财务数据(东方财富双接口,PE/PB/ROE/市值/EPS,sqlite 缓存 1 天)+ 股东人数(datacenter)
 ├── stock_market_extras.py # 市场扩展数据(龙虎榜/北向资金/主力资金流/概念板块反查/指数行情)
-├── strategy_engine.py     # 54 策略信号引擎(23 原有 + 22 新增 + 5 补齐 + 4 经典形态:K线/顶背离/缺口)
+├── strategy_engine.py     # 56 策略信号引擎(23 原有 + 22 新增 + 5 补齐 + 6 经典形态:K线/背离/缺口)
 ├── backtest_builtin.py    # 回测引擎(workers=1,非线程安全)
 ├── yujie_scan.py          # 玉姐精选评分(10 条规则)
 ├── daily_scan.py          # 每日 09:25 盘前日报 + 15:05 盘后复盘 + 飞书推送(systemd timer)
@@ -107,7 +107,7 @@ systemctl --user list-timers daily-afterclose.timer news-monitor.timer
   - 数据查询: `analyze_stock` / `get_market_status` / `get_yujie_picks` / `get_portfolio`
   - 策略查询: `list_strategies` / `get_strategy_library` / `get_yujie_detail` / `analyze_with_strategy` / `analyze_with_yujie`
   - 策略操作: `toggle_strategy` / `set_strategy_params` / `enable_library_strategy`
-  - 回测寻优选股: `backtest_strategy` / `grid_search_strategy` / `scan_with_strategy`(全市场策略选股) / `scan_combo`(多策略组合选股,AND共振/OR宽松,耗时5-30分钟)
+  - 回测寻优选股: `backtest_strategy` / `grid_search_strategy` / `scan_with_strategy`(全市场策略选股) / `scan_combo`(多策略组合选股,AND共振/OR宽松,耗时约1-3分钟)
   - 自选股: `watchlist`(add/remove/list)
   - 财务: `get_finance`(单股 PE/PB/市值/ROE/毛利率/净利率/EPS/营收/净利润)
   - 批量: `compare_stocks`(多股对比) / `analyze_sector`(板块成分股) / `query_history_picks`(历史玉姐复盘)
@@ -150,19 +150,20 @@ systemctl --user list-timers daily-afterclose.timer news-monitor.timer
 - 已融入其他策略的标 `implemented=True` + `engine_id` 指向其融入策略(如 bottom_kline → bottom)
 - `cross_ref` 跨来源查同一策略在哪些书里出现
 
-### 内置策略列表(strategy_engine.py,54 个)
+### 内置策略列表(strategy_engine.py,56 个)
 - 原有 23: macd/kdj/ma_stop/boll/dmi/psy/bias/sar/bbiboll/tower/ma_combo/two_line/life_line/three_third/sparrow/bounce/volume_div/resonance/dmi_psy/rsi/bottom/top/zt
-- 12章 投资法则(4): trend_follow(顺势)/pyramid(金字塔)/stop_profit(暴利收手)/plan_trade(计划交易)
+- 12章 投资法则(4): trend_follow(顺势)/pyramid(金字塔)/stop_profit(暴风收手)/plan_trade(计划交易)
 - 漫画书 量能/实战战法(5): high_volume(高量柱)/demon_stock(看妖股)/dragon_pullback(龙回头)/support_resistance(压力支撑)/range_trade(区间交易)
 - 漫画书 实战战法 补齐(2): daban(打板,日K线简化版)/fupan(复盘法,量化版)
 - 15章 抄底(2): bottom_ma(均线识底)/bottom_time(时间识底,斐波那契时间窗)
 - 16章 逃顶(2): top_weekly(周线见顶)/top_monthly(月线见顶)
 - 17章 跟庄(5): zhuang_test(试盘)/zhuang_build(建仓)/zhuang_pull(拉高)/zhuang_ship(出货)/zhuang_wash(洗盘)
-- 20章 涨停细分(3): zt_type(类型)/zt_unsealed(封不牢)/zt_pull(拉高型)
+- 20章 涨停细分(3): zt_type(类型)/zt_unsealed(封不牢)/zt_pull(拉高型,涨停判定均用真实涨停价,按板块区分 10%/20%/30%)
 - 14章 基本面(4): pe_select(市盈率)/roe_pe(ROE+PE 复合)/shareholder_select(股东人数变动,东财datacenter)/policy_select(政策选股,新闻关键词)
-- 经典 K 线形态(4): kline_pattern(早晨/黄昏之星/锤头/流星/吞没/十字星/红三兵/黑三兵/孕线)/macd_top_divergence(MACD顶背离)/rsi_top_divergence(RSI顶背离)/gap(缺口识别)
+- 经典 K 线形态(6): kline_pattern(早晨/黄昏之星/锤头/流星/吞没/十字星/红三兵/黑三兵/孕线)/macd_top_divergence(MACD顶背离)/macd_bottom_divergence(MACD底背离)/rsi_top_divergence(RSI顶背离)/rsi_bottom_divergence(RSI底背离)/gap(缺口识别)
 - 板块热点 hotspot_select 在 daily_scan.scan_hotspot_stocks 实现(市场层面,非单股策略)
 - 需联网的策略(shareholder_select/policy_select)不可用于 scan_with_strategy 全市场扫描,只能 analyze 个股
+- 观察型策略(zhuang_test/zhuang_wash/zt_pull)只返回 hold 不产生买卖信号,扫描入口直接拒绝
 
 ### 股票名识别(stock_names.py)
 - 6 位代码直接返回

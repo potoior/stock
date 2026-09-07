@@ -114,7 +114,14 @@ def fetch_market_all(limit=0, max_pages=80):
 
 
 def market_stats(rows):
-    """全市场涨跌分布统计。"""
+    """全市场涨跌分布统计。
+
+    涨停/跌停用真实涨跌停价判定(主板 10%/ST 5%/创业板科创板 20%/北交所 30%,
+    四舍五入到分),由 现价/涨幅 反推昨收。低价股涨停涨幅可能低于 9.9%
+    (如 2.44 元股涨停价 2.68,涨幅仅 9.84%),固定阈值会漏计。
+    """
+    from strategy_engine import limit_prices
+
     up = dn = flat = 0
     limit_up = limit_dn = 0
     total_amount = 0.0
@@ -128,12 +135,21 @@ def market_stats(rows):
             dn += 1
         else:
             flat += 1
+        trade = float(r.get("trade") or 0)
+        if trade <= 0 or not pct:
+            continue
         code = r.get("code6", "")
-        is_kcb_cyb = code.startswith(("30", "68"))
-        up_lim = 19.9 if is_kcb_cyb else 9.9
-        if pct >= up_lim:
+        name = r.get("name", "") or ""
+        st = "ST" in name.upper()
+        # 由 现价/涨幅 反推昨收(两位小数)
+        prev = round(trade / (1 + pct / 100), 2)
+        if prev <= 0:
+            continue
+        zt, zd = limit_prices(code, prev, st=st)
+        # 原始价(非复权),容差只需覆盖浮点误差
+        if trade >= zt - 0.001:
             limit_up += 1
-        elif pct <= -up_lim:
+        elif trade <= zd + 0.001:
             limit_dn += 1
     return {
         "total": len(rows),

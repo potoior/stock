@@ -372,7 +372,7 @@ def test_scan_with_strategy_rejects_policy_select():
 def test_scan_with_strategy_accepts_daban():
     """scan_with_strategy 应接受 daban(不联网,mock 后跑通)。"""
     df = _make_df(n=120, seed=42)
-    with patch("strategy_engine.get_daily_data", return_value=df):
+    with patch("strategy_engine._bulk_fetch_daily", return_value={"600519": df.copy()}):
         with patch("sqlite3.connect") as mock_connect:
             mock_conn = mock_connect.return_value
             mock_conn.execute.return_value.fetchall.return_value = [

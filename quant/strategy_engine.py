@@ -4,6 +4,7 @@ import logging
 import sqlite3
 import threading
 from datetime import datetime
+from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
 import httpx
@@ -873,31 +874,75 @@ def strategy_top(ctx, params):
     return "hold", f"无见顶信号(近{lookback}日{ret:+.1f}%,量比{vol_ratio:.2f})"
 
 
+def _limit_pct(code: str) -> float:
+    """按板块返回涨停幅度(%):创业板/科创板 20%,北交所 30%,其余(主板)10%。"""
+    code = str(code or "")[-6:]  # 兼容 sh600519 / sz000001 等前缀
+    if code.startswith(("300", "301", "302", "688", "689")):
+        return 20.0
+    if code.startswith(("8", "4", "92")):
+        return 30.0
+    return 10.0
+
+
+def limit_prices(code: str, prev_close: float, st: bool = False) -> tuple[float, float]:
+    """返回 (涨停价, 跌停价),按板块幅度四舍五入到分。
+
+    主板 ST 涨跌幅 5%;创业板/科创板的 ST 仍为 20%(交易所规则)。
+    用 Decimal ROUND_HALF_UP 模拟交易所"四舍五入到分"——
+    Python 内置 round 是银行家舍入,11.055 会错舍成 11.05。
+    """
+    pct = _limit_pct(code)
+    if st and pct == 10.0:  # ST 降幅度仅适用主板
+        pct = 5.0
+    base = Decimal(str(prev_close))
+    up_factor = Decimal(str(1 + pct / 100))
+    down_factor = Decimal(str(1 - pct / 100))
+    cent = Decimal("0.01")
+    return (
+        float((base * up_factor).quantize(cent, rounding=ROUND_HALF_UP)),
+        float((base * down_factor).quantize(cent, rounding=ROUND_HALF_UP)),
+    )
+
+
+def _zt_price(code: str, prev_close: float, st: bool = False) -> float:
+    """真实涨停价 = round(前收 × (1+板块涨停幅度), 2)。"""
+    return limit_prices(code, prev_close, st=st)[0]
+
+
+def _is_limit_up(code: str, prev_close: float, close: float) -> bool:
+    """收盘价是否达涨停价(容差 1 分,兼容前复权精度)。"""
+    return float(close) >= _zt_price(code, prev_close) - 0.01
+
+
 def strategy_zt(ctx, params):
     """涨停板策略(操练大全20章):涨停封板信号识别。
 
     买入条件:
-      - 当日涨幅 ≥ zt_pct(默认9.6%,兼容主板10%/创业板20%由参数调整)
-      - 当日量比 ≥ min_vol_ratio(放量封板,排除一字板无量特殊情况)
+      - 当日收盘价达涨停价(按板块:主板10%/创业板科创板20%/北交所30%,四舍五入到分)
+      - 当日量比 >= min_vol_ratio(放量封板,排除一字板无量特殊情况)
     """
-    zt_pct = float(params.get("zt_pct", 9.6))
     min_vol_ratio = float(params.get("min_vol_ratio", 1.5))
+    zt_pct = float(params.get("zt_pct", 9.6))  # 距涨停价的观察距离(百分点),主板 9.6 即差 0.4
     i = ctx["i"]
     df = ctx["df"]
     close = df["close"]
+    code = ctx.get("code", "")
     if i < 1:
         return "hold", "数据不足"
-    pct = (close.iloc[i] - close.iloc[i - 1]) / close.iloc[i - 1] * 100
+    prev = float(close.iloc[i - 1])
+    pct = (float(close.iloc[i]) - prev) / prev * 100 if prev > 0 else 0
     avg_vol = df["volume"].iloc[max(0, i - 20):i].mean()
     vol_ratio = df["volume"].iloc[i] / avg_vol if avg_vol > 0 else 0
-    if pct >= 9.8:  # 创业板/科创板 20%涨停
+    zt_price = _zt_price(code, prev)
+    if _is_limit_up(code, prev, close.iloc[i]):  # 真实封板
         if vol_ratio >= min_vol_ratio:
             return "buy", f"涨停封板(+{pct:.1f}%,量比{vol_ratio:.1f}),强势追击"
         return "hold", f"涨停(+{pct:.1f}%)但量比{vol_ratio:.1f}不足,可能一字板"
-    if pct >= zt_pct:
+    near_threshold = _limit_pct(code) - (10.0 - zt_pct)  # 距涨停价不足 (10-zt_pct) 个百分点
+    if pct >= near_threshold:  # 接近涨停但未封板
         if vol_ratio >= min_vol_ratio:
-            return "buy", f"近涨停(+{pct:.1f}%≥{zt_pct}%,量比{vol_ratio:.1f}≥{min_vol_ratio}),封板强势"
-        return "hold", f"近涨停(+{pct:.1f}%)但量比{vol_ratio:.1f}不足,封板不牢"
+            return "buy", f"近涨停(+{pct:.1f}%,涨停价{zt_price:.2f},量比{vol_ratio:.1f}),封板强势"
+        return "hold", f"近涨停(+{pct:.1f}%,涨停价{zt_price:.2f})但量比{vol_ratio:.1f}不足,封板不牢"
     if pct >= 5 and vol_ratio >= min_vol_ratio * 1.5:
         return "hold", f"大涨+{pct:.1f}%放量(量比{vol_ratio:.1f}),观望是否封板"
     return "hold", f"无涨停信号(+{pct:.1f}%,量比{vol_ratio:.1f})"
@@ -1052,8 +1097,8 @@ def strategy_demon_stock(ctx, params):
     """看妖股战法(漫画书):连续大涨识别妖股,启动期买入,过热期卖出。
 
     规则:
+      - 近 hot 日(默认5)累计涨幅 ≥ hot_pct(默认30%) → sell(过热风险,优先判断)
       - 近 consec 日(默认3)每日涨幅均 ≥ consec_pct(默认5%) → buy(启动期强势)
-      - 近 hot 日(默认5)累计涨幅 ≥ hot_pct(默认30%) → sell(过热风险)
     """
     consec = int(params.get("consec", 3))
     consec_pct = float(params.get("consec_pct", 5))
@@ -1064,13 +1109,14 @@ def strategy_demon_stock(ctx, params):
     if i < max(consec, hot):
         return "hold", "数据不足"
     daily_ret = close.pct_change() * 100
+    # 过热(sell)先于启动(buy)判断:已过热的妖股不应报买入
+    ret_hot = (close.iloc[i] - close.iloc[i - hot]) / close.iloc[i - hot] * 100
+    if ret_hot >= hot_pct:
+        return "sell", f"近{hot}日累计涨{ret_hot:.1f}%≥{hot_pct}%,妖股过热,获利盘出逃风险"
     consec_strong = all(daily_ret.iloc[i - k] >= consec_pct for k in range(consec))
     if consec_strong:
         rets = [f"+{daily_ret.iloc[i-k]:.1f}%" for k in range(consec)]
         return "buy", f"近{consec}日连续大涨({'/'.join(rets[::-1])}),妖股启动期"
-    ret_hot = (close.iloc[i] - close.iloc[i - hot]) / close.iloc[i - hot] * 100
-    if ret_hot >= hot_pct:
-        return "sell", f"近{hot}日累计涨{ret_hot:.1f}%≥{hot_pct}%,妖股过热,获利盘出逃风险"
     return "hold", f"近{hot}日{ret_hot:+.1f}%,无妖股特征"
 
 
@@ -1078,21 +1124,24 @@ def strategy_dragon_pullback(ctx, params):
     """龙回头战法(漫画书):前期涨停后回调到均线支撑 + 放量反弹二次启动。
 
     买入条件(全部满足):
-      - 近 lookback 日(默认30)内出现过涨停(涨幅 ≥ zt_pct)
+      - 近 lookback 日(默认30)内出现过涨停(按板块真实涨停价判定)
       - 当前回调到 MA10 附近(close 在 MA10 ± band% 内)
       - 当日放量反弹(量比 ≥ vol_ratio)
     """
     lookback = int(params.get("lookback", 30))
-    zt_pct = float(params.get("zt_pct", 9.6))
     band = float(params.get("band", 3))
     vol_ratio_t = float(params.get("vol_ratio", 1.5))
     i = ctx["i"]
     df = ctx["df"]
     close = ctx["close"]
+    code = ctx.get("code", "")
     if i < max(lookback, 60):
         return "hold", "数据不足"
     daily_ret = close.pct_change() * 100
-    has_zt = any(daily_ret.iloc[i - k] >= zt_pct for k in range(1, lookback + 1))
+    has_zt = any(
+        i - k - 1 >= 0 and _is_limit_up(code, float(close.iloc[i - k - 1]), float(close.iloc[i - k]))
+        for k in range(1, lookback + 1)
+    )
     if not has_zt:
         return "hold", f"近{lookback}日无涨停,非龙回头"
     ma10 = ctx["ma10"].iloc[i]
@@ -1255,8 +1304,8 @@ def strategy_top_monthly(ctx, params):
 # ---------------- 操练大全17章 跟庄炒股 ----------------
 
 
-def _percentile_pos(close, i, n, pct):
-    """当前价在近 n 日价格分位(0~1,0=最低,1=最高)。"""
+def _percentile_pos(close, i, n):
+    """当前价在近 n 日价格区间的位置(0~1,0=区间最低,1=区间最高,min-max 定位)。"""
     if i < n:
         return 0.5
     window = close.iloc[i - n:i]
@@ -1290,7 +1339,7 @@ def strategy_zhuang_test(ctx, params):
         return "hold", "十字星,无实体"
     avg_vol = df["volume"].iloc[i - 5:i].mean()
     v_ratio = df["volume"].iloc[i] / avg_vol if avg_vol > 0 else 1
-    pos = _percentile_pos(close, i, n, low_pct)
+    pos = _percentile_pos(close, i, n)
     if upper_shadow > body * shadow_ratio and v_ratio < shrink and pos <= low_pct:
         return "hold", f"试盘:上影{upper_shadow:.2f}>实体{body:.2f}×{shadow_ratio}+缩量(量比{v_ratio:.1f})+低位(分位{pos*100:.0f}%),庄家试探"
     return "hold", "无试盘特征"
@@ -1313,7 +1362,7 @@ def strategy_zhuang_build(ctx, params):
     close = ctx["close"]
     if i < max(n, 20):
         return "hold", "数据不足"
-    pos = _percentile_pos(close, i, n, low_pct)
+    pos = _percentile_pos(close, i, n)
     recent5_vol = df["volume"].iloc[i - 5:i].mean()
     recent20_vol = df["volume"].iloc[i - 20:i].mean()
     v_ratio = recent5_vol / recent20_vol if recent20_vol > 0 else 1
@@ -1366,7 +1415,7 @@ def strategy_zhuang_ship(ctx, params):
     close = ctx["close"]
     if i < max(n, 20):
         return "hold", "数据不足"
-    pos = _percentile_pos(close, i, n, high_pct)
+    pos = _percentile_pos(close, i, n)
     recent5_vol = df["volume"].iloc[i - 5:i].mean()
     recent20_vol = df["volume"].iloc[i - 20:i].mean()
     v_ratio = recent5_vol / recent20_vol if recent20_vol > 0 else 1
@@ -1381,7 +1430,7 @@ def strategy_zhuang_wash(ctx, params):
 
     识别条件(同时满足):
       - 近 20 日累计涨幅 ≥ rise_pct(默认 10%,前期上涨)
-      - 近 5 日缩量(量比 < shrink,默认 0.8)+ 跌幅在 pull_range(默认 -3%~-8%)
+      - 当日缩量(当日量/20日均量 < shrink,默认 0.8)+ 跌幅在 pull_range(默认 -3%~-8%)
       - 当前价 > MA20(不破位)
     """
     rise_pct = float(params.get("rise_pct", 10))
@@ -1411,23 +1460,23 @@ def strategy_zhuang_wash(ctx, params):
 def strategy_zt_type(ctx, params):
     """涨停板类型分类(操练大全20章):一字板/T字板/拉高板,根据强度给信号。
 
-    规则(当日涨幅 ≥ zt_pct 默认 9.6%):
+    规则(当日收盘达涨停价,按板块幅度四舍五入到分):
       - 一字板:open≈close≈high≈low(全天封板) → buy(最强势)
       - T 字板:open≈high≈close 但 low 明显低(开板后回封) → buy(强势)
       - 拉高板:open 未涨停,close 涨停(盘中拉至涨停) → hold(需次日确认)
     """
-    zt_pct = float(params.get("zt_pct", 9.6))
     tolerance = float(params.get("tolerance", 0.5))
     i = ctx["i"]
     df = ctx["df"]
+    code = ctx.get("code", "")
     if i < 1:
         return "hold", "数据不足"
     o, c, h, low = df["open"].iloc[i], df["close"].iloc[i], df["high"].iloc[i], df["low"].iloc[i]
     prev_c = df["close"].iloc[i - 1]
-    pct = (c - prev_c) / prev_c * 100
-    if pct < zt_pct:
-        return "hold", f"未涨停(涨{pct:.1f}%<{zt_pct}%)"
-    zt_price = prev_c * (1 + zt_pct / 100)
+    zt_price = _zt_price(code, prev_c)  # 真实涨停价(round(前收×1+幅度, 2))
+    pct = (c - prev_c) / prev_c * 100 if prev_c > 0 else 0
+    if not _is_limit_up(code, prev_c, c):
+        return "hold", f"未涨停(涨{pct:.1f}%,涨停价{zt_price:.2f})"
 
     def _near(a, b, tol=tolerance):
         return abs(a - b) / b * 100 < tol
@@ -1443,21 +1492,21 @@ def strategy_zt_unsealed(ctx, params):
     """涨停封不牢(操练大全20章):涨停但盘中开板,封板力度弱。
 
     卖出/观望条件:
-      - 当日涨幅 ≥ zt_pct(默认 9.6%,涨停)
+      - 当日收盘达涨停价(按板块幅度,四舍五入到分)
       - low < close × (1 - break_pct)(默认 1%,盘中开板)
       - 量比 ≥ vol_ratio(默认 2,放量)
     """
-    zt_pct = float(params.get("zt_pct", 9.6))
     break_pct = float(params.get("break_pct", 1))
     vol_ratio_t = float(params.get("vol_ratio", 2))
     i = ctx["i"]
     df = ctx["df"]
+    code = ctx.get("code", "")
     if i < 20:
         return "hold", "数据不足"
     c, low = df["close"].iloc[i], df["low"].iloc[i]
     prev_c = df["close"].iloc[i - 1]
-    pct = (c - prev_c) / prev_c * 100
-    if pct < zt_pct:
+    pct = (c - prev_c) / prev_c * 100 if prev_c > 0 else 0
+    if not _is_limit_up(code, prev_c, c):
         return "hold", f"未涨停(涨{pct:.1f}%)"
     avg_vol = df["volume"].iloc[i - 20:i].mean()
     v_ratio = df["volume"].iloc[i] / avg_vol if avg_vol > 0 else 0
@@ -1470,31 +1519,32 @@ def strategy_zt_unsealed(ctx, params):
 
 
 def strategy_zt_pull(ctx, params):
-    """拉高型涨停(操练大全20章):接近涨停但未封板+放量+大阳。
+    """拉高型涨停(操练大全20章):接近涨停但未封板+放量+大阳(观察信号,只返回 hold)。
 
     规则(已融入 zt 主策略,此为细分):
-      - 当日涨幅在 [pull_min, zt_pct)(默认 5~9.6%,接近涨停但未封)
+      - 当日涨幅 ≥ pull_min(默认 5%)且未封板(收盘 < 涨停价)
       - 量比 ≥ vol_ratio(默认 2,放量)
       - 实体占比 ≥ body_ratio(默认 70%,大阳线)
     """
-    zt_pct = float(params.get("zt_pct", 9.6))
     pull_min = float(params.get("pull_min", 5))
     vol_ratio_t = float(params.get("vol_ratio", 2))
     body_ratio_t = float(params.get("body_ratio", 70))
     i = ctx["i"]
     df = ctx["df"]
+    code = ctx.get("code", "")
     if i < 20:
         return "hold", "数据不足"
     o, c, h, low = df["open"].iloc[i], df["close"].iloc[i], df["high"].iloc[i], df["low"].iloc[i]
     prev_c = df["close"].iloc[i - 1]
-    pct = (c - prev_c) / prev_c * 100
+    pct = (c - prev_c) / prev_c * 100 if prev_c > 0 else 0
     avg_vol = df["volume"].iloc[i - 20:i].mean()
     v_ratio = df["volume"].iloc[i] / avg_vol if avg_vol > 0 else 0
     body = abs(c - o)
     total = h - low
     body_pct = body / total * 100 if total > 0 else 0
-    if pull_min <= pct < zt_pct and v_ratio >= vol_ratio_t and body_pct >= body_ratio_t:
-        return "hold", f"拉高型涨停:涨{pct:.1f}%({pull_min}~{zt_pct}未封)+量比{v_ratio:.1f}+实体{body_pct:.0f}%,观望是否封板"
+    sealed = _is_limit_up(code, prev_c, c)
+    if pull_min <= pct and not sealed and v_ratio >= vol_ratio_t and body_pct >= body_ratio_t:
+        return "hold", f"拉高型:涨{pct:.1f}%(≥{pull_min}%未封板)+量比{v_ratio:.1f}+实体{body_pct:.0f}%,观望是否封板"
     return "hold", f"涨{pct:.1f}%/量比{v_ratio:.1f}/实体{body_pct:.0f}%,非拉高型"
 
 
@@ -1591,35 +1641,34 @@ def strategy_daban(ctx, params):
     与 zt 区别:zt 只看当日封板,daban 要求连板,更强势。
 
     买入条件(同时满足):
-      - 当日涨幅 >= zt_pct(默认 9.6%)
+      - 当日收盘达涨停价(按板块幅度,四舍五入到分)
       - 当日量比 >= min_vol_ratio(默认 1.5)
       - 近 N 日(默认 10)连板数 >= consec(默认 2)
     """
-    zt_pct = float(params.get("zt_pct", 9.6))
     min_vol_ratio = float(params.get("min_vol_ratio", 1.5))
     consec = int(params.get("consec", 2))
     n = int(params.get("n", 10))
     i = ctx["i"]
     df = ctx["df"]
     close = df["close"]
+    code = ctx.get("code", "")
     if i < n + 1:
         return "hold", "数据不足"
     pct = (close.iloc[i] - close.iloc[i - 1]) / close.iloc[i - 1] * 100
     avg_vol = df["volume"].iloc[max(0, i - 20):i].mean()
     vol_ratio = df["volume"].iloc[i] / avg_vol if avg_vol > 0 else 0
-    # 连板数(从今日往前数,中断即停)
+    # 连板数(从今日往前数,中断即停;统一用真实涨停价判定)
     zt_count = 0
     for j in range(i, max(i - n, 0), -1):
         if j < 1:
             break
-        p = (close.iloc[j] - close.iloc[j - 1]) / close.iloc[j - 1] * 100
-        if p >= zt_pct - 0.1:
+        if _is_limit_up(code, float(close.iloc[j - 1]), float(close.iloc[j])):
             zt_count += 1
         else:
             break
-    if pct >= zt_pct and vol_ratio >= min_vol_ratio and zt_count >= consec:
+    if _is_limit_up(code, float(close.iloc[i - 1]), float(close.iloc[i])) and vol_ratio >= min_vol_ratio and zt_count >= consec:
         return "buy", f"打板:今+{pct:.1f}%+量比{vol_ratio:.1f}+连板{zt_count}日,强势追击"
-    if pct >= zt_pct and zt_count >= consec:
+    if zt_count >= consec:
         return "hold", f"涨停+{pct:.1f}%连板{zt_count}日,但量比{vol_ratio:.1f}不足"
     return "hold", f"无打板信号(今+{pct:.1f}%,连板{zt_count}日,量比{vol_ratio:.1f})"
 
@@ -1634,7 +1683,6 @@ def strategy_fupan(ctx, params):
       - 否则 hold
     """
     n = int(params.get("n", 30))
-    zt_pct = float(params.get("zt_pct", 9.6))
     support_pct = float(params.get("support_pct", 5))
     resistance_pct = float(params.get("resistance_pct", 5))
     rise_threshold = float(params.get("rise_threshold", 20))
@@ -1642,19 +1690,19 @@ def strategy_fupan(ctx, params):
     df = ctx["df"]
     close = df["close"]
     vol = df["volume"]
+    code = ctx.get("code", "")
     if i < n + 1:
         return "hold", "数据不足"
     recent_close = close.iloc[i - n:i + 1]
     recent_vol = vol.iloc[i - n:i + 1]
     recent_high = float(recent_close.max())
     recent_low = float(recent_close.min())
-    # 涨停次数
+    # 涨停次数(按板块真实涨停价判定)
     zt_count = 0
     for j in range(i, max(i - n, 0), -1):
         if j < 1:
             break
-        p = (close.iloc[j] - close.iloc[j - 1]) / close.iloc[j - 1] * 100
-        if p >= zt_pct - 0.1:
+        if _is_limit_up(code, float(close.iloc[j - 1]), float(close.iloc[j])):
             zt_count += 1
     cum_pct = (close.iloc[i] - close.iloc[i - n]) / close.iloc[i - n] * 100
     price = ctx["price"]
@@ -1743,7 +1791,7 @@ def strategy_shareholder_select(ctx, params):
     close = ctx["close"]
     if i < 60:
         return "hold", "数据不足"
-    pos = _percentile_pos(close, i, 60, 0.3)  # 0~1
+    pos = _percentile_pos(close, i, 60)
     if change_pct <= concentrate and pos <= 0.3:
         return "buy", f"股东数{change_pct:+.1f}%<= {concentrate}%(集中,{hold_focus})+价在低位(分位{pos:.1%}),低吸"
     if change_pct >= disperse and pos >= 0.7:
@@ -1808,7 +1856,7 @@ def strategy_policy_select(ctx, params):
     close = ctx["close"]
     if i < 60:
         return "hold", "数据不足"
-    pos = _percentile_pos(close, i, 60, 0.3)
+    pos = _percentile_pos(close, i, 60)
     if pos_hits >= min_positive and pos <= 0.3:
         sample = pos_titles[0] if pos_titles else ""
         return "buy", f"政策利好:近{len(news)}条新闻{pos_hits}条利好+价在低位(分位{pos:.1%}),例:{sample}"
@@ -1878,12 +1926,12 @@ def strategy_kline_pattern(ctx, params):
             df["open"].iloc[i] >= df["close"].iloc[i - 1] and df["close"].iloc[i] <= df["open"].iloc[i - 1]:
         pattern = "看跌吞没"
         signal_dir = "bear"
-    # 锤头(小实体在上,长下影 >= 2× 实体)
-    elif is_bull and lower >= body * 2 and upper < body:
+    # 锤头(小实体在上,长下影 >= 2× 实体;经典定义不限阴阳线)
+    elif body > 0 and lower >= body * 2 and upper < body:
         pattern = "锤头"
         signal_dir = "bull"
-    # 流星(小实体在下,长上影 >= 2× 实体)
-    elif not is_bull and upper >= body * 2 and lower < body:
+    # 流星(小实体在下,长上影 >= 2× 实体;经典定义不限阴阳线)
+    elif body > 0 and upper >= body * 2 and lower < body:
         pattern = "流星"
         signal_dir = "bear"
     # 早晨之星(3 K:大阴 + 跳空小实体 + 大阳收回 50% 以上)
@@ -1913,7 +1961,7 @@ def strategy_kline_pattern(ctx, params):
     # 结合价位分位判断
     if i < 60:
         return "hold", f"识别到 {pattern},但数据不足判断价位"
-    pos = _percentile_pos(close, i, 60, 0.4)
+    pos = _percentile_pos(close, i, 60)
     if signal_dir == "bull" and pos <= 0.4:
         return "buy", f"K线形态 {pattern}(看涨)+ 价在低位(分位{pos:.1%}),低吸"
     if signal_dir == "bear" and pos >= 0.6:
@@ -1925,55 +1973,81 @@ def strategy_kline_pattern(ctx, params):
     return "hold", f"K线形态 {pattern}({signal_dir}),价在分位{pos:.1%},等位置确认"
 
 
-def _find_top_divergence(close, indicator, n=60, lookback=5):
-    """通用顶背离识别:找近 n 日指标的最近两个高点,判断是否背离。
+def _find_divergence(close, indicator, n=60, lookback=5, recency=20, top=True):
+    """通用背离识别:锚定价格的最近两个极值点,判断指标是否背离。
 
-    顶背离 = 价格创新高 + 指标高点下降
+    顶背离 = 价格创新高 + 指标高点下降(上涨动能衰竭)
+    底背离 = 价格创新低 + 指标低点抬升(下跌动能衰竭)
+    两个锚定点都取在价格极值上:窗口内价格最高/最低处为当前点,
+    其之前(间距 >= lookback 日)的价格极值处为前点,
+    再比较两处的指标值。不能在指标序列上找两个点——
+    当前点取指标全局极值后,"指标极值回落/抬升"永远不可能成立。
     Args:
         close: 收盘价 Series
         indicator: 指标 Series(DIF / RSI 等)
         n: 回看窗口
-        lookback: 当前高点相对最近高点的容忍天数
-    Returns: (是否背离, 当前价, 前高价, 当前指标值, 前高指标值)
+        lookback: 两个价格极值点间的最小间距(交易日)
+        recency: 信号时效(当前极值点距期末的最大天数,过滤陈旧形态)
+        top: True=顶背离(高点), False=底背离(低点)
+    Returns: (是否背离, 当前价, 前点价, 当前指标值, 前点指标值)
     """
     if len(close) < n:
         return False, None, None, None, None
     window_close = close.iloc[-n:]
     window_ind = indicator.iloc[-n:]
-    # 找局部高点:在窗口内找指标最大值的位置
-    # 简化:找指标最高的两个不连续点(间距>=5日)
     ind_arr = window_ind.values
     close_arr = window_close.values
-    # 找指标最大值位置
     if len(ind_arr) < 10:
         return False, None, None, None, None
-    # 第一个高点:窗口内指标最大
-    idx1 = int(np.argmax(ind_arr))
-    # 在 idx1 之前找第二个高点
-    if idx1 < 5:
+    # 当前极值点:窗口内价格最高(顶)/最低(底)处
+    idx1 = int(np.argmax(close_arr) if top else np.argmin(close_arr))
+    if idx1 <= lookback:
         return False, None, None, None, None
-    idx0 = int(np.argmax(ind_arr[:idx1 - 5]))
-    # 顶背离:price[idx1] > price[idx0] 但 indicator[idx1] < indicator[idx0]
-    if close_arr[idx1] > close_arr[idx0] and ind_arr[idx1] < ind_arr[idx0]:
-        return True, float(close_arr[idx1]), float(close_arr[idx0]), float(ind_arr[idx1]), float(ind_arr[idx0])
-    return False, float(close_arr[idx1]), float(close_arr[idx0]), float(ind_arr[idx1]), float(ind_arr[idx0])
+    # 信号时效:极值点太久远说明形态已过时,不再有操作意义
+    if (len(close_arr) - 1 - idx1) > recency:
+        return False, None, None, None, None
+    # 前一极值点:idx1 之前(间距至少 lookback 日)的价格极值处
+    if top:
+        idx0 = int(np.argmax(close_arr[:idx1 - lookback]))
+        div = bool(close_arr[idx1] > close_arr[idx0] and ind_arr[idx1] < ind_arr[idx0])
+    else:
+        idx0 = int(np.argmin(close_arr[:idx1 - lookback]))
+        div = bool(close_arr[idx1] < close_arr[idx0] and ind_arr[idx1] > ind_arr[idx0])
+    return (
+        div,
+        float(close_arr[idx1]),
+        float(close_arr[idx0]),
+        float(ind_arr[idx1]),
+        float(ind_arr[idx0]),
+    )
+
+
+def _find_top_divergence(close, indicator, n=60, lookback=5, recency=20):
+    """顶背离 = 价格创新高 + 指标高点下降。"""
+    return _find_divergence(close, indicator, n=n, lookback=lookback, recency=recency, top=True)
+
+
+def _find_bottom_divergence(close, indicator, n=60, lookback=5, recency=20):
+    """底背离 = 价格创新低 + 指标低点抬升。"""
+    return _find_divergence(close, indicator, n=n, lookback=lookback, recency=recency, top=False)
 
 
 def strategy_macd_top_divergence(ctx, params):
     """MACD 顶背离识别(经典技术分析):价格新高但 MACD DIF 未新高。
 
     规则:
-      - 找近 N 日(默认 60)DIF 的最近两个高点
-      - 价格新高 + DIF 高点下降 → 顶背离 → sell(高位风险)
-      - 价格新高 + DIF 也新高 → 趋势健康 → hold
+        - 找近 N 日(默认 60)价格的最近两个高点,对比两处 DIF
+        - 价格新高 + DIF 高点下降 → 顶背离 → sell(高位风险)
+        - 价格新高 + DIF 也新高 → 趋势健康 → hold
     """
     n = int(params.get("n", 60))
+    recency = int(params.get("recency", 20))
     i = ctx["i"]
     if i < n:
         return "hold", "数据不足"
     diff = ctx["macd_diff"]
     close = ctx["close"]
-    div, p1, p0, d1, d0 = _find_top_divergence(close, diff, n=n)
+    div, p1, p0, d1, d0 = _find_top_divergence(close, diff, n=n, recency=recency)
     if p1 is None:
         return "hold", "无足够高点对比"
     if div:
@@ -1985,11 +2059,12 @@ def strategy_rsi_top_divergence(ctx, params):
     """RSI 顶背离识别:价格新高但 RSI 未新高。
 
     规则:
-      - 找近 N 日(默认 60)RSI 的最近两个高点
-      - 价格新高 + RSI 高点下降 → 顶背离 → sell(超买衰竭)
-      - 价格新高 + RSI 也新高 → 趋势健康 → hold
+        - 找近 N 日(默认 60)价格的最近两个高点,对比两处 RSI
+        - 价格新高 + RSI 高点下降 → 顶背离 → sell(超买衰竭)
+        - 价格新高 + RSI 也新高 → 趋势健康 → hold
     """
     n = int(params.get("n", 60))
+    recency = int(params.get("recency", 20))
     i = ctx["i"]
     if i < n:
         return "hold", "数据不足"
@@ -1997,12 +2072,60 @@ def strategy_rsi_top_divergence(ctx, params):
     if rsi is None:
         return "hold", "RSI 数据缺失"
     close = ctx["close"]
-    div, p1, p0, r1, r0 = _find_top_divergence(close, rsi, n=n)
+    div, p1, p0, r1, r0 = _find_top_divergence(close, rsi, n=n, recency=recency)
     if p1 is None:
         return "hold", "无足够高点对比"
     if div:
         return "sell", f"RSI顶背离:价{p1:.2f}>{p0:.2f}但RSI{r1:.1f}<{r0:.1f},超买衰竭"
     return "hold", f"无RSI顶背离:价{p1:.2f}/RSI{r1:.1f}(前高{p0:.2f}/RSI{r0:.1f}),趋势健康"
+
+
+def strategy_macd_bottom_divergence(ctx, params):
+    """MACD 底背离识别(经典技术分析):价格新低但 MACD DIF 未新低。
+
+    规则:
+        - 找近 N 日(默认 60)价格的最近两个低点,对比两处 DIF
+        - 价格新低 + DIF 低点抬升 → 底背离 → buy(跌势衰竭,反弹概率大)
+        - 价格新低 + DIF 也新低 → 跌势延续 → hold
+    """
+    n = int(params.get("n", 60))
+    recency = int(params.get("recency", 20))
+    i = ctx["i"]
+    if i < n:
+        return "hold", "数据不足"
+    diff = ctx["macd_diff"]
+    close = ctx["close"]
+    div, p1, p0, d1, d0 = _find_bottom_divergence(close, diff, n=n, recency=recency)
+    if p1 is None:
+        return "hold", "无足够低点对比"
+    if div:
+        return "buy", f"MACD底背离:价{p1:.2f}<{p0:.2f}但DIF{d1:.2f}>{d0:.2f},跌势衰竭,反弹概率大"
+    return "hold", f"无底背离:价{p1:.2f}/DIF{d1:.2f}(前低{p0:.2f}/DIF{d0:.2f}),跌势延续"
+
+
+def strategy_rsi_bottom_divergence(ctx, params):
+    """RSI 底背离识别:价格新低但 RSI 未新低。
+
+    规则:
+        - 找近 N 日(默认 60)价格的最近两个低点,对比两处 RSI
+        - 价格新低 + RSI 低点抬升 → 底背离 → buy(超卖衰竭,反弹概率大)
+        - 价格新低 + RSI 也新低 → 跌势延续 → hold
+    """
+    n = int(params.get("n", 60))
+    recency = int(params.get("recency", 20))
+    i = ctx["i"]
+    if i < n:
+        return "hold", "数据不足"
+    rsi = ctx.get("rsi6")
+    if rsi is None:
+        return "hold", "RSI 数据缺失"
+    close = ctx["close"]
+    div, p1, p0, r1, r0 = _find_bottom_divergence(close, rsi, n=n, recency=recency)
+    if p1 is None:
+        return "hold", "无足够低点对比"
+    if div:
+        return "buy", f"RSI底背离:价{p1:.2f}<{p0:.2f}但RSI{r1:.1f}>{r0:.1f},超卖衰竭,反弹概率大"
+    return "hold", f"无RSI底背离:价{p1:.2f}/RSI{r1:.1f}(前低{p0:.2f}/RSI{r0:.1f}),跌势延续"
 
 
 def strategy_gap(ctx, params):
@@ -2417,6 +2540,18 @@ def analyze(code: str, use_ai: bool = True) -> dict:
     if len(df) < 30:
         return {"error": f"{code} 历史数据不足"}
 
+    # 盘中实时价修正:当最后一根 K 线已是当日 bar(盘中缓存的部分数据)时,
+    # 用实时价修正 close/high/low,避免信号停留在缓存抓取时刻的过期价上。
+    # (realtime 之前只用于展示,不参与信号计算,盘中信号会失真)
+    if realtime and realtime.get("price"):
+        rt_price = float(realtime["price"])
+        if rt_price > 0 and df["date"].iloc[-1].strftime("%Y%m%d") == datetime.now().strftime("%Y%m%d"):
+            if rt_price > float(df["high"].iloc[-1]):
+                df.loc[df.index[-1], "high"] = rt_price
+            if rt_price < float(df["low"].iloc[-1]):
+                df.loc[df.index[-1], "low"] = rt_price
+            df.loc[df.index[-1], "close"] = rt_price
+
     close = df["close"]
     i = len(df) - 1
     price = close.iloc[i]
@@ -2572,6 +2707,8 @@ def analyze(code: str, use_ai: bool = True) -> dict:
         ("kline_pattern", "K线形态", strategy_kline_pattern),
         ("macd_top_divergence", "MACD顶背离", strategy_macd_top_divergence),
         ("rsi_top_divergence", "RSI顶背离", strategy_rsi_top_divergence),
+        ("macd_bottom_divergence", "MACD底背离", strategy_macd_bottom_divergence),
+        ("rsi_bottom_divergence", "RSI底背离", strategy_rsi_bottom_divergence),
         ("gap", "缺口识别", strategy_gap),
     ]
 
@@ -2669,9 +2806,11 @@ _STRATEGY_DEPS: dict[str, tuple[str, ...]] = {
     "bottom_time": ("ma60",),
     "dragon_pullback": ("ma10",),
     "macd_top_divergence": ("macd_diff",),
+    "macd_bottom_divergence": ("macd_diff",),
     "plan_trade": ("ma10", "macd_dea", "macd_diff"),
     "resonance": ("boll_m", "ma5"),
     "rsi_top_divergence": ("rsi6",),
+    "rsi_bottom_divergence": ("rsi6",),
     "trend_follow": ("adx", "ma10", "ma20", "ma5"),
     "tower": ("tower",),
     "zhuang_wash": ("ma20",),
@@ -2707,6 +2846,75 @@ def _compute_indicator(df, ind: str):
     return None
 
 
+# ---------------- 全市场扫描共用(scan_with_strategy / scan_combo_strategies) ----------------
+
+# 全部内置策略 id(单策略/组合扫描共用,新增策略只需改这一处)
+BUILTIN_STRATEGY_IDS = {
+    "macd", "kdj", "ma_stop", "boll", "dmi", "psy", "bias", "sar",
+    "bbiboll", "tower", "ma_combo", "two_line", "life_line", "three_third",
+    "sparrow", "bounce", "volume_div", "resonance", "dmi_psy", "rsi",
+    "bottom", "top", "zt",
+    "trend_follow", "pyramid", "stop_profit", "plan_trade",
+    "high_volume", "demon_stock", "dragon_pullback",
+    "support_resistance", "range_trade",
+    "bottom_ma", "top_weekly", "top_monthly",
+    "zhuang_test", "zhuang_build", "zhuang_pull", "zhuang_ship", "zhuang_wash",
+    "zt_type", "zt_unsealed", "zt_pull",
+    "pe_select", "roe_pe",
+    "daban", "fupan", "bottom_time",
+    "shareholder_select", "policy_select",
+    "kline_pattern", "macd_top_divergence", "macd_bottom_divergence",
+    "rsi_top_divergence", "rsi_bottom_divergence", "gap",
+}
+
+# 需要联网取外部数据的策略:全市场扫描每只都要联网,会跑数小时
+NO_SCAN_STRATEGIES = {"shareholder_select", "policy_select"}
+# 观察型策略:命中时只输出观察信息,永远不返回 buy/sell,
+# 用于选股扫描必然 0 命中,应拒绝
+NO_BUY_SIGNAL_STRATEGIES = {"zhuang_test", "zhuang_wash", "zt_pull"}
+
+
+def _bulk_fetch_daily(candidates, days: int = 320) -> dict:
+    """批量拉取候选股票的日 K 线(只读 sqlite,不联网)。
+
+    供全市场扫描用:一次 IN 查询代替逐股 SELECT,约 14x 提速;
+    且不经过 get_daily_data,避免缓存不新鲜时逐股联网刷新。
+    Returns: {code: DataFrame(open/close/high/low/volume, 按日期升序, 最多 days 行)}
+    """
+    if not candidates:
+        return {}
+    from datetime import timedelta as _td
+
+    # 交易日 → 日历日放大 1.6 倍取 cutoff,再按行数截断,与 get_daily_data(days) 口径一致
+    date_cutoff = (datetime.now() - _td(days=int(days * 1.6))).strftime("%Y%m%d")
+    grouped: dict = {}
+    conn = sqlite3.connect(str(CACHE_DB), timeout=30)
+    try:
+        codes = list(candidates)
+        batch_size = 500  # 规避 sqlite IN 参数上限(默认 999)
+        for k in range(0, len(codes), batch_size):
+            batch = codes[k:k + batch_size]
+            placeholders = ",".join("?" * len(batch))
+            cur = conn.execute(
+                f"SELECT code, date, open, close, high, low, volume FROM daily "
+                f"WHERE code IN ({placeholders}) AND date >= ?",
+                [*batch, date_cutoff],
+            )
+            cols = [d[0] for d in cur.description]
+            df = pd.DataFrame(cur.fetchall(), columns=cols)
+            if df.empty:
+                continue
+            df["date"] = pd.to_datetime(df["date"], format="%Y%m%d", errors="coerce")
+            for code, g in df.groupby("code", sort=False):
+                g = g.sort_values("date").reset_index(drop=True)
+                if len(g) > days:
+                    g = g.tail(days).reset_index(drop=True)
+                grouped[code] = g
+    finally:
+        conn.close()
+    return grouped
+
+
 def scan_with_strategy(
     strategy_id: str,
     top_n: int = 20,
@@ -2716,7 +2924,7 @@ def scan_with_strategy(
 ) -> dict:
     """全市场扫描指定策略,返回触发 buy 信号的股票列表。
 
-    轻量版:跳过 fetch_realtime,只跑指定单策略(非 analyze 的全部 45 个),
+    轻量版:跳过 fetch_realtime,只跑指定单策略(非 analyze 的全部 56 个),
     适合"哪些股票今天触发了 X 策略买入信号"的选股场景。
 
     Args:
@@ -2730,7 +2938,7 @@ def scan_with_strategy(
              hits: [{code, name, price, pct, signal, reason, amount_yi}, ...]
 
     实现要点:
-      - 只用 daily 表已缓存的股票(不主动 fetch,避免联网慢)
+      - 只读 daily 表已缓存数据(批量拉取,不联网)
       - 跳过 ST/退市股
       - 单线程跑(策略函数非线程安全,参考 backtest_builtin workers=1)
       - 数据不足(< 60 日)跳过
@@ -2740,32 +2948,18 @@ def scan_with_strategy(
 
     t0 = _time.time()
 
-    # 1. 验证策略 id 在 BUILTIN 列表
-    builtin_ids = {
-        "macd", "kdj", "ma_stop", "boll", "dmi", "psy", "bias", "sar",
-        "bbiboll", "tower", "ma_combo", "two_line", "life_line", "three_third",
-        "sparrow", "bounce", "volume_div", "resonance", "dmi_psy", "rsi",
-        "bottom", "top", "zt",
-        "trend_follow", "pyramid", "stop_profit", "plan_trade",
-        "high_volume", "demon_stock", "dragon_pullback",
-        "support_resistance", "range_trade",
-        "bottom_ma", "top_weekly", "top_monthly",
-        "zhuang_test", "zhuang_build", "zhuang_pull", "zhuang_ship", "zhuang_wash",
-        "zt_type", "zt_unsealed", "zt_pull",
-        "pe_select", "roe_pe",
-        "daban", "fupan", "bottom_time",
-        "shareholder_select", "policy_select",
-        "kline_pattern", "macd_top_divergence", "rsi_top_divergence", "gap",
-    }
-    if strategy_id not in builtin_ids:
+    # 1. 验证策略 id
+    if strategy_id not in BUILTIN_STRATEGY_IDS:
         return {"error": f"未知策略 id: {strategy_id},必须是内置策略之一"}
-
-    # 需要联网的策略不适合全市场扫描(每只都要联网,4700 只会跑数小时)
-    NO_SCAN_STRATEGIES = {"shareholder_select", "policy_select"}
     if strategy_id in NO_SCAN_STRATEGIES:
         return {
             "error": f"策略 {strategy_id} 需要联网获取外部数据(股东人数/新闻),"
             "不适合全市场扫描,请用 analyze_with_strategy 分析个股"
+        }
+    if strategy_id in NO_BUY_SIGNAL_STRATEGIES:
+        return {
+            "error": f"策略 {strategy_id} 为观察型(试盘/洗盘/拉高型,只输出观察信息不产生买卖信号),"
+            "不适合选股扫描"
         }
 
     # 2. 从 daily 表取所有股票的最新数据(不主动 fetch,避免 4700 次联网)
@@ -2795,6 +2989,19 @@ def scan_with_strategy(
     # 过滤:无(数据长度过滤交给策略函数,避免 N+1 查 COUNT)
     # 兼容旧版 (code, n, last) 三元组(测试 mock)和新版 (code,) 单元组
     candidates = [row[0] for row in rows]
+
+    # 跳过 ST/退市(名字来自 stock_names sqlite 缓存,不联网;未命中缓存的保留)
+    try:
+        import stock_names as _sn
+
+        _name_map = _sn.lookup_names(candidates)
+        candidates = [
+            c for c in candidates
+            if "ST" not in (_name_map.get(c, "") or "") and "退" not in (_name_map.get(c, "") or "")
+        ]
+    except Exception:
+        pass
+
     if limit and limit < len(candidates):
         candidates = candidates[:limit]
 
@@ -2804,6 +3011,7 @@ def scan_with_strategy(
     if fn is None:
         return {"error": f"策略函数 {fn_name} 不存在"}
 
+    grouped = _bulk_fetch_daily(candidates, days=320)
     params = {**DEFAULT_STRATEGY_PARAMS.get(strategy_id, {})}
     hits = []
     scanned = 0
@@ -2822,14 +3030,14 @@ def scan_with_strategy(
                 pass
             last_progress_at = scanned
         try:
-            df = get_daily_data(code, days=320)
-            if len(df) < 60:
+            df = grouped.get(code)
+            if df is None or len(df) < 60:
                 continue
             close = df["close"]
             i = len(df) - 1
             price = float(close.iloc[i])
 
-            # 跳过 ST/退市(用股票名,但这里没有 name 字段,跳过)
+            # ST/退市已在候选池层过滤(见上 stock_names 缓存)
 
             # 构造 ctx:只算当前策略依赖的指标(其余策略函数内部自调 compute_xxx)
             # 优化:不再预算全套 10+ 指标,4700 股 × 10+ 指标的浪费消除
@@ -2904,30 +3112,21 @@ def scan_combo_strategies(
     t0 = _time.time()
 
     # 1. 校验策略 id(复用单策略扫描的白名单)
-    builtin_ids = {
-        "macd", "kdj", "ma_stop", "boll", "dmi", "psy", "bias", "sar",
-        "bbiboll", "tower", "ma_combo", "two_line", "life_line", "three_third",
-        "sparrow", "bounce", "volume_div", "resonance", "dmi_psy", "rsi",
-        "bottom", "top", "zt",
-        "trend_follow", "pyramid", "stop_profit", "plan_trade",
-        "high_volume", "demon_stock", "dragon_pullback",
-        "support_resistance", "range_trade",
-        "bottom_ma", "top_weekly", "top_monthly",
-        "zhuang_test", "zhuang_build", "zhuang_pull", "zhuang_ship", "zhuang_wash",
-        "zt_type", "zt_unsealed", "zt_pull",
-        "pe_select", "roe_pe",
-        "daban", "fupan", "bottom_time",
-        "kline_pattern", "macd_top_divergence", "rsi_top_divergence", "gap",
-    }
-    no_scan = {"shareholder_select", "policy_select"}
-    bad = [s for s in strategy_ids if s not in builtin_ids]
+    bad = [s for s in strategy_ids if s not in BUILTIN_STRATEGY_IDS]
     if bad:
         return {"error": f"未知策略 id: {bad},必须是内置策略"}
-    need_net = [s for s in strategy_ids if s in no_scan]
+    need_net = [s for s in strategy_ids if s in NO_SCAN_STRATEGIES]
     if need_net:
         return {"error": f"策略 {need_net} 需联网,不适合全市场扫描"}
+    inert = [s for s in strategy_ids if s in NO_BUY_SIGNAL_STRATEGIES]
+    if inert:
+        return {"error": f"策略 {inert} 为观察型(只返回 hold 不产生买卖信号),不适合选股扫描"}
     if not 2 <= len(strategy_ids) <= 5:
         return {"error": "策略数须 2-5 个"}
+    if len(set(strategy_ids)) != len(strategy_ids):
+        return {"error": "策略 id 不能重复"}
+    if mode not in ("and", "or"):
+        return {"error": f"mode 须为 and/or,收到: {mode}"}
 
     # 2. 候选池(同单策略扫描)
     from datetime import datetime as _dt
@@ -2949,6 +3148,19 @@ def scan_combo_strategies(
     finally:
         conn.close()
     candidates = [row[0] for row in rows]
+
+    # 跳过 ST/退市(名字来自 stock_names sqlite 缓存,不联网;未命中缓存的保留)
+    try:
+        import stock_names as _sn
+
+        _name_map = _sn.lookup_names(candidates)
+        candidates = [
+            c for c in candidates
+            if "ST" not in (_name_map.get(c, "") or "") and "退" not in (_name_map.get(c, "") or "")
+        ]
+    except Exception:
+        pass
+
     if limit and limit < len(candidates):
         candidates = candidates[:limit]
 
@@ -2963,6 +3175,7 @@ def scan_combo_strategies(
     for sid in strategy_ids:
         all_deps.update(_STRATEGY_DEPS.get(sid, ()))
 
+    grouped = _bulk_fetch_daily(candidates, days=320)
     hits = []
     scanned = 0
     total = len(candidates)
@@ -2978,8 +3191,8 @@ def scan_combo_strategies(
                 pass
             last_progress_at = scanned
         try:
-            df = get_daily_data(code, days=320)
-            if len(df) < 60:
+            df = grouped.get(code)
+            if df is None or len(df) < 60:
                 continue
             close = df["close"]
             i = len(df) - 1
