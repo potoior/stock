@@ -428,6 +428,31 @@ def save_strategies(strategies):
     _save_config(cfg)
 
 
+def validate_strategy_params(strategy_id: str, params: dict) -> str | None:
+    """校验策略参数(白名单 + 数值合理性),返回错误信息或 None(通过)。
+
+    白名单 = DEFAULT_STRATEGY_PARAMS 中该策略的声明的参数;
+    tower/resonance/bbiboll 等无参数策略传任何参数都拒绝。
+    """
+    if strategy_id not in BUILTIN_STRATEGY_IDS:
+        return f"未知策略 id: {strategy_id}"
+    if not isinstance(params, dict) or not params:
+        return "参数必须是非空字典"
+    whitelist = DEFAULT_STRATEGY_PARAMS.get(strategy_id, {})
+    errors = []
+    for k, v in params.items():
+        if k not in whitelist:
+            legal = ", ".join(whitelist) if whitelist else "该策略无可调参数"
+            errors.append(f"未知参数 {k}(合法参数: {legal})")
+        elif isinstance(v, bool) or not isinstance(v, (int, float)):
+            errors.append(f"参数 {k} 必须是数字")
+        elif not -10000 <= float(v) <= 10000:
+            errors.append(f"参数 {k} 超出合理范围 [-10000, 10000]")
+    if errors:
+        return "; ".join(errors)
+    return None
+
+
 # ---------------- 每个策略一个可独立开关/调参的评估函数 ----------------
 
 

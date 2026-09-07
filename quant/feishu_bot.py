@@ -2036,11 +2036,14 @@ def handler_toggle_strategy(strategy_id: str, enabled: bool) -> str:
 
 
 def handler_set_strategy_params(strategy_id: str, params: dict) -> str:
-    """调整策略参数。"""
+    """调整策略参数(白名单校验,越界拒绝)。"""
     try:
         import strategy_engine as se
         if not params or not isinstance(params, dict):
             return "❌ 参数必须是非空 dict,如 {\"period\": 30}"
+        err = se.validate_strategy_params(strategy_id, params)
+        if err:
+            return f"❌ 参数校验不通过: {err}"
         strategies = se.get_strategies()
         found = False
         for s in strategies:

@@ -109,3 +109,41 @@ def test_analyze_with_strategies_preset(mock_market, monkeypatch):
     assert "error" not in res
     keys = {s["key"] for s in res["signals"]}
     assert keys == set(se.STRATEGY_PRESETS["抄底"]["ids"])
+
+
+# ============ set_strategy_params 白名单校验 ============
+
+
+def test_validate_params_ok():
+    assert se.validate_strategy_params("macd", {"fast": 10}) is None
+
+
+def test_validate_params_unknown_name():
+    res = se.validate_strategy_params("macd", {"not_a_param": 1})
+    assert res and "未知参数" in res
+
+
+def test_validate_params_non_numeric():
+    res = se.validate_strategy_params("macd", {"fast": "abc"})
+    assert res and "必须是数字" in res
+
+
+def test_validate_params_out_of_range():
+    res = se.validate_strategy_params("macd", {"fast": 999999})
+    assert res and "范围" in res
+
+
+def test_validate_params_no_param_strategy():
+    """无参数策略(tower 等)传任何参数都拒绝。"""
+    res = se.validate_strategy_params("tower", {"n": 5})
+    assert res and "无可调参数" in res
+
+
+def test_validate_params_unknown_strategy():
+    res = se.validate_strategy_params("no_such_strategy", {"x": 1})
+    assert res and "未知策略" in res
+
+
+def test_validate_params_bool_rejected():
+    res = se.validate_strategy_params("macd", {"fast": True})
+    assert res and "必须是数字" in res
