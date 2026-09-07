@@ -2228,6 +2228,46 @@ CONDITION_METRIC_META = {
     "close_below_open": "阴线收盘",
     "volume_expand": "放量(>1.5倍)",
     "volume_shrink": "缩量(<0.7倍)",
+    "macd_golden": "MACD金叉",
+    "macd_death": "MACD死叉",
+    "volume_ratio": "量比(当日量/5日均量)",
+}
+
+# 指标语义说明(供规则编译器的 LLM 参考)
+METRIC_DESC = {
+    "price_vs_ma5": "现价减MA5的差值(>0 表示在MA5上方)",
+    "price_vs_ma10": "现价减MA10的差值",
+    "price_vs_ma20": "现价减MA20的差值",
+    "price_vs_ma60": "现价减MA60的差值",
+    "ma5_vs_ma10": "MA5减MA10的差值",
+    "ma5_vs_ma60": "MA5减MA60的差值",
+    "ma10_vs_ma60": "MA10减MA60的差值",
+    "macd_diff_vs_dea": "DIFF减DEA的差值(>0 表示MACD多头)",
+    "macd_above_zero": "MACD的DIFF在零轴上方(布尔)",
+    "macd_below_zero": "MACD的DIFF在零轴下方(布尔)",
+    "k": "KDJ的K值",
+    "d": "KDJ的D值",
+    "j": "KDJ的J值",
+    "kdj_golden": "当日K线上穿D线形成KDJ金叉(布尔事件)",
+    "kdj_death": "当日K线下穿D线形成KDJ死叉(布尔事件)",
+    "macd_golden": "当日DIFF上穿DEA形成MACD金叉(布尔事件)",
+    "macd_death": "当日DIFF下穿DEA形成MACD死叉(布尔事件)",
+    "price_in_boll_upper": "现价触及BOLL布林带上轨(布尔)",
+    "price_in_boll_lower": "现价触及BOLL布林带下轨(布尔)",
+    "psy_over": "PSY心理线≥75超买(布尔)",
+    "psy_under": "PSY心理线≤25超卖(布尔)",
+    "bias_over": "BIAS6乖离率≥3超涨(布尔)",
+    "bias_under": "BIAS6乖离率≤-3超跌(布尔)",
+    "pdi_vs_mdi": "DMI的PDI减MDI的差值(>0 表示多头主导)",
+    "sar_bull": "价格在SAR上方,SAR翻红(布尔)",
+    "sar_bear": "价格在SAR下方,SAR翻绿(布尔)",
+    "tower_red": "宝塔线红(布尔)",
+    "tower_green": "宝塔线绿(布尔)",
+    "close_above_open": "阳线收盘,收盘价高于开盘价(布尔)",
+    "close_below_open": "阴线收盘,收盘价低于开盘价(布尔)",
+    "volume_expand": "当日成交量大于5日均量1.5倍(布尔)",
+    "volume_shrink": "当日成交量小于5日均量0.7倍(布尔)",
+    "volume_ratio": "当日成交量除以5日均量的比值(数值,如 1.5)",
 }
 
 
@@ -2303,6 +2343,24 @@ def _eval_metric(ctx, metric):
         v = df["volume"].iloc[i]
         avg = df["volume"].iloc[i - 5 : i].mean() if i >= 5 else df["volume"].mean()
         return 1 if avg > 0 and v < avg * 0.7 else 0
+    if metric == "macd_golden":
+        return (
+            1
+            if ctx["macd_diff"].iloc[i] > ctx["macd_dea"].iloc[i]
+            and ctx["macd_diff"].iloc[i - 1] <= ctx["macd_dea"].iloc[i - 1]
+            else 0
+        )
+    if metric == "macd_death":
+        return (
+            1
+            if ctx["macd_diff"].iloc[i] < ctx["macd_dea"].iloc[i]
+            and ctx["macd_diff"].iloc[i - 1] >= ctx["macd_dea"].iloc[i - 1]
+            else 0
+        )
+    if metric == "volume_ratio":
+        v = df["volume"].iloc[i]
+        avg = df["volume"].iloc[i - 5 : i].mean() if i >= 5 else df["volume"].mean()
+        return v / avg if avg > 0 else 0
     return 0
 
 
@@ -2332,25 +2390,118 @@ def eval_condition(ctx, cond):
     return False
 
 
+def eval_condition_group(ctx, group):
+    """条件组求值。group 支持三种形态:
+    - [cond, ...]         列表: 全部满足(AND, 兼容旧格式)
+    - {"all": [cond,...]} 全部满足
+    - {"any": [cond,...]} 任一满足(OR)
+    """
+    if isinstance(group, list):
+        return bool(group) and all(eval_condition(ctx, c) for c in group)
+    if isinstance(group, dict):
+        if "all" in group:
+            return bool(group["all"]) and all(eval_condition(ctx, c) for c in group["all"])
+        if "any" in group:
+            return any(eval_condition(ctx, c) for c in group["any"])
+    return False
+
+
+def _group_reason(ctx, group):
+    """生成条件组的人类可读描述,标注每条条件的当前取值。"""
+    joiner = " 且 " if not isinstance(group, dict) else (" 且 " if "all" in group else " 或 ")
+    conds = group if isinstance(group, list) else next(iter(group.values()), [])
+    parts = []
+    for c in conds:
+        name = CONDITION_METRIC_META.get(c.get("metric"), c.get("metric"))
+        val = _eval_metric(ctx, c.get("metric"))
+        if c.get("op") == "is_true" or c.get("op", ">") == "is_true":
+            parts.append(f"{name}={'是' if val else '否'}")
+        else:
+            parts.append(f"{name}={val:.2f}{c.get('op', '>')}{c.get('threshold', 0)}")
+    return joiner.join(parts) or "无"
+
+
 def eval_custom_strategy(ctx, strat):
-    """离线兜底：{name, buy:[conds], sell:[conds]} buy/sell 均为 AND 关系"""
-    sig = "hold"
-    reason = ""
-    buy_conds = strat.get("buy", [])
-    sell_conds = strat.get("sell", [])
-    if buy_conds and all(eval_condition(ctx, c) for c in buy_conds):
-        sig = "buy"
-        reason = "买入条件满足: " + " 且 ".join(
-            CONDITION_METRIC_META.get(c["metric"], c["metric"]) for c in buy_conds
-        )
-    elif sell_conds and all(eval_condition(ctx, c) for c in sell_conds):
-        sig = "sell"
-        reason = "卖出条件满足: " + " 且 ".join(
-            CONDITION_METRIC_META.get(c["metric"], c["metric"]) for c in sell_conds
-        )
-    else:
-        reason = "自定义条件未触发"
-    return sig, reason
+    """确定性判定自定义策略。
+
+    条件来源优先级:compiled(AI 编译的结构化条件) > buy/sell(手工结构化条件)。
+    buy/sell 内条件为 AND;compiled 支持 {"all":[...]} / {"any":[...]} 分组。
+    """
+    buy = strat.get("compiled", {}).get("buy") or strat.get("buy")
+    sell = strat.get("compiled", {}).get("sell") or strat.get("sell")
+    if buy and eval_condition_group(ctx, buy):
+        return "buy", "买入条件满足: " + _group_reason(ctx, buy)
+    if sell and eval_condition_group(ctx, sell):
+        return "sell", "卖出条件满足: " + _group_reason(ctx, sell)
+    return "hold", "自定义条件未触发"
+
+
+# ---------------- 规则编译(自然语言 → 结构化条件,AI 只翻译一次) ----------------
+
+
+def _validate_compiled(compiled: dict) -> str | None:
+    """校验编译产物,返回错误信息或 None(通过)。"""
+    if not isinstance(compiled, dict):
+        return "编译结果必须是 JSON 对象"
+    for side in ("buy", "sell"):
+        group = compiled.get(side)
+        if group is None:
+            continue
+        if isinstance(group, dict):
+            if "all" not in group and "any" not in group:
+                return f"{side} 只支持 {{'all':[...]}} / {{'any':[...]}} 形态"
+            group = next(iter(group.values()))
+        if not isinstance(group, list):
+            return f"{side} 条件必须是列表"
+        for c in group:
+            if not isinstance(c, dict) or c.get("metric") not in CONDITION_METRIC_META:
+                bad = c.get("metric") if isinstance(c, dict) else c
+                return f"{side} 含未知指标: {bad}"
+            if c.get("op", ">") not in (">", ">=", "<", "<=", "==", "is_true"):
+                return f"{side} 含未知比较符: {c.get('op')}"
+    return None
+
+
+def compile_custom_strategy(strategy_id: str) -> dict:
+    """把自定义策略的自然语言规则编译为结构化条件(一次性 AI 翻译)。
+
+    编译后判定走纯代码(eval_custom_strategy),LLM 不再参与信号判定,100% 可复现。
+
+    Returns: {"ok": True, "compiled": {...}} 或 {"ok": False, "error": "..."}
+    """
+    strategies = get_strategies()
+    strat = next(
+        (s for s in strategies if s.get("id") == strategy_id and s.get("type") == "custom"),
+        None,
+    )
+    if not strat:
+        return {"ok": False, "error": f"未找到自定义策略 {strategy_id}"}
+    if not (strat.get("buy_rule") or strat.get("sell_rule")):
+        return {"ok": False, "error": "策略没有自然语言规则(buy_rule/sell_rule)可编译"}
+
+    try:
+        from ai_decider import AIDecider
+
+        decider = AIDecider()
+    except Exception as e:
+        return {"ok": False, "error": f"AI 不可用: {e}"}
+
+    resp = decider.compile_rule(
+        strat.get("name", strategy_id),
+        strat.get("buy_rule", ""),
+        strat.get("sell_rule", ""),
+    )
+    if not isinstance(resp, dict) or resp.get("error"):
+        return {"ok": False, "error": (resp or {}).get("error", "AI 编译失败")}
+    compiled = resp.get("compiled")
+    err = _validate_compiled(compiled)
+    if err:
+        return {"ok": False, "error": f"AI 翻译结果校验不通过: {err}"}
+
+    strat["compiled"] = compiled
+    save_strategies(strategies)
+    clear_ai_cache()
+    return {"ok": True, "compiled": compiled}
 
 
 def format_indicators(ctx):
@@ -2380,11 +2531,46 @@ def format_indicators(ctx):
 
 
 def judge_custom_with_ai(code, ctx, custom_strats, use_ai=True):
-    """用 AI 判定自定义策略。返回 [{key,name,builtin:False,buy_rule,sell_rule,signal,reason,ai:bool}]"""
+    """判定自定义策略。
+
+    解耦设计(策略与 AI 判定分离):
+    - 有 compiled(编译后结构化条件)或 buy/sell(手工结构化条件)的策略 → 纯代码确定性判定
+    - 只有自然语言 buy_rule/sell_rule 的策略 → 降级走 AI 判定(可先 compile_strategy 编译)
+
+    返回 [{key,name,builtin:False,buy_rule,sell_rule,signal,reason,ai:bool}]
+    """
     if not custom_strats:
         return []
-    today = datetime.now().strftime("%Y%m%d")
     out = []
+    deterministic_strats = []
+    ai_strats = []
+    for s in custom_strats:
+        if s.get("compiled") or s.get("buy") or s.get("sell"):
+            deterministic_strats.append(s)
+        else:
+            ai_strats.append(s)
+
+    # 确定性判定:不依赖 LLM,100% 可复现
+    for s in deterministic_strats:
+        sg, rsn = eval_custom_strategy(ctx, s)
+        out.append(
+            {
+                "key": s["id"],
+                "name": s.get("name", "自定义策略"),
+                "signal": sg,
+                "reason": rsn,
+                "builtin": False,
+                "ai": False,
+                "buy_rule": s.get("buy_rule", ""),
+                "sell_rule": s.get("sell_rule", ""),
+            }
+        )
+
+    custom_strats = ai_strats
+    if not custom_strats:
+        return out
+
+    today = datetime.now().strftime("%Y%m%d")
     if use_ai:
         try:
             from ai_decider import AIDecider
@@ -2511,6 +2697,172 @@ def judge_custom_with_ai(code, ctx, custom_strats, use_ai=True):
     return out
 
 
+# ---------------- 策略注册表元数据 + 预设组合(供策略总管选择) ----------------
+
+# 策略分类(注册表元数据,供 LLM 按意图选策略)
+STRATEGY_CATEGORY = {
+    "macd": "经典技术指标", "kdj": "经典技术指标", "ma_stop": "经典技术指标",
+    "boll": "经典技术指标", "dmi": "经典技术指标", "psy": "经典技术指标",
+    "bias": "经典技术指标", "sar": "经典技术指标", "bbiboll": "经典技术指标",
+    "tower": "经典技术指标", "ma_combo": "经典技术指标", "two_line": "经典技术指标",
+    "life_line": "经典技术指标", "three_third": "经典技术指标", "sparrow": "经典技术指标",
+    "bounce": "经典技术指标", "volume_div": "经典技术指标", "resonance": "经典技术指标",
+    "dmi_psy": "经典技术指标", "rsi": "经典技术指标", "bottom": "经典技术指标",
+    "top": "经典技术指标", "zt": "经典技术指标",
+    "trend_follow": "投资法则", "pyramid": "投资法则",
+    "stop_profit": "投资法则", "plan_trade": "投资法则",
+    "high_volume": "量能实战", "demon_stock": "量能实战", "dragon_pullback": "量能实战",
+    "support_resistance": "量能实战", "range_trade": "量能实战",
+    "daban": "实战战法", "fupan": "实战战法",
+    "bottom_ma": "抄底", "bottom_time": "抄底",
+    "top_weekly": "逃顶", "top_monthly": "逃顶",
+    "zhuang_test": "跟庄", "zhuang_build": "跟庄", "zhuang_pull": "跟庄",
+    "zhuang_ship": "跟庄", "zhuang_wash": "跟庄",
+    "zt_type": "涨停", "zt_unsealed": "涨停", "zt_pull": "涨停",
+    "pe_select": "基本面", "roe_pe": "基本面",
+    "shareholder_select": "基本面", "policy_select": "基本面",
+    "kline_pattern": "经典形态", "macd_top_divergence": "经典形态",
+    "macd_bottom_divergence": "经典形态", "rsi_top_divergence": "经典形态",
+    "rsi_bottom_divergence": "经典形态", "gap": "经典形态",
+}
+
+# 预设组合:LLM 总管可按用户意图直接引用(也可展开为具体策略 id)
+STRATEGY_PRESETS = {
+    "短线": {
+        "desc": "短线交易:金叉/超卖/均线止损等快速信号",
+        "ids": ["macd", "kdj", "ma_stop", "boll", "bias", "daban"],
+    },
+    "趋势": {
+        "desc": "中线趋势跟随,均线多头排列",
+        "ids": ["ma_combo", "two_line", "life_line", "trend_follow", "macd"],
+    },
+    "抄底": {
+        "desc": "底部识别,K线形态+底背离",
+        "ids": ["bottom", "bottom_ma", "bottom_time", "rsi_bottom_divergence", "kline_pattern"],
+    },
+    "逃顶": {
+        "desc": "顶部风险识别,顶背离+周月线见顶",
+        "ids": ["top", "top_weekly", "top_monthly", "macd_top_divergence"],
+    },
+    "量价": {
+        "desc": "量能分析,高量柱/量价背离/龙回头",
+        "ids": ["high_volume", "volume_div", "demon_stock", "dragon_pullback"],
+    },
+    "跟庄": {
+        "desc": "庄家行为识别,试盘/建仓/拉高/出货/洗盘",
+        "ids": ["zhuang_test", "zhuang_build", "zhuang_pull", "zhuang_ship", "zhuang_wash"],
+    },
+    "涨停": {
+        "desc": "涨停板分析,类型/封板强度",
+        "ids": ["zt", "zt_type", "zt_unsealed", "zt_pull"],
+    },
+}
+
+
+def expand_strategy_ids(tokens: list) -> tuple[list, list]:
+    """把 策略id/预设名 混合列表展开为策略 id 列表。
+
+    Returns: (ids, unknown)  unknown 为无法识别的 token
+    """
+    ids: list = []
+    unknown: list = []
+    for t in tokens:
+        t = str(t).strip()
+        if not t:
+            continue
+        if t in STRATEGY_PRESETS:
+            ids.extend(s for s in STRATEGY_PRESETS[t]["ids"] if s not in ids)
+        elif t in BUILTIN_STRATEGY_IDS:
+            if t not in ids:
+                ids.append(t)
+        else:
+            unknown.append(t)
+    return ids, unknown
+
+
+def analyze_with_strategies(code: str, strategy_ids: list, use_ai: bool = True) -> dict:
+    """按需选择策略分析:只跑指定策略(支持预设名),不动全局配置。"""
+    ids, unknown = expand_strategy_ids(strategy_ids or [])
+    if unknown:
+        return {"error": f"未知策略/预设: {', '.join(unknown)}"}
+    if not ids:
+        return {"error": "未指定有效策略"}
+    return analyze(code, use_ai=use_ai, strategy_ids=ids)
+
+
+# ---------------- 内置策略注册表(id, 名称, 评估函数) ----------------
+
+
+BUILTIN_REGISTRY = [
+    ("macd", "MACD金叉死叉", strategy_macd),
+    ("kdj", "KDJ超买超卖", strategy_kdj),
+    ("ma_stop", "5日均线止损", strategy_ma_stop),
+    ("boll", "BOLL布林线", strategy_boll),
+    ("dmi", "DMI趋势", strategy_dmi),
+    ("psy", "PSY心理线", strategy_psy),
+    ("bias", "BIAS乖离率", strategy_bias),
+    ("sar", "SAR止损", strategy_sar),
+    ("bbiboll", "BBIBOLL多空布林", strategy_burnal),
+    ("tower", "宝塔线TOWER", strategy_tower),
+    ("ma_combo", "均线组合", strategy_ma_combo),
+    ("two_line", "二线法", strategy_two_line),
+    ("life_line", "60日生命线", strategy_life_line),
+    ("three_third", "三分法", strategy_three_third),
+    ("sparrow", "麻雀战术", strategy_sparrow),
+    ("bounce", "反弹量化", strategy_bounce),
+    ("volume_div", "量价背离", strategy_volume_divergence),
+    ("resonance", "三指标共振", strategy_resonance),
+    ("dmi_psy", "DMI+PSY超跌", strategy_dmi_psy),
+    ("rsi", "RSI相对强弱", strategy_rsi),
+    ("bottom", "抄底策略", strategy_bottom),
+    ("top", "逃顶策略", strategy_top),
+    ("zt", "涨停板策略", strategy_zt),
+        # 操练大全12章 投资法则
+    ("trend_follow", "顺势而为", strategy_trend_follow),
+    ("pyramid", "金字塔买卖", strategy_pyramid),
+    ("stop_profit", "暴利收手", strategy_stop_profit),
+    ("plan_trade", "计划交易", strategy_plan_trade),
+        # 漫画书 量能/实战战法
+    ("high_volume", "高量柱", strategy_high_volume),
+    ("demon_stock", "看妖股", strategy_demon_stock),
+    ("dragon_pullback", "龙回头", strategy_dragon_pullback),
+    ("support_resistance", "压力支撑", strategy_support_resistance),
+    ("range_trade", "区间交易", strategy_range_trade),
+        # 操练大全15章 抄底
+    ("bottom_ma", "均线识底", strategy_bottom_ma),
+        # 操练大全16章 逃顶(周/月线)
+    ("top_weekly", "周线见顶", strategy_top_weekly),
+    ("top_monthly", "月线见顶", strategy_top_monthly),
+        # 操练大全17章 跟庄
+    ("zhuang_test", "庄家试盘", strategy_zhuang_test),
+    ("zhuang_build", "庄家建仓", strategy_zhuang_build),
+    ("zhuang_pull", "庄家拉高", strategy_zhuang_pull),
+    ("zhuang_ship", "庄家出货", strategy_zhuang_ship),
+    ("zhuang_wash", "庄家洗盘", strategy_zhuang_wash),
+        # 操练大全20章 涨停细分
+    ("zt_type", "涨停类型", strategy_zt_type),
+    ("zt_unsealed", "涨停封不牢", strategy_zt_unsealed),
+    ("zt_pull", "拉高型涨停", strategy_zt_pull),
+        # 操练大全14章 基本面
+    ("pe_select", "市盈率选股", strategy_pe_select),
+    ("roe_pe", "ROE+PE选股", strategy_roe_pe),
+        # 漫画书 实战战法(剩余)
+    ("daban", "打板策略", strategy_daban),
+    ("fupan", "复盘法", strategy_fupan),
+        # 操练大全15章 抄底(剩余)
+    ("bottom_time", "时间识底", strategy_bottom_time),
+        # 操练大全14章 选股(剩余)
+    ("shareholder_select", "股东人数选股", strategy_shareholder_select),
+    ("policy_select", "政策选股", strategy_policy_select),
+        # 经典 K 线形态 + 顶背离 + 缺口
+    ("kline_pattern", "K线形态", strategy_kline_pattern),
+    ("macd_top_divergence", "MACD顶背离", strategy_macd_top_divergence),
+    ("rsi_top_divergence", "RSI顶背离", strategy_rsi_top_divergence),
+    ("macd_bottom_divergence", "MACD底背离", strategy_macd_bottom_divergence),
+    ("rsi_bottom_divergence", "RSI底背离", strategy_rsi_bottom_divergence),
+    ("gap", "缺口识别", strategy_gap),
+    ]
+
 # ---------------- 主分析入口 ----------------
 
 
@@ -2533,7 +2885,12 @@ def verdict_from_votes(buy_n: int, sell_n: int, total_n: int) -> tuple:
     return "观望", "⏸"
 
 
-def analyze(code: str, use_ai: bool = True) -> dict:
+def analyze(code: str, use_ai: bool = True, strategy_ids: list | None = None) -> dict:
+    """分析个股,所有启用策略投票。
+
+    Args:
+        strategy_ids: 按需模式——只跑这些策略(显式选择优先于 enabled 开关),None=全部启用策略
+    """
     rt = fetch_realtime([code])
     realtime = rt[0] if rt else None
     df = get_daily_data(code)
@@ -2642,76 +2999,6 @@ def analyze(code: str, use_ai: bool = True) -> dict:
         "ma13": df["ma13"],
     }
 
-    BUILTIN = [
-        ("macd", "MACD金叉死叉", strategy_macd),
-        ("kdj", "KDJ超买超卖", strategy_kdj),
-        ("ma_stop", "5日均线止损", strategy_ma_stop),
-        ("boll", "BOLL布林线", strategy_boll),
-        ("dmi", "DMI趋势", strategy_dmi),
-        ("psy", "PSY心理线", strategy_psy),
-        ("bias", "BIAS乖离率", strategy_bias),
-        ("sar", "SAR止损", strategy_sar),
-        ("bbiboll", "BBIBOLL多空布林", strategy_burnal),
-        ("tower", "宝塔线TOWER", strategy_tower),
-        ("ma_combo", "均线组合", strategy_ma_combo),
-        ("two_line", "二线法", strategy_two_line),
-        ("life_line", "60日生命线", strategy_life_line),
-        ("three_third", "三分法", strategy_three_third),
-        ("sparrow", "麻雀战术", strategy_sparrow),
-        ("bounce", "反弹量化", strategy_bounce),
-        ("volume_div", "量价背离", strategy_volume_divergence),
-        ("resonance", "三指标共振", strategy_resonance),
-        ("dmi_psy", "DMI+PSY超跌", strategy_dmi_psy),
-        ("rsi", "RSI相对强弱", strategy_rsi),
-        ("bottom", "抄底策略", strategy_bottom),
-        ("top", "逃顶策略", strategy_top),
-        ("zt", "涨停板策略", strategy_zt),
-        # 操练大全12章 投资法则
-        ("trend_follow", "顺势而为", strategy_trend_follow),
-        ("pyramid", "金字塔买卖", strategy_pyramid),
-        ("stop_profit", "暴利收手", strategy_stop_profit),
-        ("plan_trade", "计划交易", strategy_plan_trade),
-        # 漫画书 量能/实战战法
-        ("high_volume", "高量柱", strategy_high_volume),
-        ("demon_stock", "看妖股", strategy_demon_stock),
-        ("dragon_pullback", "龙回头", strategy_dragon_pullback),
-        ("support_resistance", "压力支撑", strategy_support_resistance),
-        ("range_trade", "区间交易", strategy_range_trade),
-        # 操练大全15章 抄底
-        ("bottom_ma", "均线识底", strategy_bottom_ma),
-        # 操练大全16章 逃顶(周/月线)
-        ("top_weekly", "周线见顶", strategy_top_weekly),
-        ("top_monthly", "月线见顶", strategy_top_monthly),
-        # 操练大全17章 跟庄
-        ("zhuang_test", "庄家试盘", strategy_zhuang_test),
-        ("zhuang_build", "庄家建仓", strategy_zhuang_build),
-        ("zhuang_pull", "庄家拉高", strategy_zhuang_pull),
-        ("zhuang_ship", "庄家出货", strategy_zhuang_ship),
-        ("zhuang_wash", "庄家洗盘", strategy_zhuang_wash),
-        # 操练大全20章 涨停细分
-        ("zt_type", "涨停类型", strategy_zt_type),
-        ("zt_unsealed", "涨停封不牢", strategy_zt_unsealed),
-        ("zt_pull", "拉高型涨停", strategy_zt_pull),
-        # 操练大全14章 基本面
-        ("pe_select", "市盈率选股", strategy_pe_select),
-        ("roe_pe", "ROE+PE选股", strategy_roe_pe),
-        # 漫画书 实战战法(剩余)
-        ("daban", "打板策略", strategy_daban),
-        ("fupan", "复盘法", strategy_fupan),
-        # 操练大全15章 抄底(剩余)
-        ("bottom_time", "时间识底", strategy_bottom_time),
-        # 操练大全14章 选股(剩余)
-        ("shareholder_select", "股东人数选股", strategy_shareholder_select),
-        ("policy_select", "政策选股", strategy_policy_select),
-        # 经典 K 线形态 + 顶背离 + 缺口
-        ("kline_pattern", "K线形态", strategy_kline_pattern),
-        ("macd_top_divergence", "MACD顶背离", strategy_macd_top_divergence),
-        ("rsi_top_divergence", "RSI顶背离", strategy_rsi_top_divergence),
-        ("macd_bottom_divergence", "MACD底背离", strategy_macd_bottom_divergence),
-        ("rsi_bottom_divergence", "RSI底背离", strategy_rsi_bottom_divergence),
-        ("gap", "缺口识别", strategy_gap),
-    ]
-
     strategies_cfg = get_strategies()
     enabled_map = {}
     params_map = {}
@@ -2720,8 +3007,10 @@ def analyze(code: str, use_ai: bool = True) -> dict:
         params_map[s["id"]] = s.get("params", {})
 
     signals = []
-    for sid, name, fn in BUILTIN:
-        if sid in enabled_map and not enabled_map[sid]:
+    for sid, name, fn in BUILTIN_REGISTRY:
+        if strategy_ids is not None and sid not in strategy_ids:
+            continue
+        if strategy_ids is None and sid in enabled_map and not enabled_map[sid]:
             continue
         params = {**DEFAULT_STRATEGY_PARAMS.get(sid, {}), **params_map.get(sid, {})}
         try:
@@ -2731,7 +3020,13 @@ def analyze(code: str, use_ai: bool = True) -> dict:
             sg, rsn = "hold", "计算异常"
         signals.append({"key": sid, "name": name, "signal": sg, "reason": rsn, "builtin": True})
 
-    custom_strats = [s for s in strategies_cfg if s.get("type") == "custom" and s.get("enabled", True)]
+    custom_strats = [
+        s
+        for s in strategies_cfg
+        if s.get("type") == "custom"
+        and s.get("enabled", True)
+        and (strategy_ids is None or s["id"] in strategy_ids)
+    ]
     custom_strats = migrate_custom_strategies(custom_strats)
     signals.extend(judge_custom_with_ai(code, ctx, custom_strats, use_ai=use_ai))
 

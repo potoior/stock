@@ -9,7 +9,7 @@ A 股量化分析系统,集成飞书群聊 Bot(Function Calling ReAct Agent),覆
 - 45 内置策略信号引擎(MACD/KDJ/BOLL/RSI/玉姐 10 条规则 + 操练大全12/14/15/16/17/20章 + 漫画书量能/实战战法等)
 - 玉姐精选全市场扫描(多因子评分排行)
 - 回测 + 参数网格寻优
-- 飞书 Bot Agent(31 个 skill,跨轮记忆,自选股,群共享自选股,财务数据,板块分析,历史复盘,策略选股,个股新闻,龙虎榜,北向资金,主力资金流,板块反查,指数行情,板块资金流,市场情绪,多策略组合回测,条件选股)
+- **飞书 Bot Agent(35 个工具,跨轮记忆,自选股,群共享自选股,财务数据,板块分析,历史复盘,策略选股,个股新闻,龙虎榜,北向资金,主力资金流,板块反查,指数行情,板块资金流,市场情绪,多策略组合回测,条件选股)
 - 策略大全(4 来源 73 策略:漫画书 29 + 操练大全 32 + 玉姐 10 + AI 2,已实现 72 个)
 
 ## 目录结构
@@ -103,10 +103,10 @@ systemctl --user list-timers daily-afterclose.timer news-monitor.timer
 
 ### Agent 设计
 - **Function Calling ReAct**: LLM 自主决策调工具,失败降级到 `route()` 关键词路由
-- **31 个 skill**: 4 数据查询 + 5 策略查询 + 3 策略操作 + 4 回测寻优(含组合回测) + 1 自选股(含群共享/批量分析) + 1 财务 + 3 批量(对比/板块/历史复盘) + 1 个股新闻 + 7 市场数据(龙虎榜/北向/主力资金流/板块反查/指数/板块资金流/市场情绪) + 1 条件选股 + 1 条件选股
+- **35 个 skill**: 4 数据查询 + 6 策略查询 + 4 策略操作 + 5 回测寻优(含组合回测) + 1 自选股(含群共享/批量分析) + 1 财务 + 3 批量(对比/板块/历史复盘) + 2 新闻 + 7 市场数据(龙虎榜/北向/主力资金流/板块反查/指数/板块资金流/市场情绪) + 2 条件选股
   - 数据查询: `analyze_stock` / `get_market_status` / `get_yujie_picks` / `get_portfolio`
-  - 策略查询: `list_strategies` / `get_strategy_library` / `get_yujie_detail` / `analyze_with_strategy` / `analyze_with_yujie`
-  - 策略操作: `toggle_strategy` / `set_strategy_params` / `enable_library_strategy`
+  - 策略查询: `list_strategies` / `get_strategy_library` / `get_yujie_detail` / `analyze_with_strategy` / `analyze_with_strategies`(策略总管,按需组合) / `analyze_with_yujie`
+  - 策略操作: `toggle_strategy` / `compile_strategy`(自定义规则编译,见下) / `set_strategy_params` / `enable_library_strategy`
   - 回测寻优选股: `backtest_strategy` / `grid_search_strategy` / `scan_with_strategy`(全市场策略选股) / `scan_combo`(多策略组合选股,AND共振/OR宽松,耗时约1-3分钟)
   - 自选股: `watchlist`(add/remove/list)
   - 财务: `get_finance`(单股 PE/PB/市值/ROE/毛利率/净利率/EPS/营收/净利润)
@@ -152,6 +152,8 @@ systemctl --user list-timers daily-afterclose.timer news-monitor.timer
 - `cross_ref` 跨来源查同一策略在哪些书里出现
 
 ### 内置策略列表(strategy_engine.py,56 个)
+- 策略注册表: `BUILTIN_REGISTRY`(id, 名称, 评估函数),分类元数据 `STRATEGY_CATEGORY`,预设组合 `STRATEGY_PRESETS`(短线/趋势/抄底/逃顶/量价/跟庄/涨停)
+- 策略总管: `analyze_with_strategies(code, strategies)` 按需选择策略组合分析个股(支持策略 id 与预设名混用),只跑指定策略,不动全局配置;LLM 负责根据用户意图挑选策略
 - 原有 23: macd/kdj/ma_stop/boll/dmi/psy/bias/sar/bbiboll/tower/ma_combo/two_line/life_line/three_third/sparrow/bounce/volume_div/resonance/dmi_psy/rsi/bottom/top/zt
 - 12章 投资法则(4): trend_follow(顺势)/pyramid(金字塔)/stop_profit(暴风收手)/plan_trade(计划交易)
 - 漫画书 量能/实战战法(5): high_volume(高量柱)/demon_stock(看妖股)/dragon_pullback(龙回头)/support_resistance(压力支撑)/range_trade(区间交易)
@@ -165,6 +167,14 @@ systemctl --user list-timers daily-afterclose.timer news-monitor.timer
 - 板块热点 hotspot_select 在 daily_scan.scan_hotspot_stocks 实现(市场层面,非单股策略)
 - 需联网的策略(shareholder_select/policy_select)不可用于 scan_with_strategy 全市场扫描,只能 analyze 个股
 - 观察型策略(zhuang_test/zhuang_wash/zt_pull)只返回 hold 不产生买卖信号,扫描入口直接拒绝
+
+### 自定义策略解耦(策略与 AI 判定分离)
+- 自然语言规则(buy_rule/sell_rule)每次由 LLM 解释判定不可控 → 解耦为"AI 只翻译一次,执行纯代码"
+- `compile_strategy(strategy_id)`: 把自然语言规则编译为结构化条件 `compiled: {buy: {"all"/"any": [...]}, sell: ...}`(指标白名单 + 比较符,存 config.json)
+- 编译后 `judge_custom_with_ai` 走 `eval_custom_strategy` 确定性判定(`ai: False`),LLM 不再参与;未编译的策略仍走 AI 判定兜底
+- 条件组: `[...]`=全部满足(旧格式兼容) / `{"all": [...]}`=全部满足 / `{"any": [...]}`=任一满足
+- 指标白名单: `CONDITION_METRIC_META`(33 个,含 macd_golden/macd_death/volume_ratio),语义说明 `METRIC_DESC` 供编译 LLM 参考
+- 编译产物经 `_validate_compiled` 校验(未知指标/比较符直接拒绝),校验失败不落盘
 
 ### 股票名识别(stock_names.py)
 - 6 位代码直接返回

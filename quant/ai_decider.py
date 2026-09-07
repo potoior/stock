@@ -145,6 +145,50 @@ class AIDecider:
         except json.JSONDecodeError:
             return {"actions": [], "market_judgment": "解析失败", "risk_level": "中"}
 
+    def compile_rule(self, name, buy_rule, sell_rule, timeout=60):
+        """把自然语言买卖规则翻译为结构化条件(一次性编译,不参与判定)。
+
+        返回 {"compiled": {"buy": {...}, "sell": {...}}} 或 {"error": "..."}
+        """
+        from strategy_engine import METRIC_DESC
+
+        metric_lines = "\n".join(f"- {k}: {v}" for k, v in METRIC_DESC.items())
+        prompt = f"""你是量化规则编译器。请把用户的自然语言买卖规则翻译为结构化条件 JSON。
+
+## 可用指标(只能使用这些 metric)
+{metric_lines}
+
+## 比较符
+数值型指标(如 price_vs_ma5, k, volume_ratio 等): 用 >, >=, <, <=, == 加 threshold
+布尔/事件型指标(如 kdj_golden, macd_golden, psy_over 等): 用 "op": "is_true"
+
+## 规则
+策略名: {name}
+买入规则: 「{buy_rule}」
+卖出规则: 「{sell_rule}」
+
+## 输出格式(严格 JSON,不要其他文字)
+{{
+  "buy": {{"all": [{{"metric": "...", "op": "...", "threshold": 0}}]}}
+}}
+
+- 多个条件"同时满足"用 all,"任一满足"用 any
+- 条件语义上覆盖不了的(如基本面/新闻),直接忽略并在该侧用空数组
+- 只输出 JSON,不要解释
+
+请输出:"""
+        raw = self._call_api(prompt, timeout=timeout)
+        if not isinstance(raw, str) or raw.startswith(("API错误", "调用失败", "API限流")):
+            return {"error": f"AI 编译失败: {raw}"}
+        try:
+            json_match = re.search(r"\{.*\}", raw, re.DOTALL)
+            if not json_match:
+                return {"error": "AI 编译失败: 未返回 JSON"}
+            compiled = json.loads(json_match.group())
+            return {"compiled": compiled}
+        except json.JSONDecodeError:
+            return {"error": "AI 编译失败: JSON 解析失败"}
+
     def judge_code(self, code, name, indicators_text, rules, timeout=45, max_retries=2):
         """根据自然语言规则 + 指标值，让 AI 判断每只股票的买卖。
 

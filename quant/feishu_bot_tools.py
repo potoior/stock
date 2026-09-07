@@ -1,7 +1,7 @@
 """飞书 Bot 工具 schema + SYSTEM_PROMPT(从 feishu_bot.py 提取,纯数据无函数)。
 
 包含:
-- TOOLS: 31 个 OpenAI function calling 工具 schema
+- TOOLS: 35 个 OpenAI function calling 工具 schema
 - SYSTEM_PROMPT: Agent 系统提示词
 
 被 feishu_bot.py 导入,通过 re-export 保持 `feishu_bot.TOOLS` / `feishu_bot.SYSTEM_PROMPT` 兼容。
@@ -244,6 +244,25 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "analyze_with_strategies",
+            "description": "策略总管:按需选择策略组合分析个股,只跑指定策略,不动全局配置。你是策略总管,根据用户意图从 56 个策略中挑选相关策略(如短线/趋势/抄底/逃顶/量价/跟庄/涨停),或多策略交叉验证。用户说'看下X的短线机会/X能不能抄底/X量价怎么样'时调用。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "code": {"type": "string", "description": "6位A股代码"},
+                    "strategies": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "策略 id 或预设名列表。预设: 短线/趋势/抄底/逃顶/量价/跟庄/涨停;也可混用具体 id,如 [\"macd\", \"kdj\"] 或 [\"短线\", \"macd_top_divergence\"]"
+                    }
+                },
+                "required": ["code", "strategies"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "analyze_with_yujie",
             "description": "用玉姐精选10条评分规则分析个股,给出综合评分+命中规则+未命中规则+解读。用户问'用玉姐分析X/玉姐评分看X/玉姐策略测X'时调用。与 analyze_with_strategy 不同:玉姐是复合评分体系(10条规则累加),不是单策略买卖信号。",
             "parameters": {
@@ -267,6 +286,20 @@ TOOLS = [
                     "enabled": {"type": "boolean", "description": "true=开启,false=关闭"}
                 },
                 "required": ["strategy_id", "enabled"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "compile_strategy",
+            "description": "把自定义策略的自然语言规则(自然语言 buy_rule/sell_rule)一次性编译为结构化条件,编译后判定走纯代码,不再依赖 AI,100% 可复现。用户说'编译策略/把规则变成代码/固化这个策略'时调用。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "strategy_id": {"type": "string", "description": "自定义策略 id(仅支持 type=custom 的策略)"}
+                },
+                "required": ["strategy_id"]
             }
         }
     },
@@ -554,7 +587,7 @@ TOOLS = [
         }
     },
 ]
-SYSTEM_PROMPT = """你是 A 股量化分析助手(飞书群聊 Bot),有 33 个工具。回复严格 ≤400 字,markdown 格式,只给关键结论+数字,加风险提示。
+SYSTEM_PROMPT = """你是 A 股量化分析助手(飞书群聊 Bot),有 35 个工具。回复严格 ≤400 字,markdown 格式,只给关键结论+数字,加风险提示。
 
 【数据查询】
 - analyze_stock(code): 个股技术面分析+K线图。code 支持中文简称/拼音/6位代码
@@ -578,8 +611,13 @@ SYSTEM_PROMPT = """你是 A 股量化分析助手(飞书群聊 Bot),有 33 个�
 - get_yujie_detail(): 玉姐10条评分规则+权重+回测表现
 - analyze_with_strategy(code, strategy_id): 用指定策略分析个股+K线图
   · strategy_id 支持引擎id(macd)/大全id(macd_8)/中文名(抄底)模糊匹配
+- analyze_with_strategies(code, strategies): 策略总管,按需组合分析,只跑指定策略
+  · strategies 为策略 id 或预设名数组,预设: 短线/趋势/抄底/逃顶/量价/跟庄/涨停
+  · 你应根据用户意图选策略:短线机会→["短线"],能不能抄底→["抄底"],交叉验证→["短线","趋势"]
+  · 也可混用: ["短线","macd_top_divergence"]
 - analyze_with_yujie(code): 玉姐10条评分规则分析个股+玉姐专属图
 - toggle_strategy(strategy_id, enabled): 开关策略(操作类,需用户明确意图)
+- compile_strategy(strategy_id): 把自定义策略的自然语言规则编译为结构化条件,编译后判定不再依赖AI(操作类)
 - set_strategy_params(strategy_id, params): 调参数(操作类)
 - enable_library_strategy(library_id): 从大全引入策略(操作类)
 

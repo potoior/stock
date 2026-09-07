@@ -1829,6 +1829,42 @@ def handler_analyze_with_strategy(code: str, strategy_id: str) -> str:
         return f"❌ 分析 {code} 出错: {e}"
 
 
+def handler_analyze_with_strategies(code: str, strategies: list) -> str:
+    """策略总管:按需选择策略组合分析个股,只跑指定策略,不动全局配置。"""
+    try:
+        import strategy_engine as se
+
+        if not strategies or not isinstance(strategies, list):
+            return "❌ 请指定策略(可传策略 id 或预设名,如 [\"短线\"] 或 [\"macd\", \"kdj\"])"
+        r = se.analyze_with_strategies(code, strategies, use_ai=False)
+        if "error" in r:
+            return f"❌ {r['error']}\n💡 预设: {'、'.join(se.STRATEGY_PRESETS)}"
+        rt = r.get("realtime") or {}
+        s = r.get("summary", {})
+        lines = [
+            f"🎯 策略组合分析 {code} {rt.get('name', '')}",
+            f"  现价 {rt.get('price', 0):.2f} ({rt.get('pct', 0):+.2f}%)",
+            f"综合判断: **{r.get('verdict', '-')}** (买{s.get('buy', 0)}/卖{s.get('sell', 0)}/观{s.get('hold', 0)},共{s.get('total', 0)}个策略)",
+            "",
+        ]
+        buys = r.get("buy_reasons", [])
+        sells = r.get("sell_reasons", [])
+        if buys:
+            lines.append("✅ 买入信号:")
+            for b in buys:
+                lines.append(f"  • {b.get('name', '')}: {b.get('reason', '')}")
+        if sells:
+            lines.append("⚠️ 卖出信号:")
+            for x in sells:
+                lines.append(f"  • {x.get('name', '')}: {x.get('reason', '')}")
+        if not buys and not sells:
+            lines.append("(无明显方向信号,各策略均未触发)")
+        return "\n".join(lines)
+    except Exception as e:
+        log.error("analyze_with_strategies 异常: %s\n%s", e, traceback.format_exc())
+        return f"❌ 策略组合分析 {code} 出错: {e}"
+
+
 def handler_analyze_with_yujie(code: str) -> str:
     """用玉姐精选10条评分规则分析个股,给出综合评分+命中规则+未命中规则+解读。
 
@@ -1933,6 +1969,47 @@ def handler_analyze_with_yujie(code: str) -> str:
         return "\n".join(lines)
     except Exception as e:
         return f"❌ 玉姐分析 {code} 出错: {e}"
+
+
+def handler_compile_strategy(strategy_id: str) -> str:
+    """把自定义策略的自然语言规则编译为结构化条件(一次性 AI 翻译)。"""
+    try:
+        import strategy_engine as se
+        res = se.compile_custom_strategy(strategy_id)
+        if not res.get("ok"):
+            return f"❌ 编译失败: {res.get('error', '未知错误')}"
+        compiled = res["compiled"]
+
+        def _fmt(group):
+            if not isinstance(group, dict):
+                return "(空)"
+            joiner = "all" if "all" in group else "any"
+            word = "全部满足" if joiner == "all" else "任一满足"
+            conds = group.get(joiner) or []
+            if not conds:
+                return "(空)"
+            parts = []
+            for c in conds:
+                name = se.CONDITION_METRIC_META.get(c.get("metric"), c.get("metric"))
+                if c.get("op") == "is_true":
+                    parts.append(f"{name}")
+                else:
+                    parts.append(f"{name} {c.get('op', '>')} {c.get('threshold', 0)}")
+            return f"{word}: " + " 且 ".join(parts)
+
+        strat = next(
+            (s for s in se.get_strategies() if s.get("id") == strategy_id and s.get("type") == "custom"),
+            {},
+        )
+        return (
+            f"✅ 策略 {strategy_id} 已编译为确定性规则(后续判定不再依赖 AI)\n\n"
+            f"买入: {_fmt(compiled.get('buy'))}\n"
+            f"卖出: {_fmt(compiled.get('sell'))}\n\n"
+            f"原始规则:\n买入「{strat.get('buy_rule', '')}」\n卖出「{strat.get('sell_rule', '')}」\n"
+            f"说明: 编译结果已写入 config.json,不满意可修改规则后重新编译"
+        )
+    except Exception as e:
+        return f"❌ 编译出错: {e}"
 
 
 def handler_toggle_strategy(strategy_id: str, enabled: bool) -> str:
@@ -2648,10 +2725,14 @@ TOOL_HANDLERS = {
     "analyze_with_strategy": lambda args: handler_analyze_with_strategy(
         args.get("code", ""), args.get("strategy_id", "")
     ),
+    "analyze_with_strategies": lambda args: handler_analyze_with_strategies(
+        args.get("code", ""), args.get("strategies", [])
+    ),
     "analyze_with_yujie": lambda args: handler_analyze_with_yujie(args.get("code", "")),
     "toggle_strategy": lambda args: handler_toggle_strategy(
         args.get("strategy_id", ""), bool(args.get("enabled", True))
     ),
+    "compile_strategy": lambda args: handler_compile_strategy(args.get("strategy_id", "")),
     "set_strategy_params": lambda args: handler_set_strategy_params(
         args.get("strategy_id", ""), args.get("params", {})
     ),
