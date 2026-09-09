@@ -13,6 +13,7 @@ import json
 from unittest.mock import MagicMock, patch
 
 import stock_market_extras as sme
+from feishu_bot import handler_watchlist
 
 
 def _mock_resp(data):
@@ -603,7 +604,7 @@ def test_run_combo_backtest_and_mode(monkeypatch):
         assert r["combo"]["signal_count"] <= min_single
 
 
-def test_handler_combo_backtest_output_format(monkeypatch):
+def test_handler_combo_backtest_output_format(monkeypatch, ctx):
     """handler_combo_backtest 输出应包含关键信息: 组合信号/基准/对比/结论。"""
     import feishu_bot
     # mock run_combo_backtest 返回典型结果
@@ -621,7 +622,7 @@ def test_handler_combo_backtest_output_format(monkeypatch):
         "elapsed_sec": 30,
     }
     monkeypatch.setattr("backtest_builtin.run_combo_backtest", lambda *a, **k: fake_report)
-    out = feishu_bot.handler_combo_backtest(["macd", "boll"], "and", 20, 50)
+    out = feishu_bot.handler_combo_backtest(ctx, ["macd", "boll"], "and", 20, 50)
     assert "组合回测" in out
     assert "macd" in out and "boll" in out
     assert "组合信号" in out
@@ -706,7 +707,7 @@ def test_handler_screen_stocks_error(monkeypatch):
 # ---------------- 第三批优化测试 ----------------
 
 
-def test_handler_combo_backtest_zero_signal_and_mode():
+def test_handler_combo_backtest_zero_signal_and_mode(ctx):
     """combo_backtest 0 信号时应有结论提示(AND 条件过严 / OR 无触发)。"""
     import feishu_bot
     # AND 模式 0 信号
@@ -720,12 +721,12 @@ def test_handler_combo_backtest_zero_signal_and_mode():
     }
     import unittest.mock as mock
     with mock.patch("backtest_builtin.run_combo_backtest", return_value=fake_and):
-        out = feishu_bot.handler_combo_backtest(["macd", "boll"], "and", 20, 50)
+        out = feishu_bot.handler_combo_backtest(ctx, ["macd", "boll"], "and", 20, 50)
     assert "无同日触发" in out or "条件过严" in out
     assert "OR" in out  # 建议改 OR
 
 
-def test_handler_combo_backtest_compact_4strategies():
+def test_handler_combo_backtest_compact_4strategies(ctx):
     """4+ 策略时用紧凑格式(每策略一行短)。"""
     import unittest.mock as mock
 
@@ -739,7 +740,7 @@ def test_handler_combo_backtest_compact_4strategies():
         "elapsed_sec": 30,
     }
     with mock.patch("backtest_builtin.run_combo_backtest", return_value=fake):
-        out = feishu_bot.handler_combo_backtest(["macd", "kdj", "boll", "dmi"], "or", 20, 50)
+        out = feishu_bot.handler_combo_backtest(ctx, ["macd", "kdj", "boll", "dmi"], "or", 20, 50)
     # 紧凑格式: 每策略一行只含"超额 X% (触发 N)"
     assert "超额 +1.00%" in out
     assert "触发 100" in out
@@ -810,11 +811,11 @@ def test_screen_stocks_uses_snapshot_cache(monkeypatch):
     assert len(r) == 1
 
 
-def test_handler_watchlist_group_in_p2p_rejected(monkeypatch):
+def test_handler_watchlist_group_in_p2p_rejected(monkeypatch, ctx):
     """1v1 私聊(chat_type=p2p)时 group_* action 应拒绝。"""
-    import feishu_bot
-    monkeypatch.setattr(feishu_bot, "_current_chat_type", lambda: "p2p")
-    out = feishu_bot.handler_watchlist("group_list", session_id="user_x:user_x")
+    ctx.chat_type = "p2p"
+    ctx.session_id = "user_x:user_x"
+    out = handler_watchlist(ctx, "group_list")
     assert "群聊" in out or "私聊" in out
     assert "加自选" in out  # 提示用个人自选
 

@@ -11,18 +11,19 @@ import unittest.mock as mock
 
 import bot_handlers
 import feishu_bot
+from feishu_bot import handler_portfolio
 
 # ============ handler_market ============
 
 
-def test_handler_market_no_data(tmp_path, monkeypatch):
+def test_handler_market_no_data(tmp_path, monkeypatch, ctx):
     """无日报数据应返回提示。"""
     monkeypatch.setattr(bot_handlers, "REPORTS_DIR", tmp_path)
-    out = feishu_bot.handler_market()
+    out = feishu_bot.handler_market(ctx, )
     assert "尚未生成" in out or "❌" in out
 
 
-def test_handler_market_with_data(tmp_path, monkeypatch):
+def test_handler_market_with_data(tmp_path, monkeypatch, ctx):
     """有日报数据应返回市场概况。"""
     monkeypatch.setattr(bot_handlers, "REPORTS_DIR", tmp_path)
     from datetime import datetime
@@ -31,23 +32,23 @@ def test_handler_market_with_data(tmp_path, monkeypatch):
         "## 一、全市场扫描\n总成交 12000 亿,涨停 80 跌停 5\n## 二、玉姐精选\n1. 600519 茅台 8分",
         encoding="utf-8",
     )
-    out = feishu_bot.handler_market()
+    out = feishu_bot.handler_market(ctx, )
     assert "12000" in out or "80" in out or "涨停" in out
 
 
 # ============ handler_yujie ============
 
 
-def test_handler_yujie_no_data(tmp_path, monkeypatch):
+def test_handler_yujie_no_data(tmp_path, monkeypatch, ctx):
     """无玉姐精选数据应返回提示。"""
     monkeypatch.setattr(feishu_bot, "ENGINE_HOME", tmp_path)
     import yujie_scan
     monkeypatch.setattr(yujie_scan, "CACHE_DB", str(tmp_path / "stock_cache.db"))
-    out = feishu_bot.handler_yujie()
+    out = feishu_bot.handler_yujie(ctx, )
     assert "尚未生成" in out or "❌" in out or "无" in out
 
 
-def test_handler_yujie_with_data(tmp_path, monkeypatch):
+def test_handler_yujie_with_data(tmp_path, monkeypatch, ctx):
     """有玉姐精选数据应返回 Top 列表。"""
     from datetime import datetime
     today = datetime.now().strftime("%Y%m%d")
@@ -64,7 +65,7 @@ def test_handler_yujie_with_data(tmp_path, monkeypatch):
     conn.close()
     import yujie_scan
     monkeypatch.setattr(yujie_scan, "CACHE_DB", str(db))
-    out = feishu_bot.handler_yujie()
+    out = feishu_bot.handler_yujie(ctx, )
     assert "600519" in out or "茅台" in out
 
 
@@ -72,14 +73,15 @@ def test_handler_yujie_with_data(tmp_path, monkeypatch):
 # 已升级为完整持仓管理(buy/sell/list/clear),详见 test_portfolio_tool.py
 
 
-def test_handler_portfolio_empty(tmp_path, monkeypatch):
+def test_handler_portfolio_empty(tmp_path, monkeypatch, ctx):
     """无持仓应返回提示。"""
     monkeypatch.setattr(bot_handlers, "PORTFOLIO_DB", tmp_path / "portfolio.db")
-    out = feishu_bot.handler_portfolio("list", session_id="s1")
+    ctx.session_id = "s1"
+    out = handler_portfolio(ctx, "list")
     assert "无持仓" in out or "📭" in out
 
 
-def test_handler_portfolio_with_data(tmp_path, monkeypatch):
+def test_handler_portfolio_with_data(tmp_path, monkeypatch, ctx):
     """有持仓数据应返回持仓列表(实时价 mock)。"""
     db = tmp_path / "portfolio.db"
     monkeypatch.setattr(bot_handlers, "PORTFOLIO_DB", db)
@@ -90,7 +92,8 @@ def test_handler_portfolio_with_data(tmp_path, monkeypatch):
         lambda codes: [{"code": "600519", "name": "贵州茅台", "price": 1500.0, "pct": 0.5}],
     )
     feishu_bot.portfolio_buy("s1", "600519", "贵州茅台", 100, 1400.0, "20260101")
-    out = feishu_bot.handler_portfolio("list", session_id="s1")
+    ctx.session_id = "s1"
+    out = handler_portfolio(ctx, "list")
     assert "600519" in out
 
 
@@ -250,17 +253,17 @@ def test_handler_get_strategy_library_unimplemented():
     assert "T+0" in out or "未实现" in out
 
 
-# ============ handler_analyze(mock,避免联网) ============
+# ============ handler_analyze(ctx, mock,避免联网) ============
 
 
-def test_handler_analyze_invalid_code():
+def test_handler_analyze_invalid_code(ctx):
     """非法代码应返回错误。"""
-    out = feishu_bot.handler_analyze("不存在的xyz")
+    out = feishu_bot.handler_analyze(ctx, "不存在的xyz")
     # handler_analyze 内部会调 resolve_code,失败应返错误
     assert "❌" in out or "无法" in out or "未识别" in out
 
 
-def test_handler_analyze_valid_code(monkeypatch):
+def test_handler_analyze_valid_code(monkeypatch, ctx):
     """有效代码应返回分析结果(mock strategy_engine.analyze)。"""
     fake_result = {
         "code": "600519", "name": "贵州茅台", "verdict": "买入",
@@ -270,7 +273,7 @@ def test_handler_analyze_valid_code(monkeypatch):
     monkeypatch.setattr("strategy_engine.analyze", lambda *a, **k: fake_result)
     # 也 mock 图片生成避免 matplotlib
     monkeypatch.setattr("feishu_image.gen_kline_chart", lambda *a, **k: None)
-    out = feishu_bot.handler_analyze("600519")
+    out = feishu_bot.handler_analyze(ctx, "600519")
     assert "600519" in out or "茅台" in out
 
 

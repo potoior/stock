@@ -82,85 +82,36 @@ def _register_stats_signal() -> None:
         pass  # 非 main 线程或 Windows,跳过
 
 
-# ---- 会话级 thread-local 状态 ----
-
-# ---- 会话级 thread-local 状态 ----
+# ---- 会话上下文(显式传参,替代 thread-local) ----
 # 关键: 飞书 Bot 会并发处理不同 session 的消息(会话锁按 session_id 隔离,
-# 同 session 串行、不同 session 并行)。因此累积图片队列和当前 session_id
-# 必须是线程隔离的,否则并发下会串号/互相清空。
-_tl = threading.local()
+# 同 session 串行、不同 session 并行)。上下文必须随消息显式传递,
+# 不依赖 thread-local 隐式全局状态,并发安全且 handler 依赖一目了然。
 
 
-class _PendingImages:
-    """thread-local 图片队列,行为兼容 list(append/clear/len/bool/迭代)。"""
+class Ctx:
+    """单条消息的会话上下文,由 Agent 分发前构造,显式传给每个 handler。
 
-    def _get(self) -> list:
-        if not hasattr(_tl, "images"):
-            _tl.images = []
-        return _tl.images
+    session_id: 会话 id(chat_id:sender),自选股/持仓等用户隔离的 key
+    chat_id: 飞书 chat_id(空 = CLI/无飞书环境)
+    chat_type: 'p2p' 私聊 / 'group' 群聊
+    bot: FeishuBot 实例(可主动发消息;CLI 模式为 None)
+    images: 本条消息累积的图片(PNG bytes),Agent 结束后发送并清空
+    """
 
-    def append(self, val: bytes) -> None:
-        self._get().append(val)
+    def __init__(self, session_id="cli", chat_id="", chat_type="group", bot=None):
+        self.session_id = session_id
+        self.chat_id = chat_id
+        self.chat_type = chat_type or "group"
+        self.bot = bot
+        self.images: list[bytes] = []
 
-    def clear(self) -> None:
-        self._get().clear()
-
-    def __len__(self) -> int:
-        return len(self._get())
-
-    def __bool__(self) -> bool:
-        return bool(self._get())
-
-    def __iter__(self):
-        return iter(self._get())
-
-
-_pending_images = _PendingImages()
-
-
-def _current_session_id() -> str:
-    """读取当前线程的 session_id(默认 'cli')。"""
-    return getattr(_tl, "session_id", "cli")
-
-
-def _set_current_session_id(session_id: str) -> None:
-    """设置当前线程的 session_id。"""
-    _tl.session_id = session_id
-
-
-def _current_chat_id() -> str:
-    """读取当前线程的飞书 chat_id(默认 '')。"""
-    return getattr(_tl, "chat_id", "")
-
-
-def _set_current_chat_id(chat_id: str) -> None:
-    """设置当前线程的 chat_id,供 handler 内部主动发消息(如进度提示)。"""
-    _tl.chat_id = chat_id
-
-
-def _current_chat_type() -> str:
-    """读取当前线程的飞书 chat_type('p2p' 私聊 / 'group' 群聊,默认 'group')。"""
-    return getattr(_tl, "chat_type", "group")
-
-
-def _set_current_chat_type(chat_type: str) -> None:
-    """设置当前线程的 chat_type,供 handler 判断群共享功能是否适用。"""
-    _tl.chat_type = chat_type or "group"
-
-
-# 当前线程的 FeishuBot 实例(供 handler 内部主动发消息)
-_bot_ref = None
-
-
-def _current_bot():
-    """返回当前 FeishuBot 单例(若已初始化)。"""
-    return _bot_ref
-
-
-def _set_current_bot(bot):
-    """设置 FeishuBot 单例(由 FeishuBot.__init__ 调用)。"""
-    global _bot_ref
-    _bot_ref = bot
+    def send_progress(self, text: str) -> None:
+        """handler 内部主动发消息(如扫描进度提示);无 bot/chat_id 时静默。"""
+        if self.bot and self.chat_id:
+            try:
+                self.bot._send_text(self.chat_id, text)
+            except Exception:
+                pass
 
 
 # 网络类异常关键词(用于错误友好化)

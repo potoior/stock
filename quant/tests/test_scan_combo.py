@@ -5,7 +5,7 @@ import sqlite3
 import pytest
 
 import feishu_bot
-import strategy_engine as se
+import market_scan as ms
 
 MOCK_KLINE = """CREATE TABLE IF NOT EXISTS daily (
     code TEXT, name TEXT, date TEXT, open REAL, high REAL, low REAL,
@@ -39,56 +39,56 @@ def _rising_kline(n=120, base=10.0, vol=1e7):
 def test_combo_and_requires_all(tmp_path, monkeypatch):
     """AND 模式:只触发其中一个策略的股票不应命中。"""
     db = tmp_path / "cache.db"
-    monkeypatch.setattr(se, "CACHE_DB", db)
+    monkeypatch.setattr(ms, "CACHE_DB", db)
     _seed_daily(db, "600519", _rising_kline())
 
     # macd + kdj:两只,AND 模式
-    r = se.scan_combo_strategies(["macd", "kdj"], mode="and", limit=50)
+    r = ms.scan_combo_strategies(["macd", "kdj"], mode="and", limit=50)
     assert "hits" in r
     assert r["scanned"] == 1
 
 
 def test_combo_unknown_strategy(tmp_path, monkeypatch):
     db = tmp_path / "cache.db"
-    monkeypatch.setattr(se, "CACHE_DB", db)
+    monkeypatch.setattr(ms, "CACHE_DB", db)
     _seed_daily(db, "600519", _rising_kline())
-    r = se.scan_combo_strategies(["macd", "xxx"], mode="and")
+    r = ms.scan_combo_strategies(["macd", "xxx"], mode="and")
     assert "error" in r
 
 
 def test_combo_no_scan_strategy(tmp_path, monkeypatch):
     """需联网的策略不允许扫描。"""
     db = tmp_path / "cache.db"
-    monkeypatch.setattr(se, "CACHE_DB", db)
+    monkeypatch.setattr(ms, "CACHE_DB", db)
     _seed_daily(db, "600519", _rising_kline())
-    r = se.scan_combo_strategies(["macd", "policy_select"], mode="and")
+    r = ms.scan_combo_strategies(["macd", "policy_select"], mode="and")
     assert "error" in r
 
 
 def test_combo_rejects_inert_strategy(tmp_path, monkeypatch):
     """观察型策略(只返回 hold,不产生买卖信号)不允许进组合扫描。"""
     db = tmp_path / "cache.db"
-    monkeypatch.setattr(se, "CACHE_DB", db)
+    monkeypatch.setattr(ms, "CACHE_DB", db)
     _seed_daily(db, "600519", _rising_kline())
-    r = se.scan_combo_strategies(["macd", "zt_pull"], mode="and")
+    r = ms.scan_combo_strategies(["macd", "zt_pull"], mode="and")
     assert "error" in r
     assert "观察型" in r["error"]
 
 
 def test_combo_wrong_count(tmp_path, monkeypatch):
     db = tmp_path / "cache.db"
-    monkeypatch.setattr(se, "CACHE_DB", db)
+    monkeypatch.setattr(ms, "CACHE_DB", db)
     _seed_daily(db, "600519", _rising_kline())
-    assert "error" in se.scan_combo_strategies(["macd"], mode="and")
-    assert "error" in se.scan_combo_strategies(["macd"] * 6, mode="and")
+    assert "error" in ms.scan_combo_strategies(["macd"], mode="and")
+    assert "error" in ms.scan_combo_strategies(["macd"] * 6, mode="and")
 
 
 def test_combo_invalid_mode(tmp_path, monkeypatch):
     """mode 只允许 and/or,非法值应报错而非静默按 or 处理。"""
     db = tmp_path / "cache.db"
-    monkeypatch.setattr(se, "CACHE_DB", db)
+    monkeypatch.setattr(ms, "CACHE_DB", db)
     _seed_daily(db, "600519", _rising_kline())
-    r = se.scan_combo_strategies(["macd", "kdj"], mode="AND")
+    r = ms.scan_combo_strategies(["macd", "kdj"], mode="AND")
     assert "error" in r
     assert "mode" in r["error"]
 
@@ -96,9 +96,9 @@ def test_combo_invalid_mode(tmp_path, monkeypatch):
 def test_combo_duplicate_strategy(tmp_path, monkeypatch):
     """重复策略 id 应报错。"""
     db = tmp_path / "cache.db"
-    monkeypatch.setattr(se, "CACHE_DB", db)
+    monkeypatch.setattr(ms, "CACHE_DB", db)
     _seed_daily(db, "600519", _rising_kline())
-    r = se.scan_combo_strategies(["macd", "macd"], mode="and")
+    r = ms.scan_combo_strategies(["macd", "macd"], mode="and")
     assert "error" in r
     assert "重复" in r["error"]
 
@@ -106,9 +106,9 @@ def test_combo_duplicate_strategy(tmp_path, monkeypatch):
 def test_combo_hits_structure(tmp_path, monkeypatch):
     """命中结果应含 signals 列表(触发了哪些策略)。"""
     db = tmp_path / "cache.db"
-    monkeypatch.setattr(se, "CACHE_DB", db)
+    monkeypatch.setattr(ms, "CACHE_DB", db)
     _seed_daily(db, "600519", _rising_kline())
-    r = se.scan_combo_strategies(["ma_combo", "trend_follow"], mode="or", limit=50)
+    r = ms.scan_combo_strategies(["ma_combo", "trend_follow"], mode="or", limit=50)
     for h in r["hits"]:
         assert isinstance(h["signals"], list)
         assert len(h["signals"]) >= 1
@@ -117,12 +117,12 @@ def test_combo_hits_structure(tmp_path, monkeypatch):
 
 def test_combo_empty_db(tmp_path, monkeypatch):
     db = tmp_path / "cache.db"
-    monkeypatch.setattr(se, "CACHE_DB", db)
+    monkeypatch.setattr(ms, "CACHE_DB", db)
     conn = sqlite3.connect(str(db))  # 建空表
     conn.execute(MOCK_KLINE)
     conn.commit()
     conn.close()
-    r = se.scan_combo_strategies(["macd", "kdj"], mode="and")
+    r = ms.scan_combo_strategies(["macd", "kdj"], mode="and")
     assert "error" in r
 
 
@@ -136,7 +136,5 @@ def test_handler_scan_combo_registered():
 
 
 @pytest.fixture(autouse=True)
-def _no_progress(monkeypatch):
-    """屏蔽进度回调副作用。"""
-    monkeypatch.setattr(feishu_bot, "_current_chat_id", lambda: None)
-    monkeypatch.setattr(feishu_bot, "_current_bot", lambda: None)
+def _no_progress():
+    """进度回调现在经显式 ctx 传入,CLI ctx 无 bot 自然静默,无需屏蔽。"""

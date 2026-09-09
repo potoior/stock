@@ -15,12 +15,7 @@ from pathlib import Path
 
 import config_store
 from bot_context import (
-    _current_bot,
-    _current_chat_id,
-    _current_chat_type,
-    _current_session_id,
     _friendly_err,
-    _pending_images,
 )
 
 log = logging.getLogger("feishu_bot.handlers")
@@ -235,7 +230,7 @@ def load_config():
 # ============ Handlers ============
 
 
-def handler_analyze(code: str) -> str:
+def handler_analyze(ctx, code: str) -> str:
     """个股技术面分析。返回文本(可选附带图片通过 _send_after_handler)。"""
     try:
         from strategy_engine import analyze
@@ -254,7 +249,7 @@ def handler_analyze(code: str) -> str:
             from feishu_image import gen_kline_chart
             img = gen_kline_chart(code)
             if img:
-                _pending_images.append(img.getvalue())
+                ctx.images.append(img.getvalue())
         except Exception as e:
             log.warning("生成 K 线图失败 %s: %s", code, e)
 
@@ -275,7 +270,7 @@ def handler_analyze(code: str) -> str:
                 lines.append(f"  • {s.get('name','')}: {s.get('reason','')}")
         if not buys and not sells:
             lines.append("(无明显信号)")
-        if _pending_images:
+        if ctx.images:
             lines.append("\n[已附 K 线+指标图]")
         return "\n".join(lines)
     except Exception as e:
@@ -283,7 +278,7 @@ def handler_analyze(code: str) -> str:
         return f"❌ 分析 {code} 出错: {e}"
 
 
-def handler_market() -> str:
+def handler_market(ctx) -> str:
     """今日市场概况。优先读今日日报,否则提示用户先跑 daily_scan。"""
     today = datetime.now().strftime("%Y%m%d")
     report = REPORTS_DIR / f"daily_{today}.md"
@@ -305,12 +300,12 @@ def handler_market() -> str:
             if stats:
                 img = gen_market_chart(stats)
                 if img:
-                    _pending_images.append(img.getvalue())
+                    ctx.images.append(img.getvalue())
         except Exception as e:
             log.warning("生成市场图失败: %s", e)
         if section:
             text_out = "📊 今日市场概况\n" + section.strip()
-            if _pending_images:
+            if ctx.images:
                 text_out += "\n[已附市场情绪图]"
             return text_out
         return "📊 今日日报已生成,但格式异常。请查看: " + str(report)
@@ -336,7 +331,7 @@ def _parse_market_from_report(section: str) -> dict | None:
         return None
 
 
-def handler_yujie(min_score: float = 0, hit_rule: str = "") -> str:
+def handler_yujie(ctx, min_score: float = 0, hit_rule: str = "") -> str:
     """今日玉姐精选 Top10,支持按最低评分和命中规则过滤。"""
     try:
         import yujie_scan
@@ -372,7 +367,7 @@ def handler_yujie(min_score: float = 0, hit_rule: str = "") -> str:
             from feishu_image import gen_yujie_wall
             img = gen_yujie_wall(show)
             if img:
-                _pending_images.append(img.getvalue())
+                ctx.images.append(img.getvalue())
         except Exception as e:
             log.warning("生成玉姐墙失败: %s", e)
 
@@ -400,21 +395,21 @@ def handler_yujie(min_score: float = 0, hit_rule: str = "") -> str:
             )
         if len(filtered) > len(text_show):
             lines.append(f"\n(共 {len(filtered)} 只,文字仅列前 {len(text_show)} 只,完整 {len(show)} 只见附图)")
-        if _pending_images:
+        if ctx.images:
             lines.append("[已附候选 K 线缩略图墙]")
         return "\n".join(lines)
     except Exception as e:
         return f"❌ 读取玉姐精选出错: {e}"
 
 
-def handler_watchlist(action: str, codes: list = None, session_id: str = "cli") -> str:
+def handler_watchlist(ctx, action: str, codes: list = None) -> str:
     """自选股管理:add/remove/list/analyze,按 session_id 隔离(每人独立)。
 
     codes 里的元素可以是代码或名称,统一解析成 6 位代码 + 名称。
     analyze: 批量分析自选股(调 handler_compare_stocks 做 PE/PB/ROE 对比)
     """
     if action == "list":
-        items = watchlist_list(session_id)
+        items = watchlist_list(ctx.session_id)
         if not items:
             return "📭 你的自选股列表为空。\n用 \"加自选 茅台\" 或 \"加自选 600519\" 添加。"
         lines = [f"📌 你的自选股({len(items)} 只)"]
@@ -424,10 +419,10 @@ def handler_watchlist(action: str, codes: list = None, session_id: str = "cli") 
 
     if action in ("group_list", "group_analyze"):
         # 群共享功能仅群聊可用,1v1 私聊 chat_type=p2p
-        if _current_chat_type() == "p2p":
+        if ctx.chat_type == "p2p":
             return "💡 群共享自选股功能仅在群聊中可用。\n私聊请用 '加自选'/'我的自选' 管理个人列表。"
         # 群共享自选池:所有群成员添加的去重列表
-        items = watchlist_group_list(session_id)
+        items = watchlist_group_list(ctx.session_id)
         if not items:
             return "📭 群共享自选池为空。\n用 \"群加自选 茅台\" 添加(全群可见)。"
         if action == "group_list":
@@ -441,11 +436,11 @@ def handler_watchlist(action: str, codes: list = None, session_id: str = "cli") 
         codes = [it["code"] for it in items[:8]]
         extra = (f"\n\n(群共享共 {len(items)} 只,仅分析前 8。"
                  f"看其余: '分析群自选 9-16'") if len(items) > 8 else ""
-        return handler_compare_stocks(codes) + extra
+        return handler_compare_stocks(ctx, codes) + extra
 
     if action == "analyze":
         # 批量分析自选股:调 handler_compare_stocks 做财务对比
-        items = watchlist_list(session_id)
+        items = watchlist_list(ctx.session_id)
         if not items:
             return "📭 你的自选股列表为空,无法分析。\n用 \"加自选 茅台\" 添加后再试。"
         if len(items) == 1:
@@ -454,7 +449,7 @@ def handler_watchlist(action: str, codes: list = None, session_id: str = "cli") 
         # 多只:compare_stocks 最多 8 只
         codes = [it["code"] for it in items[:8]]
         extra = f"\n\n(自选共 {len(items)} 只,仅分析前 8。看其余: '分析自选 9-16')" if len(items) > 8 else ""
-        return handler_compare_stocks(codes) + extra
+        return handler_compare_stocks(ctx, codes) + extra
 
     if not codes:
         return "❌ add/remove/group_add/group_remove 操作需要 codes 参数,如 [\"600519\"] 或 [\"茅台\"]"
@@ -483,7 +478,7 @@ def handler_watchlist(action: str, codes: list = None, session_id: str = "cli") 
         return f"❌ 未能识别任何股票: {codes}"
 
     # group_* 在 1v1 私聊禁用(语义错误)
-    if action.startswith("group_") and _current_chat_type() == "p2p":
+    if action.startswith("group_") and ctx.chat_type == "p2p":
         return "💡 群共享自选股功能仅在群聊中可用。\n私聊请用 '加自选'/'删自选'/'我的自选' 管理个人列表。"
 
     if action in ("add", "group_add"):
@@ -501,30 +496,30 @@ def handler_watchlist(action: str, codes: list = None, session_id: str = "cli") 
         is_group = action == "group_add"
         for code, name in resolved:
             if is_group:
-                msgs.append(watchlist_group_add(session_id, code, name))
+                msgs.append(watchlist_group_add(ctx.session_id, code, name))
             else:
-                msgs.append(watchlist_add(session_id, code, name))
+                msgs.append(watchlist_add(ctx.session_id, code, name))
         if is_group:
-            cnt = len(watchlist_group_list(session_id))
+            cnt = len(watchlist_group_list(ctx.session_id))
             return "\n".join(msgs) + f"\n\n群共享自选池共 {cnt} 只,发\"群自选\"查看(全群可见)"
-        cnt = len(watchlist_list(session_id))
+        cnt = len(watchlist_list(ctx.session_id))
         return "\n".join(msgs) + f"\n\n当前自选 {cnt} 只,发\"我的自选\"查看"
     elif action in ("remove", "group_remove"):
         msgs = []
         is_group = action == "group_remove"
         for code, _ in resolved:
             if is_group:
-                msgs.append(watchlist_group_remove(session_id, code))
+                msgs.append(watchlist_group_remove(ctx.session_id, code))
             else:
-                msgs.append(watchlist_remove(session_id, code))
+                msgs.append(watchlist_remove(ctx.session_id, code))
         return "\n".join(msgs)
     else:
         return (f"❌ 未知 action: {action},应为 "
                 f"add/remove/list/analyze 或 group_add/group_remove/group_list/group_analyze")
 
 
-def handler_portfolio(action: str = "list", code: str = "", qty: float = 0,
-                      price: float = 0, session_id: str = "cli") -> str:
+def handler_portfolio(ctx, action: str = "list", code: str = "", qty: float = 0,
+                      price: float = 0) -> str:
     """模拟持仓管理:buy/sell/list/clear,按 session_id 隔离。
 
     - buy: code 必填,qty 必填(股),price 可选(默认实时价),已有持仓加权平均成本
@@ -532,7 +527,7 @@ def handler_portfolio(action: str = "list", code: str = "", qty: float = 0,
     - list: 持仓 + 实时盈亏
     """
     if action == "list":
-        items = portfolio_list(session_id)
+        items = portfolio_list(ctx.session_id)
         if not items:
             return "📭 当前无持仓。\n用 \"买入 茅台 100股\" 或 \"买入 600519 100股 价格1500\" 建仓。"
         # 批量查实时价算盈亏
@@ -567,7 +562,7 @@ def handler_portfolio(action: str = "list", code: str = "", qty: float = 0,
         return "\n".join(lines)
 
     if action == "clear":
-        return portfolio_clear(session_id)
+        return portfolio_clear(ctx.session_id)
 
     if action == "sell":
         if not code:
@@ -576,7 +571,7 @@ def handler_portfolio(action: str = "list", code: str = "", qty: float = 0,
         if not resolved:
             return f"❌ 无法识别股票: {code}"
         code, name = resolved
-        return portfolio_sell(session_id, code, qty)
+        return portfolio_sell(ctx.session_id, code, qty)
 
     if action != "buy":
         return f"❌ 未知 action: {action},应为 buy/sell/list/clear"
@@ -602,7 +597,7 @@ def handler_portfolio(action: str = "list", code: str = "", qty: float = 0,
             cost = 0
         if not cost or cost <= 0:
             return f"❌ 无法获取 {code} 实时价,请指定价格: '买入 {code} {qty:g}股 价格X'"
-    portfolio_buy(session_id, code, name, qty, cost, datetime.now().strftime("%Y-%m-%d"))
+    portfolio_buy(ctx.session_id, code, name, qty, cost, datetime.now().strftime("%Y-%m-%d"))
     return (
         f"✅ 已记录买入 {code} {name} {qty:g}股 @ {cost:.2f}\n"
         f"发送 '持仓' 查看盈亏"
@@ -653,7 +648,7 @@ def handler_finance(code: str) -> str:
     return fmt_finance(data)
 
 
-def handler_compare_stocks(codes: list) -> str:
+def handler_compare_stocks(ctx, codes: list) -> str:
     """多股票对比: 一次给 N 只股票的对比表(PE/PB/ROE/市值/净利率)。
 
     Args:
@@ -806,7 +801,7 @@ def _fetch_sector_members(bk_code: str, top_n: int = 8) -> list[str]:
         return []
 
 
-def handler_analyze_sector(sector: str) -> str:
+def handler_analyze_sector(ctx, sector: str) -> str:
     """板块分析: 给出板块成分股的对比表(PE/PB/ROE/市值/净利率)。
 
     优先用东财板块接口动态查成分股(覆盖全 A 股 ~500 个行业板块),
@@ -840,7 +835,7 @@ def handler_analyze_sector(sector: str) -> str:
     if matched_bk:
         members = _fetch_sector_members(matched_bk, top_n=8)
         if members:
-            return _format_sector_compare(matched_name, members)
+            return _format_sector_compare(ctx, matched_name, members)
         # 动态查询失败,继续 fallback
 
     # 2. Fallback: 硬编码 _SECTOR_MEMBERS
@@ -850,7 +845,7 @@ def handler_analyze_sector(sector: str) -> str:
             matched = k
             break
     if matched:
-        return _format_sector_compare(matched, _SECTOR_MEMBERS[matched])
+        return _format_sector_compare(ctx, matched, _SECTOR_MEMBERS[matched])
 
     # 都没匹配上,提示用户
     known_hard = "、".join(_SECTOR_MEMBERS.keys())
@@ -863,10 +858,10 @@ def handler_analyze_sector(sector: str) -> str:
     return hint
 
 
-def _format_sector_compare(sector_name: str, members: list) -> str:
+def _format_sector_compare(ctx, sector_name: str, members: list) -> str:
     """板块成分股对比的统一输出格式。"""
     header = f"### 📊 板块【{sector_name}】成分股对比({len(members)} 只,按成交额排序)\n\n"
-    body = handler_compare_stocks(members)
+    body = handler_compare_stocks(ctx, members)
     # compare_stocks 内部已有标题"📊 N 只股票对比",这里替换为板块标题
     # body 第一行是 "### 📊 N 只股票对比",第二行空,第三行起是表头
     parts = body.split("\n", 2)
@@ -1279,7 +1274,7 @@ def _lookup_library_strategy(strategy_id: str) -> list[dict]:
     return hits
 
 
-def handler_analyze_with_strategy(code: str, strategy_id: str) -> str:
+def handler_analyze_with_strategy(ctx, code: str, strategy_id: str) -> str:
     """用指定策略分析个股,联动策略大全给出"来源+核心逻辑+当前信号+理由"。
 
     流程:
@@ -1366,7 +1361,7 @@ def handler_analyze_with_strategy(code: str, strategy_id: str) -> str:
             from feishu_image import gen_kline_chart
             img = gen_kline_chart(code)
             if img:
-                _pending_images.append(img.getvalue())
+                ctx.images.append(img.getvalue())
         except Exception as e:
             log.warning("生成 K 线图失败 %s: %s", code, e)
 
@@ -1376,14 +1371,14 @@ def handler_analyze_with_strategy(code: str, strategy_id: str) -> str:
             f"理由: {target.get('reason', '')}"
             f"{lib_section}"
         )
-        if _pending_images:
+        if ctx.images:
             out += "\n[已附 K 线+指标图]"
         return out
     except Exception as e:
         return f"❌ 分析 {code} 出错: {e}"
 
 
-def handler_analyze_with_strategies(code: str, strategies: list) -> str:
+def handler_analyze_with_strategies(ctx, code: str, strategies: list) -> str:
     """策略总管:按需选择策略组合分析个股,只跑指定策略,不动全局配置。"""
     try:
         import strategy_engine as se
@@ -1419,7 +1414,7 @@ def handler_analyze_with_strategies(code: str, strategies: list) -> str:
         return f"❌ 策略组合分析 {code} 出错: {e}"
 
 
-def handler_analyze_with_yujie(code: str) -> str:
+def handler_analyze_with_yujie(ctx, code: str) -> str:
     """用玉姐精选10条评分规则分析个股,给出综合评分+命中规则+未命中规则+解读。
 
     与 analyze_with_strategy 不同:玉姐是复合评分体系(10条规则累加分数),
@@ -1462,7 +1457,7 @@ def handler_analyze_with_yujie(code: str) -> str:
             from feishu_image import gen_yujie_chart
             img = gen_yujie_chart(code, score, hits, detail)
             if img:
-                _pending_images.append(img.getvalue())
+                ctx.images.append(img.getvalue())
         except Exception as e:
             log.warning("生成玉姐图失败 %s: %s", code, e)
 
@@ -1517,7 +1512,7 @@ def handler_analyze_with_yujie(code: str) -> str:
             comment = f"❌ **弱**({score:g}分),暂不符合玉姐精选标准"
         lines.append(f"\n💡 {comment}")
 
-        if _pending_images:
+        if ctx.images:
             lines.append("\n[已附玉姐专属图: K线+评分标注]")
         lines.append("\n⚠️ 技术面评分,不构成投资建议")
         return "\n".join(lines)
@@ -1655,7 +1650,7 @@ def handler_enable_library_strategy(library_id: str) -> str:
         return f"❌ 引入策略出错: {e}"
 
 
-def handler_backtest_strategy(strategy_id: str, sample: int = 0) -> str:
+def handler_backtest_strategy(ctx, strategy_id: str, sample: int = 0) -> str:
     """对指定策略做全市场回测。"""
     try:
         import backtest_builtin as bb
@@ -1677,7 +1672,7 @@ def handler_backtest_strategy(strategy_id: str, sample: int = 0) -> str:
             from feishu_image import gen_backtest_chart
             img = gen_backtest_chart(strategy_id)
             if img:
-                _pending_images.append(img.getvalue())
+                ctx.images.append(img.getvalue())
         except Exception as e:
             log.warning("生成回测图失败: %s", e)
         out = (
@@ -1688,7 +1683,7 @@ def handler_backtest_strategy(strategy_id: str, sample: int = 0) -> str:
             f"- 60天持有: 收益 {h.get('60', {}).get('mean_ret', 0)*100:+.2f}% / 超额 {h.get('60', {}).get('excess', 0)*100:+.2f}%\n"
             f"- 基准(全市场60天): {baseline.get('60', 0)*100:+.2f}%"
         )
-        if _pending_images:
+        if ctx.images:
             out += "\n[已附回测收益曲线图]"
         return out
     except Exception as e:
@@ -1732,7 +1727,7 @@ def handler_grid_search(strategy_id: str, sample: int = 400) -> str:
 
 
 def handler_combo_backtest(
-    strategy_ids: list[str], mode: str = "and", horizon: int = 20, sample: int = 400
+    ctx, strategy_ids: list[str], mode: str = "and", horizon: int = 20, sample: int = 400
 ) -> str:
     """多策略组合回测(AND=同日同时触发, OR=任一触发)。"""
     try:
@@ -1742,8 +1737,7 @@ def handler_combo_backtest(
                  strategy_ids, mode, horizon, sample, time_hint)
 
         # 进度回调(同 scan_with_strategy / scan_with_yujie)
-        chat_id = _current_chat_id()
-        bot_ref = _current_bot()
+        bot_ref = ctx.bot
         last_progress_ts = [0.0]
 
         def _progress_cb(scanned, total, hits_count):
@@ -1752,11 +1746,11 @@ def handler_combo_backtest(
             if now - last_progress_ts[0] < 30 and scanned != total:
                 return
             last_progress_ts[0] = now
-            if bot_ref and chat_id:
+            if bot_ref and ctx.chat_id:
                 pct = scanned * 100 // total if total else 0
                 try:
                     bot_ref._send_text(
-                        chat_id,
+                        ctx.chat_id,
                         f"⏳ 组合回测预加载: {scanned}/{total} ({pct}%) | 有效 {hits_count} 只",
                     )
                 except Exception:
@@ -1764,7 +1758,7 @@ def handler_combo_backtest(
 
         report = bb.run_combo_backtest(
             strategy_ids, mode, horizon, sample, workers=1,
-            progress_callback=_progress_cb if (bot_ref and chat_id) else None,
+            progress_callback=_progress_cb if (bot_ref and ctx.chat_id) else None,
         )
         if "error" in report:
             return f"❌ {report['error']}"
@@ -1816,7 +1810,7 @@ def handler_combo_backtest(
 
 
 def handler_scan_with_strategy(
-    strategy_id: str, top_n: int = 20, min_amount_yi: float = 0.5, limit: int = 0
+    ctx, strategy_id: str, top_n: int = 20, min_amount_yi: float = 0.5, limit: int = 0
 ) -> str:
     """全市场扫描指定策略,返回当日触发 buy 信号的股票列表(选股)。
 
@@ -1824,15 +1818,14 @@ def handler_scan_with_strategy(
     耗时约 10 秒-3 分钟(全市场约 4700 只,批量拉取),单线程跑(策略函数非线程安全)。
     """
     try:
-        import strategy_engine as se
+        import market_scan
         log.info(
             "开始策略选股 %s, top_n=%d, min_amount_yi=%s, limit=%d",
             strategy_id, top_n, min_amount_yi, limit,
         )
 
         # 进度回调:每 200 只发一次进度消息(通过当前线程的 chat_id)
-        chat_id = _current_chat_id()
-        bot_ref = _current_bot()  # 拿到 FeishuBot 实例(若在飞书消息处理中)
+        bot_ref = ctx.bot
         last_progress_ts = [0.0]
 
         def _progress_cb(scanned, total, hits_count):
@@ -1844,18 +1837,18 @@ def handler_scan_with_strategy(
             last_progress_ts[0] = now
             pct = scanned * 100 // total if total else 0
             msg = f"⏳ 策略选股进度: {scanned}/{total} ({pct}%) | 命中 buy 信号 {hits_count} 只"
-            if bot_ref and chat_id:
+            if bot_ref and ctx.chat_id:
                 try:
-                    bot_ref._send_text(chat_id, msg)
+                    bot_ref._send_text(ctx.chat_id, msg)
                 except Exception:
                     pass
 
-        result = se.scan_with_strategy(
+        result = market_scan.scan_with_strategy(
             strategy_id=strategy_id,
             top_n=top_n,
             min_amount_yi=min_amount_yi,
             limit=limit,
-            progress_callback=_progress_cb if (bot_ref and chat_id) else None,
+            progress_callback=_progress_cb if (bot_ref and ctx.chat_id) else None,
         )
         if "error" in result:
             return f"❌ {result['error']}"
@@ -1903,15 +1896,14 @@ def handler_scan_with_strategy(
         return f"❌ 策略选股出错: {e}"
 
 
-def handler_scan_custom(description: str, top_n: int = 20, limit: int = 0) -> str:
+def handler_scan_custom(ctx, description: str, top_n: int = 20, limit: int = 0) -> str:
     """一句话策略选股:LLM 写策略代码 → 沙箱全市场扫描。耗时约 1-5 分钟。"""
     try:
         import sandbox_scan
         log.info("开始一句话选股: %s", description)
 
         # 进度提示(一句话选股是异步生码+扫描,只在首尾发)
-        chat_id = _current_chat_id()
-        bot_ref = _current_bot()
+        bot_ref = ctx.bot
         last_progress_ts = [0.0]
 
         def _progress_cb(scanned, total, hits_count):
@@ -1920,16 +1912,16 @@ def handler_scan_custom(description: str, top_n: int = 20, limit: int = 0) -> st
             if now - last_progress_ts[0] < 30 and scanned != total:
                 return
             last_progress_ts[0] = now
-            if bot_ref and chat_id:
+            if bot_ref and ctx.chat_id:
                 try:
                     if scanned:
-                        bot_ref._send_text(chat_id, f"⏳ 一句话选股: {scanned}/{total} | 命中 {hits_count} 只")
+                        bot_ref._send_text(ctx.chat_id, f"⏳ 一句话选股: {scanned}/{total} | 命中 {hits_count} 只")
                 except Exception:
                     pass
 
         result = sandbox_scan.scan_custom(
             description, top_n=top_n, limit=limit,
-            progress_callback=_progress_cb if (bot_ref and chat_id) else None,
+            progress_callback=_progress_cb if (bot_ref and ctx.chat_id) else None,
         )
         if "error" in result:
             return f"❌ 一句话选股失败: {result['error']}"
@@ -1971,20 +1963,19 @@ def handler_scan_custom(description: str, top_n: int = 20, limit: int = 0) -> st
 
 
 def handler_scan_combo(
-    strategy_ids: list[str], mode: str = "and", top_n: int = 20,
+    ctx, strategy_ids: list[str], mode: str = "and", top_n: int = 20,
     min_amount_yi: float = 0.5, limit: int = 0
 ) -> str:
     """多策略组合选股:AND=共振(全部触发), OR=任一触发。耗时约 10 秒-3 分钟。"""
     try:
-        import strategy_engine as se
+        import market_scan
         mode = (mode or "and").lower()
         log.info(
             "开始组合选股 %s [%s], top_n=%d, min_amount_yi=%s, limit=%d",
             strategy_ids, mode, top_n, min_amount_yi, limit,
         )
 
-        chat_id = _current_chat_id()
-        bot_ref = _current_bot()
+        bot_ref = ctx.bot
         last_progress_ts = [0.0]
 
         def _progress_cb(scanned, total, hits_count):
@@ -1994,22 +1985,22 @@ def handler_scan_combo(
                 return
             last_progress_ts[0] = now
             pct = scanned * 100 // total if total else 0
-            if bot_ref and chat_id:
+            if bot_ref and ctx.chat_id:
                 try:
                     bot_ref._send_text(
-                        chat_id,
+                        ctx.chat_id,
                         f"⏳ 组合选股进度: {scanned}/{total} ({pct}%) | 命中 {hits_count} 只",
                     )
                 except Exception:
                     pass
 
-        result = se.scan_combo_strategies(
+        result = market_scan.scan_combo_strategies(
             strategy_ids=strategy_ids,
             top_n=top_n,
             min_amount_yi=min_amount_yi,
             limit=limit,
             mode=mode,
-            progress_callback=_progress_cb if (bot_ref and chat_id) else None,
+            progress_callback=_progress_cb if (bot_ref and ctx.chat_id) else None,
         )
         if "error" in result:
             return f"❌ {result['error']}"
@@ -2239,7 +2230,7 @@ def handler_screen_stocks(
         return f"❌ 条件选股出错: {_friendly_err(e)}"
 
 
-def handler_scan_with_yujie(top_n: int = 20, min_score: float = 5.0, limit: int = 0) -> str:
+def handler_scan_with_yujie(ctx, top_n: int = 20, min_score: float = 5.0, limit: int = 0) -> str:
     """全市场玉姐评分实时扫描(用 daily 表已缓存数据,不联网,耗时 1-3 分钟)。
 
     与 get_yujie_picks(盘前 09:25 扫描结果)区别:这里实时重跑全市场评分。
@@ -2252,8 +2243,7 @@ def handler_scan_with_yujie(top_n: int = 20, min_score: float = 5.0, limit: int 
         )
 
         # 进度回调(同 scan_with_strategy)
-        chat_id = _current_chat_id()
-        bot_ref = _current_bot()
+        bot_ref = ctx.bot
         last_progress_ts = [0.0]
 
         def _progress_cb(scanned, total, hits_count):
@@ -2264,9 +2254,9 @@ def handler_scan_with_yujie(top_n: int = 20, min_score: float = 5.0, limit: int 
             last_progress_ts[0] = now
             pct = scanned * 100 // total if total else 0
             msg = f"⏳ 玉姐全市场扫描: {scanned}/{total} ({pct}%) | 达标 {hits_count} 只"
-            if bot_ref and chat_id:
+            if bot_ref and ctx.chat_id:
                 try:
-                    bot_ref._send_text(chat_id, msg)
+                    bot_ref._send_text(ctx.chat_id, msg)
                 except Exception:
                     pass
 
@@ -2274,7 +2264,7 @@ def handler_scan_with_yujie(top_n: int = 20, min_score: float = 5.0, limit: int 
             top_n=int(top_n),
             min_score=float(min_score),
             limit=int(limit),
-            progress_callback=_progress_cb if (bot_ref and chat_id) else None,
+            progress_callback=_progress_cb if (bot_ref and ctx.chat_id) else None,
         )
 
         hits = result.get("hits", [])
@@ -2320,106 +2310,106 @@ def handler_scan_with_yujie(top_n: int = 20, min_score: float = 5.0, limit: int 
 
 # 工具名 → 处理函数映射
 TOOL_HANDLERS = {
-    "analyze_stock": lambda args: handler_analyze(args.get("code", "")),
-    "get_market_status": lambda args: handler_market(),
-    "get_yujie_picks": lambda args: handler_yujie(
+    "analyze_stock": lambda ctx, args: handler_analyze(args.get("code", "")),
+    "get_market_status": lambda ctx, args: handler_market(),
+    "get_yujie_picks": lambda ctx, args: handler_yujie(
         args.get("min_score", 0), args.get("hit_rule", "")
     ),
-    "get_portfolio": lambda args: handler_portfolio(
+    "get_portfolio": lambda ctx, args: handler_portfolio(
         args.get("action", "list"),
         code=args.get("code", ""),
         qty=args.get("qty", 0),
         price=args.get("price", 0),
-        session_id=_current_session_id(),
+        session_id=ctx.session_id,
     ),
-    "get_finance": lambda args: handler_finance(args.get("code", "")),
-    "compare_stocks": lambda args: handler_compare_stocks(args.get("codes", [])),
-    "analyze_sector": lambda args: handler_analyze_sector(args.get("sector", "")),
-    "query_history_picks": lambda args: handler_query_history_picks(args.get("date", "")),
-    "manage_watchlist": lambda args: handler_watchlist(
+    "get_finance": lambda ctx, args: handler_finance(args.get("code", "")),
+    "compare_stocks": lambda ctx, args: handler_compare_stocks(args.get("codes", [])),
+    "analyze_sector": lambda ctx, args: handler_analyze_sector(args.get("sector", "")),
+    "query_history_picks": lambda ctx, args: handler_query_history_picks(args.get("date", "")),
+    "manage_watchlist": lambda ctx, args: handler_watchlist(
         args.get("action", "list"),
         args.get("codes", []),
-        session_id=_current_session_id(),
+        session_id=ctx.session_id,
     ),
     # 策略管理 skill
-    "list_strategies": lambda args: handler_list_strategies(),
-    "get_strategy_library": lambda args: handler_get_strategy_library(
+    "list_strategies": lambda ctx, args: handler_list_strategies(),
+    "get_strategy_library": lambda ctx, args: handler_get_strategy_library(
         source=args.get("source", ""),
         category=args.get("category", ""),
         implemented_only=args.get("implemented_only"),
         include_meta=bool(args.get("include_meta", False)),
         cross_ref=args.get("cross_ref", ""),
     ),
-    "get_yujie_detail": lambda args: handler_get_yujie_detail(),
-    "analyze_with_strategy": lambda args: handler_analyze_with_strategy(
+    "get_yujie_detail": lambda ctx, args: handler_get_yujie_detail(),
+    "analyze_with_strategy": lambda ctx, args: handler_analyze_with_strategy(
         args.get("code", ""), args.get("strategy_id", "")
     ),
-    "analyze_with_strategies": lambda args: handler_analyze_with_strategies(
+    "analyze_with_strategies": lambda ctx, args: handler_analyze_with_strategies(
         args.get("code", ""), args.get("strategies", [])
     ),
-    "analyze_with_yujie": lambda args: handler_analyze_with_yujie(args.get("code", "")),
-    "toggle_strategy": lambda args: handler_toggle_strategy(
+    "analyze_with_yujie": lambda ctx, args: handler_analyze_with_yujie(args.get("code", "")),
+    "toggle_strategy": lambda ctx, args: handler_toggle_strategy(
         args.get("strategy_id", ""), bool(args.get("enabled", True))
     ),
-    "compile_strategy": lambda args: handler_compile_strategy(args.get("strategy_id", "")),
-    "set_strategy_params": lambda args: handler_set_strategy_params(
+    "compile_strategy": lambda ctx, args: handler_compile_strategy(args.get("strategy_id", "")),
+    "set_strategy_params": lambda ctx, args: handler_set_strategy_params(
         args.get("strategy_id", ""), args.get("params", {})
     ),
-    "enable_library_strategy": lambda args: handler_enable_library_strategy(args.get("library_id", "")),
+    "enable_library_strategy": lambda ctx, args: handler_enable_library_strategy(args.get("library_id", "")),
     # 回测/寻优 skill
-    "backtest_strategy": lambda args: handler_backtest_strategy(
+    "backtest_strategy": lambda ctx, args: handler_backtest_strategy(
         args.get("strategy_id", ""), int(args.get("sample", 0))
     ),
-    "grid_search_strategy": lambda args: handler_grid_search(
+    "grid_search_strategy": lambda ctx, args: handler_grid_search(
         args.get("strategy_id", ""), int(args.get("sample", 400))
     ),
-    "combo_backtest": lambda args: handler_combo_backtest(
+    "combo_backtest": lambda ctx, args: handler_combo_backtest(
         args.get("strategy_ids", []),
         args.get("mode", "and"),
         int(args.get("horizon", 20)),
         int(args.get("sample", 400)),
     ),
-    "scan_with_strategy": lambda args: handler_scan_with_strategy(
+    "scan_with_strategy": lambda ctx, args: handler_scan_with_strategy(
         args.get("strategy_id", ""),
         int(args.get("top_n", 20)),
         float(args.get("min_amount_yi", 0.5)),
         int(args.get("limit", 0)),
     ),
-    "scan_combo": lambda args: handler_scan_combo(
+    "scan_combo": lambda ctx, args: handler_scan_combo(
         args.get("strategy_ids", []),
         args.get("mode", "and"),
         int(args.get("top_n", 20)),
         float(args.get("min_amount_yi", 0.5)),
         int(args.get("limit", 0)),
     ),
-    "scan_custom": lambda args: handler_scan_custom(
+    "scan_custom": lambda ctx, args: handler_scan_custom(
         args.get("description", ""),
         int(args.get("top_n", 20)),
         int(args.get("limit", 0)),
     ),
-    "get_stock_news": lambda args: handler_get_stock_news(
+    "get_stock_news": lambda ctx, args: handler_get_stock_news(
         args.get("code", ""), int(args.get("num", 15))
     ),
-    "analyze_news_impact": lambda args: handler_analyze_news_impact(),
+    "analyze_news_impact": lambda ctx, args: handler_analyze_news_impact(),
     # 市场数据 skill(新)
-    "get_lhb": lambda args: handler_get_lhb(
+    "get_lhb": lambda ctx, args: handler_get_lhb(
         args.get("date", ""), int(args.get("top_n", 20))
     ),
-    "get_north_flow": lambda args: handler_get_north_flow(int(args.get("days", 5))),
-    "get_main_flow": lambda args: handler_get_main_flow(args.get("code", "")),
-    "get_concept_sectors": lambda args: handler_get_concept_sectors(args.get("code", "")),
-    "get_index": lambda args: handler_get_index(args.get("name", "")),
-    "scan_with_yujie": lambda args: handler_scan_with_yujie(
+    "get_north_flow": lambda ctx, args: handler_get_north_flow(int(args.get("days", 5))),
+    "get_main_flow": lambda ctx, args: handler_get_main_flow(args.get("code", "")),
+    "get_concept_sectors": lambda ctx, args: handler_get_concept_sectors(args.get("code", "")),
+    "get_index": lambda ctx, args: handler_get_index(args.get("name", "")),
+    "scan_with_yujie": lambda ctx, args: handler_scan_with_yujie(
         int(args.get("top_n", 20)),
         float(args.get("min_score", 5.0)),
         int(args.get("limit", 0)),
     ),
-    "get_sector_flow": lambda args: handler_get_sector_flow(
+    "get_sector_flow": lambda ctx, args: handler_get_sector_flow(
         args.get("sector_type", "industry"),
         int(args.get("top_n", 10)),
     ),
-    "get_market_sentiment": lambda args: handler_get_market_sentiment(),
-    "screen_stocks": lambda args: handler_screen_stocks(
+    "get_market_sentiment": lambda ctx, args: handler_get_market_sentiment(),
+    "screen_stocks": lambda ctx, args: handler_screen_stocks(
         args.get("pe_max"),
         args.get("pe_min"),
         args.get("pb_max"),

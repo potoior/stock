@@ -15,7 +15,8 @@ import multiprocessing
 from pathlib import Path
 
 from ai_decider import AIDecider
-from strategy_engine import CACHE_DB, _bulk_fetch_daily
+from data_fetcher import CACHE_DB
+from market_scan import _bulk_fetch_daily
 
 ENGINE_HOME = Path(__file__).parent
 CACHE_PATH = ENGINE_HOME / "scan_custom_cache.json"

@@ -13,6 +13,7 @@ from unittest.mock import patch
 import bot_handlers
 import feishu_bot
 import stock_names
+from bot_context import Ctx
 from feishu_bot import (
     _extract_post_text,
     _get_session_lock,
@@ -247,17 +248,19 @@ def test_watchlist_duplicate(tmp_path, monkeypatch):
     assert items[0]["name"] == "茅台新名"
 
 
-def test_handler_watchlist_list_empty(tmp_path, monkeypatch):
+def test_handler_watchlist_list_empty(tmp_path, monkeypatch, ctx):
     """空自选应给提示。"""
     _setup_watchlist_db(tmp_path, monkeypatch)
-    out = handler_watchlist("list", session_id="newUser")
+    ctx.session_id = "newUser"
+    out = handler_watchlist(ctx, "list")
     assert "为空" in out or "empty" in out
 
 
-def test_handler_watchlist_no_codes(tmp_path, monkeypatch):
+def test_handler_watchlist_no_codes(tmp_path, monkeypatch, ctx):
     """add/remove 不传 codes 应报错。"""
     _setup_watchlist_db(tmp_path, monkeypatch)
-    out = handler_watchlist("add", session_id="userA")
+    ctx.session_id = "userA"
+    out = handler_watchlist(ctx, "add")
     assert "需要" in out or "错误" in out or "codes" in out
 
 
@@ -497,45 +500,24 @@ def test_session_lock_serializes():
         assert order[i].split("-")[0] == order[i + 1].split("-")[0]
 
 
-def test_pending_images_thread_local():
-    """不同线程的图片队列互相隔离(并发会话不串号)。"""
-    feishu_bot._pending_images.clear()
-    results = {}
-
-    def worker(val):
-        feishu_bot._pending_images.clear()
-        feishu_bot._pending_images.append(val)
-        results[val] = list(feishu_bot._pending_images)
-
-    t1 = threading.Thread(target=worker, args=("IMG_A",))
-    t2 = threading.Thread(target=worker, args=("IMG_B",))
-    t1.start()
-    t2.start()
-    t1.join()
-    t2.join()
-    assert results == {"IMG_A": ["IMG_A"], "IMG_B": ["IMG_B"]}
-    # 主线程队列不受影响
-    assert list(feishu_bot._pending_images) == []
+def test_ctx_images_per_message():
+    """不同消息的图片队列互相隔离(并发会话不串号)。"""
+    ctx_a = Ctx()
+    ctx_b = Ctx()
+    ctx_a.images.append("IMG_A")
+    ctx_b.images.append("IMG_B")
+    assert list(ctx_a.images) == ["IMG_A"]
+    assert list(ctx_b.images) == ["IMG_B"]
 
 
-def test_current_session_id_thread_local():
-    """不同线程的 session_id 互相隔离。"""
-    feishu_bot._set_current_session_id("main-session")
-    results = {}
-
-    def worker(sid):
-        feishu_bot._set_current_session_id(sid)
-        results[sid] = feishu_bot._current_session_id()
-
-    t1 = threading.Thread(target=worker, args=("sessA",))
-    t2 = threading.Thread(target=worker, args=("sessB",))
-    t1.start()
-    t2.start()
-    t1.join()
-    t2.join()
-    assert results == {"sessA": "sessA", "sessB": "sessB"}
-    # 主线程 session 不变
-    assert feishu_bot._current_session_id() == "main-session"
+def test_ctx_session_id_independent():
+    """不同消息的 session_id 互相独立(构造即隔离,不再依赖线程)。"""
+    ctx_a = Ctx(session_id="sessA")
+    ctx_b = Ctx(session_id="sessB")
+    assert ctx_a.session_id == "sessA"
+    assert ctx_b.session_id == "sessB"
+    # 默认值
+    assert Ctx().session_id == "cli"
 
 
 def test_prune_idle_session_locks():
@@ -609,12 +591,12 @@ def test_react_clears_images_between_steps(monkeypatch):
     monkeypatch.setattr(httpx, "Client", FakeClient)
 
     # mock analyze_stock: 每次追加一张"图"(用 bytes 标记代码)
-    def fake_analyze(args):
+    def fake_analyze(ctx, args):
         code = args.get("code", "")
-        feishu_bot._pending_images.append(f"IMG_{code}".encode())
+        ctx.images.append(f"IMG_{code}".encode())
         return f"分析结果 {code}"
 
-    monkeypatch.setitem(feishu_bot.TOOL_HANDLERS, "analyze_stock", lambda args: fake_analyze(args))
+    monkeypatch.setitem(feishu_bot.TOOL_HANDLERS, "analyze_stock", fake_analyze)
 
     # 构造 Agent(绕过 __init__ 的 .env 依赖)
     agent = feishu_bot.FeishuAgent.__new__(feishu_bot.FeishuAgent)
@@ -663,15 +645,15 @@ def test_react_keeps_parallel_images(monkeypatch):
     ]
     monkeypatch.setattr(httpx, "Client", FakeClient)
 
-    def fake_analyze(args):
-        feishu_bot._pending_images.append(b"KLINE_600519")
+    def fake_analyze(ctx, args):
+        ctx.images.append(b"KLINE_600519")
         return "茅台分析"
-    def fake_market(args):
-        feishu_bot._pending_images.append(b"MARKET_CHART")
+    def fake_market(ctx, args):
+        ctx.images.append(b"MARKET_CHART")
         return "市场概况"
 
-    monkeypatch.setitem(feishu_bot.TOOL_HANDLERS, "analyze_stock", lambda args: fake_analyze(args))
-    monkeypatch.setitem(feishu_bot.TOOL_HANDLERS, "get_market_status", lambda args: fake_market(args))
+    monkeypatch.setitem(feishu_bot.TOOL_HANDLERS, "analyze_stock", fake_analyze)
+    monkeypatch.setitem(feishu_bot.TOOL_HANDLERS, "get_market_status", fake_market)
 
     agent = feishu_bot.FeishuAgent.__new__(feishu_bot.FeishuAgent)
     agent.api_key = "fake"
@@ -804,31 +786,31 @@ def test_compact_empty_summary_degrades():
 # ============ 多股票对比 compare_stocks ============
 
 
-def test_compare_stocks_empty():
+def test_compare_stocks_empty(ctx):
     """空列表应返错误。"""
-    r = handler_compare_stocks([])
+    r = handler_compare_stocks(ctx, [])
     assert "❌" in r
 
 
-def test_compare_stocks_not_list():
+def test_compare_stocks_not_list(ctx):
     """非 list 应返错误。"""
-    r = handler_compare_stocks("600519")
+    r = handler_compare_stocks(ctx, "600519")
     assert "❌" in r
 
 
-def test_compare_stocks_too_many():
+def test_compare_stocks_too_many(ctx):
     """超过 8 只应返错误。"""
-    r = handler_compare_stocks(["600519"] * 10)
+    r = handler_compare_stocks(ctx, ["600519"] * 10)
     assert "❌" in r or "8" in r
 
 
-def test_compare_stocks_invalid_codes():
+def test_compare_stocks_invalid_codes(ctx):
     """全部代码无效应返错误。"""
-    r = handler_compare_stocks(["不存在的xxx", "也存在的yyy"])
+    r = handler_compare_stocks(ctx, ["不存在的xxx", "也存在的yyy"])
     assert "❌" in r
 
 
-def test_compare_stocks_with_mock_finance(monkeypatch):
+def test_compare_stocks_with_mock_finance(monkeypatch, ctx):
     """mock fetch_finance 后,对比表应正常输出。"""
     import stock_finance
     def fake_fetch(code):
@@ -843,14 +825,14 @@ def test_compare_stocks_with_mock_finance(monkeypatch):
             "report_name": "2026中报",
         }
     monkeypatch.setattr(stock_finance, "fetch_finance", fake_fetch)
-    r = handler_compare_stocks(["600519", "000858"])
+    r = handler_compare_stocks(ctx, ["600519", "000858"])
     assert "股票600519" in r
     assert "股票000858" in r
     assert "20.00" in r  # PE
     assert "|" in r  # 表格
 
 
-def test_compare_stocks_string_total_mv(monkeypatch):
+def test_compare_stocks_string_total_mv(monkeypatch, ctx):
     """total_mv 为 '-' 字符串时不应崩溃(回归 #2),应显示 '-'。"""
     import stock_finance
 
@@ -866,7 +848,7 @@ def test_compare_stocks_string_total_mv(monkeypatch):
             "report_name": "2026中报",
         }
     monkeypatch.setattr(stock_finance, "fetch_finance", fake_fetch)
-    r = handler_compare_stocks(["600519", "000858"])
+    r = handler_compare_stocks(ctx, ["600519", "000858"])
     assert "股600519" in r
     assert "| - |" in r or "-" in r  # 市值显示 '-' 而非崩溃
     assert "20.00" in r
@@ -875,7 +857,7 @@ def test_compare_stocks_string_total_mv(monkeypatch):
 # ============ 板块分析 analyze_sector ============
 
 
-def test_analyze_sector_known(monkeypatch):
+def test_analyze_sector_known(monkeypatch, ctx):
     """已知板块(fallback 路径,东财接口被 mock 为空)应返回成分股对比。"""
     import stock_finance
 
@@ -886,11 +868,11 @@ def test_analyze_sector_known(monkeypatch):
     monkeypatch.setattr(stock_finance, "fetch_finance", fake_fetch)
     # mock 东财板块索引返回空(强制走 fallback _SECTOR_MEMBERS)
     monkeypatch.setattr(bot_handlers, "_fetch_sector_index", lambda: {})
-    r = handler_analyze_sector("白酒")
+    r = handler_analyze_sector(ctx, "白酒")
     assert "600519" in r  # 茅台代码在白酒板块成员里
 
 
-def test_analyze_sector_dynamic(monkeypatch):
+def test_analyze_sector_dynamic(monkeypatch, ctx):
     """东财动态查询:mock 板块索引返回 {'白酒': 'BK0896'},mock 成分股返回 8 个代码。"""
     import stock_finance
 
@@ -903,13 +885,13 @@ def test_analyze_sector_dynamic(monkeypatch):
                         lambda: {"白酒": "BK0896", "银行": "BK1283"})
     monkeypatch.setattr(bot_handlers, "_fetch_sector_members",
                         lambda bk, top_n=8: ["600519", "000858", "000568"][:top_n])
-    r = handler_analyze_sector("白酒")
+    r = handler_analyze_sector(ctx, "白酒")
     assert "白酒" in r
     assert "600519" in r
     assert "成交额" in r  # 动态查询的标题里有"按成交额排序"
 
 
-def test_analyze_sector_dynamic_fuzzy(monkeypatch):
+def test_analyze_sector_dynamic_fuzzy(monkeypatch, ctx):
     """动态查询模糊匹配: '银' 应匹配到 '银行'。"""
     import stock_finance
 
@@ -921,12 +903,12 @@ def test_analyze_sector_dynamic_fuzzy(monkeypatch):
                         lambda: {"银行": "BK1283"})
     monkeypatch.setattr(bot_handlers, "_fetch_sector_members",
                         lambda bk, top_n=8: ["601398", "601939"])
-    r = handler_analyze_sector("银")
+    r = handler_analyze_sector(ctx, "银")
     assert "银行" in r
     assert "601398" in r
 
 
-def test_analyze_sector_dynamic_fail_fallback(monkeypatch):
+def test_analyze_sector_dynamic_fail_fallback(monkeypatch, ctx):
     """东财动态查询失败(成分股返回空)应 fallback 到 _SECTOR_MEMBERS。"""
     import stock_finance
 
@@ -939,22 +921,22 @@ def test_analyze_sector_dynamic_fail_fallback(monkeypatch):
                         lambda: {"白酒": "BK0896"})
     monkeypatch.setattr(bot_handlers, "_fetch_sector_members",
                         lambda bk, top_n=8: [])
-    r = handler_analyze_sector("白酒")
+    r = handler_analyze_sector(ctx, "白酒")
     # 应 fallback 到硬编码白酒成员,包含 600519
     assert "600519" in r
 
 
-def test_analyze_sector_unknown(monkeypatch):
+def test_analyze_sector_unknown(monkeypatch, ctx):
     """未知板块应提示已知列表。"""
     monkeypatch.setattr(bot_handlers, "_fetch_sector_index", lambda: {"白酒": "BK0896"})
-    r = handler_analyze_sector("不存在的板块xyz")
+    r = handler_analyze_sector(ctx, "不存在的板块xyz")
     assert "❌" in r
     assert "白酒" in r  # 列出已知
 
 
-def test_analyze_sector_empty():
+def test_analyze_sector_empty(ctx):
     """空板块名应返错误。"""
-    r = handler_analyze_sector("")
+    r = handler_analyze_sector(ctx, "")
     assert "❌" in r
 
 
@@ -1433,7 +1415,7 @@ def test_process_message_post_type_processed(monkeypatch, tmp_path):
     monkeypatch.setattr(bot, "_reply_text", lambda chat_id, text: replies.append(text))
     monkeypatch.setattr(
         feishu_bot.FeishuAgent, "chat",
-        lambda self, text, history=None, session_id="": ("收到: " + text, [], []),
+        lambda self, text, ctx=None, history=None, session_id="": ("收到: " + text, [], []),
     )
     content = json.dumps({
         "post": {"zh_cn": {"content": [[{"tag": "text", "text": "分析 600519"}]]}}

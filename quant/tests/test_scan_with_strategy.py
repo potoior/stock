@@ -8,7 +8,7 @@ from unittest.mock import patch
 import numpy as np
 import pandas as pd
 
-import strategy_engine as se
+import market_scan as ms
 
 
 def _make_df(n=120, seed=42, trend=0.0):
@@ -27,15 +27,15 @@ def _make_df(n=120, seed=42, trend=0.0):
 
 def test_scan_invalid_strategy_returns_error():
     """未知策略 id 应返回 error。"""
-    result = se.scan_with_strategy("nonexistent_strategy")
+    result = ms.scan_with_strategy("nonexistent_strategy")
     assert "error" in result
     assert "未知策略" in result["error"]
 
 
 def test_scan_rejects_inert_strategy():
     """观察型策略(只返回 hold,不产生买卖信号)应被拒绝。"""
-    for sid in se.NO_BUY_SIGNAL_STRATEGIES:
-        result = se.scan_with_strategy(sid)
+    for sid in ms.NO_BUY_SIGNAL_STRATEGIES:
+        result = ms.scan_with_strategy(sid)
         assert "error" in result, f"{sid} 应被扫描拒绝"
         assert "观察型" in result["error"]
 
@@ -44,7 +44,7 @@ def test_scan_returns_hits_structure():
     """正常扫描应返回 scanned/hits_count/hits/elapsed_sec 结构。"""
     df = _make_df(n=120, seed=42)
     # mock get_daily_data 避免联网 + 加速
-    with patch("strategy_engine._bulk_fetch_daily",
+    with patch("market_scan._bulk_fetch_daily",
                        return_value={c: df.copy() for c in ["600519", "000001", "300750", "301189", "600036"]}):
         # mock daily 表查询返回 3 只假股票
         with patch("sqlite3.connect") as mock_connect:
@@ -54,7 +54,7 @@ def test_scan_returns_hits_structure():
                 ("000001", 120, "20260820"),
                 ("300750", 120, "20260820"),
             ]
-            result = se.scan_with_strategy("macd", top_n=10, min_amount_yi=0)
+            result = ms.scan_with_strategy("macd", top_n=10, min_amount_yi=0)
     assert "error" not in result
     assert "scanned" in result
     assert "hits_count" in result
@@ -68,7 +68,7 @@ def test_scan_filters_by_min_amount_yi():
     """成交额 < min_amount_yi 的股票应被过滤。"""
     # 构造小成交额数据(volume=1e6, price~10 → amount_yi ~0.001 亿)
     df = _make_df(n=120, seed=42)
-    with patch("strategy_engine._bulk_fetch_daily",
+    with patch("market_scan._bulk_fetch_daily",
                        return_value={c: df.copy() for c in ["600519", "000001", "300750", "301189", "600036"]}):
         with patch("sqlite3.connect") as mock_connect:
             mock_conn = mock_connect.return_value
@@ -76,7 +76,7 @@ def test_scan_filters_by_min_amount_yi():
                 ("600519", 120, "20260820"),
             ]
             # min_amount_yi=10 应过滤掉所有(volume*price ~ 1e7 = 0.01 亿)
-            result = se.scan_with_strategy("macd", top_n=10, min_amount_yi=10)
+            result = ms.scan_with_strategy("macd", top_n=10, min_amount_yi=10)
     assert result["hits_count"] == 0
     assert result["hits"] == []
 
@@ -84,7 +84,7 @@ def test_scan_filters_by_min_amount_yi():
 def test_scan_only_buy_signals():
     """hits 中只应包含 signal='buy' 的股票。"""
     df = _make_df(n=120, seed=42)
-    with patch("strategy_engine._bulk_fetch_daily",
+    with patch("market_scan._bulk_fetch_daily",
                        return_value={c: df.copy() for c in ["600519", "000001", "300750", "301189", "600036"]}):
         with patch("sqlite3.connect") as mock_connect:
             mock_conn = mock_connect.return_value
@@ -92,7 +92,7 @@ def test_scan_only_buy_signals():
                 ("600519", 120, "20260820"),
                 ("000001", 120, "20260820"),
             ]
-            result = se.scan_with_strategy("macd", top_n=10, min_amount_yi=0)
+            result = ms.scan_with_strategy("macd", top_n=10, min_amount_yi=0)
     for h in result["hits"]:
         assert h["signal"] == "buy"
 
@@ -100,14 +100,14 @@ def test_scan_only_buy_signals():
 def test_scan_hit_fields():
     """每条 hit 应有 code/price/pct/signal/reason/amount_yi 字段。"""
     df = _make_df(n=120, seed=42)
-    with patch("strategy_engine._bulk_fetch_daily",
+    with patch("market_scan._bulk_fetch_daily",
                        return_value={c: df.copy() for c in ["600519", "000001", "300750", "301189", "600036"]}):
         with patch("sqlite3.connect") as mock_connect:
             mock_conn = mock_connect.return_value
             mock_conn.execute.return_value.fetchall.return_value = [
                 ("600519", 120, "20260820"),
             ]
-            result = se.scan_with_strategy("macd", top_n=10, min_amount_yi=0)
+            result = ms.scan_with_strategy("macd", top_n=10, min_amount_yi=0)
     for h in result["hits"]:
         assert "code" in h
         assert "price" in h
@@ -120,7 +120,7 @@ def test_scan_hit_fields():
 def test_scan_top_n_limit():
     """top_n 应限制返回条数。"""
     df = _make_df(n=120, seed=42)
-    with patch("strategy_engine._bulk_fetch_daily",
+    with patch("market_scan._bulk_fetch_daily",
                        return_value={c: df.copy() for c in ["600519", "000001", "300750", "301189", "600036"]}):
         with patch("sqlite3.connect") as mock_connect:
             mock_conn = mock_connect.return_value
@@ -129,14 +129,14 @@ def test_scan_top_n_limit():
                 ("000001", 120, "20260820"),
                 ("300750", 120, "20260820"),
             ]
-            result = se.scan_with_strategy("macd", top_n=1, min_amount_yi=0)
+            result = ms.scan_with_strategy("macd", top_n=1, min_amount_yi=0)
     assert result["hits_count"] <= 1
 
 
 def test_scan_limit_param_restricts_universe():
     """limit 参数应限制扫描股票数。"""
     df = _make_df(n=120, seed=42)
-    with patch("strategy_engine._bulk_fetch_daily",
+    with patch("market_scan._bulk_fetch_daily",
                        return_value={c: df.copy() for c in ["600519", "000001", "300750", "301189", "600036"]}):
         with patch("sqlite3.connect") as mock_connect:
             mock_conn = mock_connect.return_value
@@ -147,5 +147,5 @@ def test_scan_limit_param_restricts_universe():
                 ("301189", 120, "20260820"),
                 ("600036", 120, "20260820"),
             ]
-            result = se.scan_with_strategy("macd", top_n=10, min_amount_yi=0, limit=2)
+            result = ms.scan_with_strategy("macd", top_n=10, min_amount_yi=0, limit=2)
     assert result["scanned"] == 2  # 只扫了 2 只

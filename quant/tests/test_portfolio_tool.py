@@ -9,6 +9,7 @@ import bot_handlers
 import config_store
 import feishu_bot
 import watchlist_check
+from feishu_bot import handler_portfolio
 
 # ---------------- 存储层 ----------------
 
@@ -79,30 +80,28 @@ def test_session_isolation(tmp_path, monkeypatch):
 # ---------------- handler 层 ----------------
 
 
-def test_handler_list_empty(tmp_path, monkeypatch):
+def test_handler_list_empty(tmp_path, monkeypatch, ctx):
     _setup_db(tmp_path, monkeypatch)
-    out = feishu_bot.handler_portfolio("list", session_id="s1")
+    ctx.session_id = "s1"
+    out = handler_portfolio(ctx, "list")
     assert "无持仓" in out or "📭" in out
 
 
-def test_handler_buy_and_list(tmp_path, monkeypatch):
+def test_handler_buy_and_list(tmp_path, monkeypatch, ctx):
     _setup_db(tmp_path, monkeypatch)
 
     # mock 实时价(买入手动指定价格,避免联网)
-    out = feishu_bot.handler_portfolio(
-        "buy", code="600519", qty=100, price=1500.0, session_id="s1"
-    )
+    ctx.session_id = "s1"
+    out = feishu_bot.handler_portfolio(ctx, "buy", code="600519", qty=100, price=1500.0)
     assert "买入" in out
     # 再买一次,验证 handler 走加仓逻辑
-    out = feishu_bot.handler_portfolio(
-        "buy", code="600519", qty=100, price=1700.0, session_id="s1"
-    )
+    out = feishu_bot.handler_portfolio(ctx, "buy", code="600519", qty=100, price=1700.0)
     assert "买入" in out
     items = feishu_bot.portfolio_list("s1")
     assert abs(items[0]["cost"] - 1600.0) < 0.01
 
 
-def test_handler_buy_no_price_uses_realtime(tmp_path, monkeypatch):
+def test_handler_buy_no_price_uses_realtime(tmp_path, monkeypatch, ctx):
     """买入不指定价格时用实时价。"""
     _setup_db(tmp_path, monkeypatch)
 
@@ -112,31 +111,36 @@ def test_handler_buy_no_price_uses_realtime(tmp_path, monkeypatch):
         return [{"code": "600519", "name": "贵州茅台", "price": 1520.0, "pct": 1.0}]
 
     monkeypatch.setattr(se, "fetch_realtime", fake_fetch)
-    out = feishu_bot.handler_portfolio("buy", code="600519", qty=100, session_id="s1")
+    ctx.session_id = "s1"
+    out = handler_portfolio(ctx, "buy", code="600519", qty=100)
     assert "1520" in out
     items = feishu_bot.portfolio_list("s1")
     assert items[0]["cost"] == 1520.0
 
 
-def test_handler_buy_invalid(tmp_path, monkeypatch):
+def test_handler_buy_invalid(tmp_path, monkeypatch, ctx):
     _setup_db(tmp_path, monkeypatch)
-    out = feishu_bot.handler_portfolio("buy", code="", qty=100, session_id="s1")
+    ctx.session_id = "s1"
+    out = handler_portfolio(ctx, "buy", code="", qty=100)
     assert "❌" in out
-    out = feishu_bot.handler_portfolio("buy", code="600519", qty=0, session_id="s1")
+    ctx.session_id = "s1"
+    out = handler_portfolio(ctx, "buy", code="600519", qty=0)
     assert "❌" in out
 
 
-def test_handler_sell_flow(tmp_path, monkeypatch):
+def test_handler_sell_flow(tmp_path, monkeypatch, ctx):
     _setup_db(tmp_path, monkeypatch)
     feishu_bot.portfolio_buy("s1", "600519", "贵州茅台", 100, 1500.0)
-    out = feishu_bot.handler_portfolio("sell", code="600519", qty=50, session_id="s1")
+    ctx.session_id = "s1"
+    out = handler_portfolio(ctx, "sell", code="600519", qty=50)
     assert "卖出" in out
     assert feishu_bot.portfolio_list("s1")[0]["qty"] == 50
 
 
-def test_handler_unknown_action(tmp_path, monkeypatch):
+def test_handler_unknown_action(tmp_path, monkeypatch, ctx):
     _setup_db(tmp_path, monkeypatch)
-    out = feishu_bot.handler_portfolio("xxx", session_id="s1")
+    ctx.session_id = "s1"
+    out = handler_portfolio(ctx, "xxx")
     assert "❌" in out
 
 

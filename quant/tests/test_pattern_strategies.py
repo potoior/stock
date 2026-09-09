@@ -10,6 +10,7 @@
 import numpy as np
 import pandas as pd
 
+import market_scan as ms
 import strategy_engine as se
 
 NEW_STRATEGY_IDS = ["kline_pattern", "macd_top_divergence", "rsi_top_divergence", "gap"]
@@ -515,7 +516,7 @@ def test_bottom_divergence_strategies_registered():
         assert sid in se.DEFAULT_STRATEGY_PARAMS, f"{sid} 不在 DEFAULT_STRATEGY_PARAMS"
         pattern = rf'\("{sid}\",\s*\"[^\"]+\",\s*strategy_{sid}\)'
         assert re.search(pattern, src), f"{sid} 未注册到 BUILTIN"
-        assert sid in se.BUILTIN_STRATEGY_IDS, f"{sid} 不在扫描白名单"
+        assert sid in ms.BUILTIN_STRATEGY_IDS, f"{sid} 不在扫描白名单"
 
 
 def test_rsi_top_divergence_normal_run():
@@ -615,13 +616,13 @@ def test_scan_with_strategy_accepts_kline_pattern():
     """scan_with_strategy 应接受 kline_pattern(不联网)。"""
     df = _make_df(n=120, seed=42)
     from unittest.mock import patch
-    with patch("strategy_engine._bulk_fetch_daily", return_value={"600519": df.copy()}):
+    with patch("market_scan._bulk_fetch_daily", return_value={"600519": df.copy()}):
         with patch("sqlite3.connect") as mock_connect:
             mock_conn = mock_connect.return_value
             mock_conn.execute.return_value.fetchall.return_value = [
                 ("600519", 120, "20260820"),
             ]
-            result = se.scan_with_strategy("kline_pattern", top_n=10, min_amount_yi=0)
+            result = ms.scan_with_strategy("kline_pattern", top_n=10, min_amount_yi=0)
     assert "error" not in result
     assert result["scanned"] == 1
 
@@ -630,11 +631,11 @@ def test_scan_with_strategy_accepts_gap():
     """scan_with_strategy 应接受 gap(不联网)。"""
     df = _make_df(n=120, seed=42)
     from unittest.mock import patch
-    with patch("strategy_engine._bulk_fetch_daily", return_value={"600519": df.copy()}):
+    with patch("market_scan._bulk_fetch_daily", return_value={"600519": df.copy()}):
         with patch("sqlite3.connect") as mock_connect:
             mock_conn = mock_connect.return_value
             mock_conn.execute.return_value.fetchall.return_value = [
                 ("600519", 120, "20260820"),
             ]
-            result = se.scan_with_strategy("gap", top_n=10, min_amount_yi=0)
+            result = ms.scan_with_strategy("gap", top_n=10, min_amount_yi=0)
     assert "error" not in result

@@ -15,6 +15,7 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pandas as pd
 
+import market_scan as ms
 import strategy_engine as se
 
 NEW_STRATEGY_IDS = ["daban", "fupan", "bottom_time", "shareholder_select", "policy_select"]
@@ -357,14 +358,14 @@ def test_policy_select_insufficient_hits_hold():
 
 def test_scan_with_strategy_rejects_shareholder_select():
     """scan_with_strategy 应拒绝 shareholder_select(需联网)。"""
-    result = se.scan_with_strategy("shareholder_select")
+    result = ms.scan_with_strategy("shareholder_select")
     assert "error" in result
     assert "联网" in result["error"] or "不适合" in result["error"]
 
 
 def test_scan_with_strategy_rejects_policy_select():
     """scan_with_strategy 应拒绝 policy_select(需联网)。"""
-    result = se.scan_with_strategy("policy_select")
+    result = ms.scan_with_strategy("policy_select")
     assert "error" in result
     assert "联网" in result["error"] or "不适合" in result["error"]
 
@@ -372,13 +373,13 @@ def test_scan_with_strategy_rejects_policy_select():
 def test_scan_with_strategy_accepts_daban():
     """scan_with_strategy 应接受 daban(不联网,mock 后跑通)。"""
     df = _make_df(n=120, seed=42)
-    with patch("strategy_engine._bulk_fetch_daily", return_value={"600519": df.copy()}):
+    with patch("market_scan._bulk_fetch_daily", return_value={"600519": df.copy()}):
         with patch("sqlite3.connect") as mock_connect:
             mock_conn = mock_connect.return_value
             mock_conn.execute.return_value.fetchall.return_value = [
                 ("600519", 120, "20260820"),
             ]
-            result = se.scan_with_strategy("daban", top_n=10, min_amount_yi=0)
+            result = ms.scan_with_strategy("daban", top_n=10, min_amount_yi=0)
     assert "error" not in result
     assert result["scanned"] == 1
 

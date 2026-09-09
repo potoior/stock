@@ -52,18 +52,10 @@ from bot_context import (  # noqa: F401
     _STATS,
     _STATS_LOCK,
     MAX_TRACKED_SESSIONS,
-    _current_bot,
-    _current_chat_id,
-    _current_chat_type,
-    _current_session_id,
+    Ctx,
     _incr_stats,
-    _pending_images,
     _print_stats,
     _register_stats_signal,
-    _set_current_bot,
-    _set_current_chat_id,
-    _set_current_chat_type,
-    _set_current_session_id,
     _stats_add_session,
 )
 from bot_handlers import (  # noqa: F401
@@ -413,12 +405,13 @@ def _purge_old_history() -> int:
 # ============ 命令分发 ============
 
 
-def route(text: str) -> tuple[str, str]:
-    """根据文本路由到对应处理器。
+def route(text: str, ctx=None) -> tuple[str, str]:
+    """关键词降级路由(仅在 Agent 异常时兜底)。
 
     Returns:
         (handler_name, formatted_reply)
     """
+    ctx = ctx or Ctx()
     text = text.strip()
     if not text:
         return "ai", "请告诉我您要查询的内容,例如:\n- 分析 600519\n- 市场\n- 玉姐\n- 持仓"
@@ -431,22 +424,22 @@ def route(text: str) -> tuple[str, str]:
         _resolve_code = lambda x: None  # noqa: E731
     code = _resolve_code(text)
     if code and any(k in text for k in CMD_ANALYZE) or (code and not any(k in text for k in CMD_MARKET + CMD_YUJIE + CMD_PORTFOLIO)):
-        return "analyze", handler_analyze(code)
+        return "analyze", handler_analyze(ctx, code)
 
     # 2. 市场概况
     if any(k in text for k in CMD_MARKET):
-        return "market", handler_market()
+        return "market", handler_market(ctx)
 
     # 3. 玉姐候选
     if any(k in text for k in CMD_YUJIE):
-        return "yujie", handler_yujie()
+        return "yujie", handler_yujie(ctx)
 
     # 4. 持仓查询
     if any(k in text for k in CMD_PORTFOLIO):
-        return "portfolio", handler_portfolio("list", session_id=_current_session_id())
+        return "portfolio", handler_portfolio(ctx, "list")
 
     # 5. AI 自由问答
-    return "ai", handler_ai(text)
+    return "ai", handler_ai(ctx, text)
 
 
 def _validate_tool_args(fn_name: str, fn_args: dict) -> tuple[bool, str | None]:
@@ -617,21 +610,18 @@ class FeishuAgent:
             log.warning("历史压缩失败 %s,降级到硬截断", e)
             return history
 
-    def chat(self, user_text: str, history: list | None = None, session_id: str = "cli") -> tuple[str, list, list[bytes]]:
+    def chat(self, user_text: str, ctx=None, history: list | None = None, session_id: str = "cli") -> tuple[str, list, list[bytes]]:
         """Agent 主循环: ReAct(Reason→Act→Observe)直到模型给出最终答案。
 
         Args:
             user_text: 用户输入
+            ctx: 会话上下文(Ctx,显式传参);None 时用默认 CLI 上下文
             history: 之前的对话历史(用于多轮)
             session_id: 会话 id(chat_id:sender),供 watchlist 等需用户隔离的 handler 用
         Returns:
             (reply_text, new_history, images)  images 是 PNG bytes 列表
         """
-
-        # 每轮对话前清空图片队列
-        _pending_images.clear()
-        # 设置当前 session_id(供 watchlist handler 用,thread-local 隔离并发会话)
-        _set_current_session_id(session_id)
+        ctx = ctx or Ctx(session_id=session_id)
 
         messages = [{"role": "system", "content": SYSTEM_PROMPT}]
         if history:
@@ -670,7 +660,7 @@ class FeishuAgent:
                     _incr_stats("llm_total_ms", int((time.time() - llm_start) * 1000))
                     return (
                         f"⚠️ AI 暂时无响应(HTTP {last_code}),请稍后重试(已重试3次)",
-                        new_history, list(_pending_images),
+                        new_history, list(ctx.images),
                     )
                 if r.status_code != 200:
                     _incr_stats("llm_calls", 1)
@@ -678,7 +668,7 @@ class FeishuAgent:
                     _incr_stats("llm_total_ms", int((time.time() - llm_start) * 1000))
                     return (
                         f"⚠️ AI 服务异常(HTTP {r.status_code}),请稍后重试",
-                        new_history, list(_pending_images),
+                        new_history, list(ctx.images),
                     )
                 msg = r.json()["choices"][0]["message"]
                 _incr_stats("llm_calls", 1)
@@ -690,7 +680,7 @@ class FeishuAgent:
                 _incr_stats("llm_total_ms", int((time.time() - llm_start) * 1000))
                 return (
                     "⚠️ AI 调用异常,请稍后重试(已记录日志)",
-                    new_history, list(_pending_images),
+                    new_history, list(ctx.images),
                 )
 
             tool_calls = msg.get("tool_calls")
@@ -708,7 +698,7 @@ class FeishuAgent:
                 new_history.append({"role": "assistant", "content": content})
                 # 历史压缩(OpenClaw compaction):旧轮 LLM 总结,降级到硬截断
                 new_history = self._compact_history(new_history)
-                return content, new_history, list(_pending_images)
+                return content, new_history, list(ctx.images)
 
             # 有工具调用: 执行并把结果回灌
             # 注意: assistant 消息需保留 tool_calls 字段,OpenAI 规范要求
@@ -722,7 +712,7 @@ class FeishuAgent:
             # 原因: ReAct 循环中 LLM 可能先猜错代码再纠正(如 301395→688395),
             # 若不清空,错误代码的 K 线图也会发给用户("发很多东西")。
             # 清空后只保留最后一轮(正确)的图片。
-            _pending_images.clear()
+            ctx.images.clear()
 
             for tc in tool_calls:
                 fn_name = tc["function"]["name"]
@@ -773,7 +763,7 @@ class FeishuAgent:
                     continue
 
                 try:
-                    result = handler(fn_args)
+                    result = handler(ctx, fn_args)
                     err_msg = None
                 except Exception as e:
                     # 工具执行异常 → 自愈:回灌友好错误让 LLM 修参数或换工具
@@ -807,7 +797,7 @@ class FeishuAgent:
 
         # 达到最大步数仍未给出最终答案
         log.warning("Agent 达到最大步数 %d,工具调用: %s", MAX_AGENT_STEPS, tool_log)
-        return f"(推理步数已达上限,工具调用: {' → '.join(tool_log)}。请重新提问或换种问法。)", new_history, list(_pending_images)
+        return f"(推理步数已达上限,工具调用: {' → '.join(tool_log)}。请重新提问或换种问法。)", new_history, list(ctx.images)
 
 
 # ============ 飞书长连接客户端 ============
@@ -896,7 +886,6 @@ class FeishuBotClient:
             raise RuntimeError("feishu app_id/app_secret 未配置")
         self.client = lark.Client.builder().app_id(self.app_id).app_secret(self.app_secret).build()
         # 注册到全局,供 handler 内部主动发消息(如 scan_with_strategy 进度提示)
-        _set_current_bot(self)
         # 消息处理线程池: Agent 处理可能耗时 1-30 分钟(扫描/回测),
         # 阻塞 ws 事件线程会导致 ping timeout 断连(历史 32 次)
         self._executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="msg")
@@ -1058,8 +1047,9 @@ class FeishuBotClient:
 
             log.info("收到消息 chat=%s sender=%s text=%r", chat_id, sender, text[:100])
 
-            # thread-local 必须在 worker 线程里设置(chat_type/chat_id/bot)
-            _set_current_chat_type(chat_type)
+            # 会话上下文(显式传参,worker 线程内构造)
+            ctx = Ctx(session_id=f"{chat_id}:{sender}", chat_id=chat_id,
+                      chat_type=chat_type, bot=self)
 
             # 跨轮记忆: 按 chat_id+sender 隔离,群里不同用户各自独立历史
             session_id = f"{chat_id}:{sender}"
@@ -1099,14 +1089,11 @@ class FeishuBotClient:
                 need_thinking_hint, hint_text = self._needs_thinking_hint(text)
                 if need_thinking_hint:
                     self._reply_text(chat_id, hint_text)
-                # 设置 chat_id 到 thread-local,供 handler 内部主动发消息(如进度提示)
-                _set_current_chat_id(chat_id)
-                _set_current_bot(self)
-                reply, new_history, images = agent.chat(text, history=history, session_id=session_id)
+                reply, new_history, images = agent.chat(text, ctx=ctx, history=history, session_id=session_id)
                 _save_history(session_id, new_history)
             except Exception as e:
                 log.warning("Agent 异常 %s, 降级到关键词路由", e)
-                _, reply = route(text)
+                _, reply = route(text, ctx)
                 images = []
             finally:
                 session_lock.release()

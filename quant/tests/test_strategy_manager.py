@@ -2,6 +2,7 @@
 
 import pytest
 
+import market_scan as ms
 import strategy_engine as se
 
 
@@ -17,7 +18,7 @@ def test_presets_all_valid():
     for name, preset in se.STRATEGY_PRESETS.items():
         assert preset["ids"], f"预设 {name} 为空"
         for sid in preset["ids"]:
-            assert sid in se.BUILTIN_STRATEGY_IDS, f"预设 {name} 引用未知策略 {sid}"
+            assert sid in ms.BUILTIN_STRATEGY_IDS, f"预设 {name} 引用未知策略 {sid}"
 
 
 def test_expand_strategy_ids_mixed():
