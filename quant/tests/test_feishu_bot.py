@@ -10,6 +10,7 @@ import time
 from pathlib import Path
 from unittest.mock import patch
 
+import bot_handlers
 import feishu_bot
 import stock_names
 from feishu_bot import (
@@ -195,7 +196,7 @@ def test_is_reset_command_with_punct():
 
 def _setup_watchlist_db(tmp_path, monkeypatch):
     db = tmp_path / "test_watchlist.db"
-    monkeypatch.setattr(feishu_bot, "WATCHLIST_DB", db)
+    monkeypatch.setattr(bot_handlers, "WATCHLIST_DB", db)
     return db
 
 
@@ -884,7 +885,7 @@ def test_analyze_sector_known(monkeypatch):
 
     monkeypatch.setattr(stock_finance, "fetch_finance", fake_fetch)
     # mock 东财板块索引返回空(强制走 fallback _SECTOR_MEMBERS)
-    monkeypatch.setattr(feishu_bot, "_fetch_sector_index", lambda: {})
+    monkeypatch.setattr(bot_handlers, "_fetch_sector_index", lambda: {})
     r = handler_analyze_sector("白酒")
     assert "600519" in r  # 茅台代码在白酒板块成员里
 
@@ -898,9 +899,9 @@ def test_analyze_sector_dynamic(monkeypatch):
                 "total_mv": 1e10, "roe": 5.0, "net_margin": 10.0, "report_name": "2026中报"}
 
     monkeypatch.setattr(stock_finance, "fetch_finance", fake_fetch)
-    monkeypatch.setattr(feishu_bot, "_fetch_sector_index",
+    monkeypatch.setattr(bot_handlers, "_fetch_sector_index",
                         lambda: {"白酒": "BK0896", "银行": "BK1283"})
-    monkeypatch.setattr(feishu_bot, "_fetch_sector_members",
+    monkeypatch.setattr(bot_handlers, "_fetch_sector_members",
                         lambda bk, top_n=8: ["600519", "000858", "000568"][:top_n])
     r = handler_analyze_sector("白酒")
     assert "白酒" in r
@@ -916,9 +917,9 @@ def test_analyze_sector_dynamic_fuzzy(monkeypatch):
                         lambda code: {"code": code, "name": f"股{code}", "pe_ttm": 10.0,
                                       "pb": 1.0, "total_mv": 1e10, "roe": 5.0,
                                       "net_margin": 10.0, "report_name": "2026中报"})
-    monkeypatch.setattr(feishu_bot, "_fetch_sector_index",
+    monkeypatch.setattr(bot_handlers, "_fetch_sector_index",
                         lambda: {"银行": "BK1283"})
-    monkeypatch.setattr(feishu_bot, "_fetch_sector_members",
+    monkeypatch.setattr(bot_handlers, "_fetch_sector_members",
                         lambda bk, top_n=8: ["601398", "601939"])
     r = handler_analyze_sector("银")
     assert "银行" in r
@@ -934,9 +935,9 @@ def test_analyze_sector_dynamic_fail_fallback(monkeypatch):
                                       "pb": 1.0, "total_mv": 1e10, "roe": 5.0,
                                       "net_margin": 10.0, "report_name": "2026中报"})
     # 板块索引有"白酒"但成分股请求失败
-    monkeypatch.setattr(feishu_bot, "_fetch_sector_index",
+    monkeypatch.setattr(bot_handlers, "_fetch_sector_index",
                         lambda: {"白酒": "BK0896"})
-    monkeypatch.setattr(feishu_bot, "_fetch_sector_members",
+    monkeypatch.setattr(bot_handlers, "_fetch_sector_members",
                         lambda bk, top_n=8: [])
     r = handler_analyze_sector("白酒")
     # 应 fallback 到硬编码白酒成员,包含 600519
@@ -945,7 +946,7 @@ def test_analyze_sector_dynamic_fail_fallback(monkeypatch):
 
 def test_analyze_sector_unknown(monkeypatch):
     """未知板块应提示已知列表。"""
-    monkeypatch.setattr(feishu_bot, "_fetch_sector_index", lambda: {"白酒": "BK0896"})
+    monkeypatch.setattr(bot_handlers, "_fetch_sector_index", lambda: {"白酒": "BK0896"})
     r = handler_analyze_sector("不存在的板块xyz")
     assert "❌" in r
     assert "白酒" in r  # 列出已知
@@ -969,8 +970,8 @@ def test_fetch_sector_index_fail_cooldown(monkeypatch):
 
     monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
     # 清空缓存 + 重置失败时间
-    monkeypatch.setattr(feishu_bot, "_SECTOR_INDEX_CACHE", {})
-    monkeypatch.setattr(feishu_bot, "_SECTOR_INDEX_FAIL_TS", 0.0)
+    monkeypatch.setattr(bot_handlers, "_SECTOR_INDEX_CACHE", {})
+    monkeypatch.setattr(bot_handlers, "_SECTOR_INDEX_FAIL_TS", 0.0)
     # 第一次调用:会真请求并失败
     r1 = feishu_bot._fetch_sector_index()
     assert r1 == {}
@@ -1022,7 +1023,7 @@ class _MockDateTime:
 def test_rollback_weekday_monday(monkeypatch):
     """周一问昨天=周日,应回退到周五(最近交易日)。"""
     _MockDateTime._fixed = _fake_now(2026, 8, 17)  # 2026-08-17 是周一
-    monkeypatch.setattr(feishu_bot, "datetime", _MockDateTime)
+    monkeypatch.setattr(bot_handlers, "datetime", _MockDateTime)
     # 昨天=08-16 周日 → 回退到 08-14 周五
     assert _rollback_to_weekday(1).strftime("%Y%m%d") == "20260814"
 
@@ -1030,7 +1031,7 @@ def test_rollback_weekday_monday(monkeypatch):
 def test_rollback_weekday_saturday(monkeypatch):
     """周六问昨天=周五,不需回退。"""
     _MockDateTime._fixed = _fake_now(2026, 8, 15)  # 2026-08-15 是周六
-    monkeypatch.setattr(feishu_bot, "datetime", _MockDateTime)
+    monkeypatch.setattr(bot_handlers, "datetime", _MockDateTime)
     # 昨天=08-14 周五,直接返回
     assert _rollback_to_weekday(1).strftime("%Y%m%d") == "20260814"
 
@@ -1038,7 +1039,7 @@ def test_rollback_weekday_saturday(monkeypatch):
 def test_rollback_weekday_weekday(monkeypatch):
     """普通工作日不影响。"""
     _MockDateTime._fixed = _fake_now(2026, 8, 19)  # 2026-08-19 是周三
-    monkeypatch.setattr(feishu_bot, "datetime", _MockDateTime)
+    monkeypatch.setattr(bot_handlers, "datetime", _MockDateTime)
     assert _rollback_to_weekday(1).strftime("%Y%m%d") == "20260818"
 
 
@@ -1181,7 +1182,7 @@ def test_print_stats_with_data(capsys):
         "tool_calls": 20, "tool_failures": 2, "sessions": {"a", "b", "c"},
     })
     try:
-        with patch("feishu_bot.log") as mock_log:
+        with patch("bot_context.log") as mock_log:
             _print_stats()
             assert mock_log.info.called
             # log.info 用 %-格式化,call_args[0] 是 (template, *args)

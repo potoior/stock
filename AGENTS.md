@@ -16,7 +16,11 @@ A 股量化分析系统,集成飞书群聊 Bot(Function Calling ReAct Agent),覆
 
 ```
 quant/
-├── feishu_bot.py          # 飞书长连接 Agent(~3480 行,29 skill)
+├── feishu_bot.py          # 飞书长连接 Agent(~1200 行:Agent 循环/WS 客户端/历史/审计)
+├── bot_handlers.py        # 36 个工具 handler + TOOL_HANDLERS 注册表(~2400 行)
+├── bot_context.py         # thread-local 会话上下文 + 运行统计(handler 与 agent 共用)
+├── config_store.py        # config.json 唯一读写入口(原子写 + mtime 缓存)
+├── strategy_conditions.py # 自定义策略条件层(指标白名单/确定性评估/编译校验,纯逻辑)
 ├── feishu_image.py        # matplotlib 图表(K 线/玉姐/回测/市场)
 ├── feishu.py              # 飞书 webhook 推送(日报/告警)
 ├── stock_names.py         # 股票名称解析(腾讯 smartbox + sqlite 缓存)

@@ -5,6 +5,7 @@
 
 import sqlite3
 
+import bot_handlers
 import config_store
 import feishu_bot
 import watchlist_check
@@ -14,7 +15,7 @@ import watchlist_check
 
 def _setup_db(tmp_path, monkeypatch):
     db = tmp_path / "portfolio.db"
-    monkeypatch.setattr(feishu_bot, "PORTFOLIO_DB", db)
+    monkeypatch.setattr(bot_handlers, "PORTFOLIO_DB", db)
     return db
 
 

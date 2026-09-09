@@ -9,6 +9,7 @@ get_main_flow/get_concept_sectors/get_stock_news/get_strategy_library)。
 import sqlite3
 import unittest.mock as mock
 
+import bot_handlers
 import feishu_bot
 
 # ============ handler_market ============
@@ -16,14 +17,14 @@ import feishu_bot
 
 def test_handler_market_no_data(tmp_path, monkeypatch):
     """无日报数据应返回提示。"""
-    monkeypatch.setattr(feishu_bot, "REPORTS_DIR", tmp_path)
+    monkeypatch.setattr(bot_handlers, "REPORTS_DIR", tmp_path)
     out = feishu_bot.handler_market()
     assert "尚未生成" in out or "❌" in out
 
 
 def test_handler_market_with_data(tmp_path, monkeypatch):
     """有日报数据应返回市场概况。"""
-    monkeypatch.setattr(feishu_bot, "REPORTS_DIR", tmp_path)
+    monkeypatch.setattr(bot_handlers, "REPORTS_DIR", tmp_path)
     from datetime import datetime
     today = datetime.now().strftime("%Y%m%d")
     (tmp_path / f"daily_{today}.md").write_text(
@@ -73,7 +74,7 @@ def test_handler_yujie_with_data(tmp_path, monkeypatch):
 
 def test_handler_portfolio_empty(tmp_path, monkeypatch):
     """无持仓应返回提示。"""
-    monkeypatch.setattr(feishu_bot, "PORTFOLIO_DB", tmp_path / "portfolio.db")
+    monkeypatch.setattr(bot_handlers, "PORTFOLIO_DB", tmp_path / "portfolio.db")
     out = feishu_bot.handler_portfolio("list", session_id="s1")
     assert "无持仓" in out or "📭" in out
 
@@ -81,7 +82,7 @@ def test_handler_portfolio_empty(tmp_path, monkeypatch):
 def test_handler_portfolio_with_data(tmp_path, monkeypatch):
     """有持仓数据应返回持仓列表(实时价 mock)。"""
     db = tmp_path / "portfolio.db"
-    monkeypatch.setattr(feishu_bot, "PORTFOLIO_DB", db)
+    monkeypatch.setattr(bot_handlers, "PORTFOLIO_DB", db)
     import strategy_engine as se
 
     monkeypatch.setattr(
