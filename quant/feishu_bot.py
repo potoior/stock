@@ -2370,6 +2370,73 @@ def handler_scan_with_strategy(
         return f"❌ 策略选股出错: {e}"
 
 
+def handler_scan_custom(description: str, top_n: int = 20, limit: int = 0) -> str:
+    """一句话策略选股:LLM 写策略代码 → 沙箱全市场扫描。耗时约 1-5 分钟。"""
+    try:
+        import sandbox_scan
+        log.info("开始一句话选股: %s", description)
+
+        # 进度提示(一句话选股是异步生码+扫描,只在首尾发)
+        chat_id = _current_chat_id()
+        bot_ref = _current_bot()
+        last_progress_ts = [0.0]
+
+        def _progress_cb(scanned, total, hits_count):
+            import time as _t
+            now = _t.time()
+            if now - last_progress_ts[0] < 30 and scanned != total:
+                return
+            last_progress_ts[0] = now
+            if bot_ref and chat_id:
+                try:
+                    if scanned:
+                        bot_ref._send_text(chat_id, f"⏳ 一句话选股: {scanned}/{total} | 命中 {hits_count} 只")
+                except Exception:
+                    pass
+
+        result = sandbox_scan.scan_custom(
+            description, top_n=top_n, limit=limit,
+            progress_callback=_progress_cb if (bot_ref and chat_id) else None,
+        )
+        if "error" in result:
+            return f"❌ 一句话选股失败: {result['error']}"
+
+        hits = result.get("hits", [])
+        cached = result.get("cached", False)
+        lines = [
+            f"🎯 **一句话选股: {description}**",
+            f"- 扫描股票数: {result.get('scanned', 0)}",
+            f"- 命中: {result.get('total_hits', 0)} 只"
+            + (f"(显示前 {len(hits)})" if len(hits) < result.get("total_hits", 0) else ""),
+            "",
+        ]
+        if not hits:
+            lines.append("今日无股票命中该策略")
+        else:
+            try:
+                import stock_names as sn
+                codes = [h["code"] for h in hits]
+                name_map = sn.lookup_names(codes) if hasattr(sn, "lookup_names") else {}
+            except Exception:
+                name_map = {}
+            lines += [
+                "| 代码 | 名称 | 现价 | 涨幅 | 成交额(亿) |",
+                "|---|---|---|---|---|",
+            ]
+            for h in hits:
+                name = name_map.get(h["code"], "") or "-"
+                lines.append(
+                    f"| {h['code']} | {name} | {h['price']} | "
+                    f"{h['pct']:+.2f}% | {h['amount_yi']} |"
+                )
+        lines.append("")
+        lines.append(f"```python\n{result.get('code', '')}\n```")
+        lines.append(f"({'缓存复用' if cached else 'AI 实时生成'}策略代码)")
+        return "\n".join(lines)
+    except Exception as e:
+        return f"❌ 一句话选股出错: {e}"
+
+
 def handler_scan_combo(
     strategy_ids: list[str], mode: str = "and", top_n: int = 20,
     min_amount_yi: float = 0.5, limit: int = 0
@@ -2790,6 +2857,11 @@ TOOL_HANDLERS = {
         args.get("mode", "and"),
         int(args.get("top_n", 20)),
         float(args.get("min_amount_yi", 0.5)),
+        int(args.get("limit", 0)),
+    ),
+    "scan_custom": lambda args: handler_scan_custom(
+        args.get("description", ""),
+        int(args.get("top_n", 20)),
         int(args.get("limit", 0)),
     ),
     "get_stock_news": lambda args: handler_get_stock_news(

@@ -431,6 +431,29 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "scan_custom",
+            "description": (
+                "一句话策略选股:用自然语言描述任意选股条件,AI 生成策略代码后在沙箱全市场扫描。"
+                "支持任意指标任意参数(如 MA8/年线/N日新高/量比/任意组合),不限于内置策略。"
+                "耗时约 1-5 分钟。用户说'帮我找XX条件的'且不匹配内置策略时调用,如'找量比大于2且MACD金叉的股票'。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "description": {
+                        "type": "string",
+                        "description": "一句话选股条件,如'收盘价站上30日均线且今天放量2倍'"
+                    },
+                    "top_n": {"type": "integer", "description": "返回前 N 只(按涨幅降序)", "default": 20},
+                    "limit": {"type": "integer", "description": "限制扫描股票数(调试用),0=全市场", "default": 0}
+                },
+                "required": ["description"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "get_stock_news",
             "description": "查询个股相关新闻(东财搜索接口,实时抓取)。用户问'X股票有什么新闻/X最近消息/X公司动态/跟X相关的新闻'时调用。返回最近 N 条提到该股票名或代码的新闻(已过滤无关列表新闻)。",
             "parameters": {
@@ -631,6 +654,9 @@ SYSTEM_PROMPT = """你是 A 股量化分析助手(飞书群聊 Bot),有 35 个�
 - scan_combo(strategy_ids, mode?, top_n?, ...): 多策略组合选股(交叉验证,约10秒-3分钟)
   · mode: and=全部触发(共振,少而精), or=任一触发(宽松)
   · 示例: "找MACD金叉+KDJ超卖的股票" / "多策略共振选股"
+- scan_custom(description, top_n?, limit?): 一句话策略选股,任意指标任意参数(约1-5分钟)
+  · 用户描述的条件不匹配任何内置策略时用,如"找站上MA8且量比大于2的股票"
+  · AI 生成策略代码→沙箱扫描→返回命中+代码,任意均线/新高/量比组合都支持
 - scan_with_yujie(top_n?, min_score?, limit?): 全市场玉姐评分实时扫描(1-3分钟)
   · 与 get_yujie_picks 区别: 这是实时重跑全市场评分,不是盘前缓存
 

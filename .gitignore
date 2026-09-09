@@ -27,6 +27,9 @@ quant/reports/
 # 运行日志（含审计日志轮转文件）
 quant/logs/
 
+# 一句话选股的代码缓存
+quant/scan_custom_cache.json
+
 # 编辑器 / 系统
 .DS_Store
 *.pdf
