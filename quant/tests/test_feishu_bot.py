@@ -1492,3 +1492,59 @@ def test_agent_llm_failover_to_fallback(monkeypatch):
     assert reply == "备用网关回复"
     assert "http://primary/v1/chat/completions" in calls
     assert "http://fallback/v1/chat/completions" in calls
+
+
+# ============ 群聊仅 @机器人 才回复 ============
+
+
+class _FakeMention:
+    def __init__(self, mid):
+        self.id = mid
+
+
+def test_mentions_bot_true(monkeypatch):
+    """@了机器人 → 处理。"""
+    bot = _make_bot_client()
+    monkeypatch.setattr(bot, "_get_bot_open_id", lambda: "ou_bot")
+    assert bot._mentions_bot([_FakeMention("ou_bot")]) is True
+
+
+def test_mentions_bot_other_user(monkeypatch):
+    """@了别人 → 忽略。"""
+    bot = _make_bot_client()
+    monkeypatch.setattr(bot, "_get_bot_open_id", lambda: "ou_bot")
+    assert bot._mentions_bot([_FakeMention("ou_other")]) is False
+    assert bot._mentions_bot([]) is False
+
+
+def test_mentions_bot_open_id_unavailable(monkeypatch):
+    """拿不到 open_id 时降级:有提及就算。"""
+    bot = _make_bot_client()
+    monkeypatch.setattr(bot, "_get_bot_open_id", lambda: None)
+    assert bot._mentions_bot([_FakeMention("ou_x")]) is True
+    assert bot._mentions_bot([]) is False
+
+
+def test_process_message_group_without_mention_ignored(monkeypatch):
+    """群聊未@机器人 → 静默忽略,不回复。"""
+    bot = _make_bot_client()
+    replies = []
+    monkeypatch.setattr(bot, "_reply_text", lambda chat_id, text: replies.append(text))
+    monkeypatch.setattr(bot, "_get_bot_open_id", lambda: "ou_bot")
+    content = json.dumps({"text": "分析 600519"})
+    bot._process_message("chat1", "text", content, "user1", "group", [_FakeMention("ou_other")])
+    assert replies == []
+    # @了机器人 → 正常处理
+    bot._process_message("chat1", "text", content, "user1", "group", [_FakeMention("ou_bot")])
+    assert len(replies) == 1
+
+
+def test_process_message_p2p_no_mention_needed(monkeypatch):
+    """私聊不需要 @。"""
+    bot = _make_bot_client()
+    replies = []
+    monkeypatch.setattr(bot, "_reply_text", lambda chat_id, text: replies.append(text))
+    monkeypatch.setattr(bot, "_get_bot_open_id", lambda: "ou_bot")
+    content = json.dumps({"text": "分析 600519"})
+    bot._process_message("chat1", "text", content, "user1", "p2p", [])
+    assert len(replies) == 1

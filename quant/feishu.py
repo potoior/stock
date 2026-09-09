@@ -89,6 +89,21 @@ class FeishuBot:
 
     # -------- 发送 --------
 
+    def get_bot_open_id(self):
+        """获取机器人自身的 open_id(调 /bot/v3/info 接口)。"""
+        import urllib.request
+
+        token = self._get_token()
+        req = urllib.request.Request(
+            "https://open.feishu.cn/open-apis/bot/v3/info",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        raw = urllib.request.urlopen(req, timeout=self.timeout).read().decode("utf-8", "replace")
+        data = json.loads(raw)
+        if data.get("code") != 0:
+            raise RuntimeError(f"获取 bot info 失败: {data.get('msg')}")
+        return (data.get("bot") or {}).get("open_id")
+
     def send_text(self, text, chat_id=None):
         """发送文本消息,返回响应 dict 或 None(失败/未启用)。"""
         return self._send("text", json.dumps({"text": text}), chat_id)

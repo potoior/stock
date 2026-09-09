@@ -3311,6 +3311,32 @@ class FeishuBotClient:
         self._executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="msg")
         log.info("飞书 Bot 客户端已初始化, app_id=%s...", self.app_id[:10])
 
+    def _get_bot_open_id(self) -> str | None:
+        """获取机器人自己的 open_id(缓存)。失败返回 None,下次重试。"""
+        if getattr(self, "_bot_open_id", None):
+            return self._bot_open_id
+        try:
+            from feishu import FeishuBot
+
+            self._bot_open_id = FeishuBot().get_bot_open_id()
+            log.info("机器人 open_id=%s", self._bot_open_id)
+        except Exception as e:
+            log.warning("获取 bot open_id 失败: %s", e)
+            self._bot_open_id = None
+        return self._bot_open_id
+
+    def _mentions_bot(self, mentions: list | None) -> bool:
+        """消息的 @提及 里是否包含本机器人。"""
+        if not mentions:
+            return False
+        bot_id = self._get_bot_open_id()
+        for m in mentions:
+            mid = getattr(m, "id", None) or (m.get("id") if isinstance(m, dict) else None)
+            if mid and mid == bot_id:
+                return True
+        # 拿不到 open_id 时降级:有任何提及就算(宁可多答不误伤 @机器人)
+        return bot_id is None and len(mentions) > 0
+
     def _needs_thinking_hint(self, text: str) -> tuple[bool, str]:
         """轻量判断:用户问题是否触发了耗时工具,返回 (需提示, 提示文案)。
 
@@ -3399,18 +3425,27 @@ class FeishuBotClient:
             # chat_type: 'p2p' 私聊 / 'group' 群聊,传给 worker 线程设 thread-local
             chat_type = getattr(msg, "chat_type", "") or "group"
 
+            # @提及信息(判断群聊是否 @ 了本机器人)
+            mentions = getattr(msg, "mentions", None) or []
+
             # 重活丢线程池:ws 事件线程立即返回,继续处理 ping/pong
             self._executor.submit(
-                self._process_message, chat_id, msg_type, content_str, sender, chat_type
+                self._process_message, chat_id, msg_type, content_str, sender, chat_type, mentions
             )
         except Exception as e:
             log.error("提交消息处理失败: %s\n%s", e, traceback.format_exc())
 
     def _process_message(
-        self, chat_id: str, msg_type: str, content_str: str, sender: str, chat_type: str
+        self, chat_id: str, msg_type: str, content_str: str, sender: str, chat_type: str,
+        mentions: list | None = None,
     ) -> None:
         """实际的消息处理(在线程池中执行)。"""
         try:
+            # 群聊只响应 @了本机器人 的消息,其余静默忽略
+            if chat_type == "group" and not self._mentions_bot(mentions):
+                log.info("群聊消息未@机器人,忽略: %s", content_str[:50] if content_str else "")
+                return
+
             # 解析消息内容(text=普通文本 / post=富文本,其余类型不支持)
             try:
                 content = json.loads(content_str)
