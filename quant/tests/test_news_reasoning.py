@@ -102,3 +102,49 @@ def test_format_text():
     ]
     out = nr.format_text(events)
     assert "E1" in out and "推理内容" in out
+
+
+# ---------------- split_reasoning(防重复) ----------------
+
+
+def test_split_reasoning_per_event():
+    """按事件标题切分,各事件拿到各自的段落。"""
+    out = (
+        "#### 事件1: 政策发布\n- **因果链**: A → B → C\n- **置信度**: 高\n\n"
+        "#### 事件2: 订单中标\n- **因果链**: D → E → F\n- **置信度**: 中\n"
+    )
+    chunks = nr.split_reasoning(out, 2)
+    assert len(chunks) == 2
+    assert "政策发布" in chunks[0] and "A → B → C" in chunks[0]
+    assert "订单中标" in chunks[1] and "D → E → F" in chunks[1]
+    assert "订单中标" not in chunks[0]
+
+
+def test_split_reasoning_no_headers():
+    """LLM 没按格式输出时,全文给事件1,其余为空(不重复)。"""
+    chunks = nr.split_reasoning("一段没有格式的推理", 3)
+    assert chunks[0] == "一段没有格式的推理"
+    assert chunks[1] == "" and chunks[2] == ""
+
+
+def test_split_reasoning_missing_event():
+    """部分事件缺标题时,缺失的给空串。"""
+    out = "#### 事件1: 只有第一个\n因果链内容"
+    chunks = nr.split_reasoning(out, 2)
+    assert "只有第一个" in chunks[0]
+    assert chunks[1] == ""
+
+
+def test_split_reasoning_empty():
+    assert nr.split_reasoning("", 2) == ["", ""]
+
+
+def test_format_text_no_duplication():
+    """多事件时推理不应整段重复 N 遍。"""
+    events = [
+        {"event": "E1", "direction": "利好", "reasoning": "推理1"},
+        {"event": "E2", "direction": "利空", "reasoning": "推理2"},
+    ]
+    out = nr.format_text(events)
+    assert out.count("推理1") == 1
+    assert out.count("推理2") == 1

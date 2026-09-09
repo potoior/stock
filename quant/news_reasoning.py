@@ -14,6 +14,7 @@
 import argparse
 import json
 import logging
+import re
 import urllib.request
 from datetime import datetime
 
@@ -218,11 +219,26 @@ def reason_events(events: list, decider) -> list[dict]:
         log.warning("reason_events LLM 失败: %s", e)
         return f"(LLM 推理失败: {e})"
     # 推理模型思考过程剥离(与 daily_scan 同一逻辑;DS 系列思考常以"好的，"开头)
-    import re
-
     return re.split(
         r"\n\s*(?:Thinking\s*Process|推理过程|好的[，,])", out, maxsplit=1
     )[0].strip()
+
+
+def split_reasoning(out: str, n_events: int) -> list[str]:
+    """把第二段推理输出按 '#### 事件N:' 切成每事件一段。
+
+    LLM 偶尔不按格式输出(无标题/漏事件):完全没切出来时全文给事件1,
+    个别缺失的事件给空串,避免整段推理在每个事件下重复。
+    """
+    parts = re.split(r"\n?####\s*事件\s*(\d+)", "\n" + (out or ""))
+    chunks = {}
+    for i in range(1, len(parts) - 1, 2):
+        idx = int(parts[i])
+        if 1 <= idx <= n_events:
+            chunks[idx] = parts[i + 1].strip()
+    if not chunks:
+        return [(out or "").strip()] + [""] * (n_events - 1)
+    return [chunks.get(i, "") for i in range(1, n_events + 1)]
 
 
 def run(news_limit=30, max_events=3, decider=None):
@@ -260,8 +276,8 @@ def run(news_limit=30, max_events=3, decider=None):
 
     print("LLM 第二段推理: 因果链分析...")
     reasoning = reason_events(events, decider)
-    for ev in events:
-        ev["reasoning"] = reasoning
+    for ev, chunk in zip(events, split_reasoning(reasoning, len(events)), strict=True):
+        ev["reasoning"] = chunk
     return events
 
 
