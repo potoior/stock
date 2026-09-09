@@ -151,8 +151,8 @@ class AIDecider:
                 "messages": [{"role": "user", "content": prompt}],
                 "temperature": 0.3,
                 # 推理模型思考也占 token(思考 + 正文共享 max_tokens),
-                # 4096 会导致盘后复盘等长文写一半被截断,提到 8192
-                "max_tokens": 8192,
+                # 与 Agent 主循环对齐:给到上限,模型写完自然停,不硬截断
+                "max_tokens": 32768,
             }
             try:
                 with httpx.Client(timeout=timeout, trust_env=False) as client:
