@@ -27,8 +27,6 @@ from pathlib import Path
 from news_digest import fetch_news
 
 REPORTS = Path(__file__).parent / "reports"
-HQ_URL = "http://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/Market_Center.getHQNodeData"
-UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36"
 log = logging.getLogger("quant.daily")
 
 # A 股法定节假日(每年 ~20 天,手动维护,年初更新一次)
@@ -65,52 +63,12 @@ def is_trading_day(now=None) -> bool:
     return today not in HOLIDAYS
 
 
-def fetch_market_page(page=1, num=100, sort="amount", asc=0):
-    url = f"{HQ_URL}?page={page}&num={num}&sort={sort}&asc={asc}&node=hs_a&symbol=&_s_r_a=page"
-    req = urllib.request.Request(url, headers={"Referer": "http://finance.sina.com.cn/", "User-Agent": UA})
-    raw = urllib.request.urlopen(req, timeout=15).read().decode("gbk")
-    return json.loads(raw) or []
-
-
-def norm_code(symbol):
-    return symbol[2:] if symbol[:2].lower() in ("sh", "sz", "bj") else symbol
-
-
-def fetch_market_all(limit=0, max_pages=80):
-    """抓取全市场 A 股实时行情,返回标准化字典列表。
-
-    每页失败重试 3 次(指数退避 1s/2s/4s),应对开盘瞬间 HTTP 456 限流。
-    仍失败才跳过该页继续下一页,避免单页网络抖动丢掉后面所有页。
-    """
-    rows = []
-    page = 1
-    while page <= max_pages:
-        batch = None
-        last_err = None
-        for attempt in range(3):  # 指数退避 1s/2s/4s
-            try:
-                batch = fetch_market_page(page=page, num=100, sort="amount", asc=0)
-                break
-            except Exception as e:
-                last_err = e
-                if attempt < 2:
-                    time.sleep(2 ** attempt)  # 1, 2 秒
-        if batch is None:
-            log.warning("fetch_market_page page=%d 重试 3 次仍失败: %s,跳过", page, last_err)
-            page += 1
-            continue
-        if not batch:
-            break  # 真正的尾页(空数据)才退出
-        rows.extend(batch)
-        if limit and len(rows) >= limit:
-            rows = rows[:limit]
-            break
-        if len(batch) < 100:
-            break
-        page += 1
-    for r in rows:
-        r["code6"] = norm_code(r.get("symbol", ""))[-6:].zfill(6)
-    return rows
+from data_fetcher import (  # noqa: E402,F401  (re-export 保持兼容)
+    UA,
+    fetch_market_all,
+    fetch_market_page,
+    norm_code,
+)
 
 
 def market_stats(rows):

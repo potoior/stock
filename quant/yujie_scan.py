@@ -32,7 +32,7 @@ from pathlib import Path
 import pandas as pd
 
 import config_store
-from daily_scan import fetch_market_all, norm_code
+from data_fetcher import fetch_market_all, norm_code
 from strategy_engine import (
     compute_macd,
     compute_mos_lows,

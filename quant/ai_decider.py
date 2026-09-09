@@ -4,6 +4,10 @@ import re
 import time
 from pathlib import Path
 
+import httpx
+
+from strategy_conditions import METRIC_DESC
+
 CONFIG_DIR = Path.home() / ".config" / "opencode"
 CONFIG_PATHS = [CONFIG_DIR / "opencode.json", CONFIG_DIR / "opencode.jsonc"]
 
@@ -140,7 +144,6 @@ class AIDecider:
 }}"""
 
     def _call_api(self, prompt, timeout=60):
-        import httpx
 
         errors = []
         all_rate_limited = True
@@ -189,8 +192,6 @@ class AIDecider:
 
         返回 {"compiled": {"buy": {...}, "sell": {...}}} 或 {"error": "..."}
         """
-        from strategy_engine import METRIC_DESC
-
         metric_lines = "\n".join(f"- {k}: {v}" for k, v in METRIC_DESC.items())
         prompt = f"""你是量化规则编译器。请把用户的自然语言买卖规则翻译为结构化条件 JSON。
 
