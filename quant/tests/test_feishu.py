@@ -166,9 +166,12 @@ def test_build_daily_card_truncates_long_ai():
              "limit_up": 0, "limit_down": 0, "total_amount_yi": 0}
     long_text = "x" * 2000
     card = feishu.build_daily_card(stats, [], long_text)
-    body = card["elements"][6]["text"]["content"]
-    assert len(body) < 1000
-    assert body.endswith("...")
+    # 超长 AI 摘要应拆成多个 div 分段展示,不截断
+    texts = "".join(
+        e["text"]["content"] for e in card["elements"]
+        if isinstance(e.get("text"), dict) and "x" in e["text"]["content"]
+    )
+    assert "x" * 2000 in texts
 
 
 # -------- 主流程接入 --------

@@ -206,6 +206,20 @@ def _post_json(url, body, bearer=None, timeout=DEFAULT_TIMEOUT):
 # -------- 卡片构造 --------
 
 
+def split_card_text(text: str, size: int = 3000) -> list[str]:
+    """把长文本按行切成多个卡片 div 内容,避免超长截断丢失。"""
+    parts, cur = [], ""
+    for line in (text or "").split("\n"):
+        if cur and len(cur) + len(line) + 1 > size:
+            parts.append(cur)
+            cur = line
+        else:
+            cur = f"{cur}\n{line}" if cur else line
+    if cur:
+        parts.append(cur)
+    return parts or [text or ""]
+
+
 def build_daily_card(stats, cands, ai_summary, now=None):
     """构造每日日报卡片。
 
@@ -241,44 +255,47 @@ def build_daily_card(stats, cands, ai_summary, now=None):
         )
     cand_block = "\n".join(cand_lines) if cand_lines else "（无候选）"
 
-    # AI 摘要(取前 800 字,超长截断)
+    # AI 摘要(超长按 3000 字/段拆多个 div,不截断)
     ai_text = (ai_summary or "").strip()
-    if len(ai_text) > 800:
-        ai_text = ai_text[:800] + "..."
 
+    ai_text = (ai_summary or "").strip()
+
+    elements = [
+        {
+            "tag": "div",
+            "text": {
+                "tag": "lark_md",
+                "content": (
+                    f"**市场情绪: {mood}**\n"
+                    f"总数 {stats.get('total',0)} | 涨 {up} / 跌 {dn} / 平 {stats.get('flat',0)}\n"
+                    f"涨停 {stats.get('limit_up',0)} | 跌停 {stats.get('limit_down',0)} | "
+                    f"成交额 {stats.get('total_amount_yi',0):.0f} 亿"
+                ),
+            },
+        },
+        {"tag": "hr"},
+        {
+            "tag": "div",
+            "text": {"tag": "lark_md", "content": f"**🎯 玉姐精选 Top {len(cands)}**"},
+        },
+        {"tag": "div", "text": {"tag": "lark_md", "content": cand_block}},
+        {"tag": "hr"},
+        {
+            "tag": "div",
+            "text": {"tag": "lark_md", "content": "**🤖 AI 综合分析**"},
+        },
+    ]
+    elements.extend(
+        {"tag": "div", "text": {"tag": "lark_md", "content": chunk}}
+        for chunk in split_card_text(ai_text or "(AI 调用失败)")
+    )
     return {
         "config": {"wide_screen": True},
         "header": {
             "title": {"tag": "plain_text", "content": f"📈 A股开盘日报 {date_str}"},
             "template": tmpl,
         },
-        "elements": [
-            {
-                "tag": "div",
-                "text": {
-                    "tag": "lark_md",
-                    "content": (
-                        f"**市场情绪: {mood}**\n"
-                        f"总数 {stats.get('total',0)} | 涨 {up} / 跌 {dn} / 平 {stats.get('flat',0)}\n"
-                        f"涨停 {stats.get('limit_up',0)} | 跌停 {stats.get('limit_down',0)} | "
-                        f"成交额 {stats.get('total_amount_yi',0):.0f} 亿"
-                    ),
-                },
-            },
-            {"tag": "hr"},
-            {
-                "tag": "div",
-                "text": {"tag": "lark_md", "content": f"**🎯 玉姐精选 Top {len(cands)}**"},
-            },
-            {"tag": "div", "text": {"tag": "lark_md", "content": cand_block}},
-            {"tag": "hr"},
-            {
-                "tag": "div",
-                "text": {"tag": "lark_md", "content": "**🤖 AI 综合分析**"},
-            },
-            {"tag": "div", "text": {"tag": "lark_md", "content": ai_text or "(AI 调用失败)"},
-             },
-        ],
+        "elements": elements,
     }
 
 
@@ -328,38 +345,40 @@ def build_afterclose_card(stats, picks, sector_lines, ai_summary, now=None):
     sector_block = "\n".join(sector_lines) if sector_lines else "(板块资金流抓取失败)"
 
     ai_text = (ai_summary or "").strip()
-    if len(ai_text) > 800:
-        ai_text = ai_text[:800] + "..."
 
+    elements = [
+        {
+            "tag": "div",
+            "text": {
+                "tag": "lark_md",
+                "content": (
+                    f"**市场情绪: {mood}**\n"
+                    f"总数 {stats.get('total',0)} | 涨 {up} / 跌 {dn} / 平 {stats.get('flat',0)}\n"
+                    f"涨停 {stats.get('limit_up',0)} | 跌停 {stats.get('limit_down',0)} | "
+                    f"成交额 {stats.get('total_amount_yi',0):.0f} 亿"
+                ),
+            },
+        },
+        {"tag": "hr"},
+        {"tag": "div", "text": {"tag": "lark_md", "content": "**💰 板块资金流(全日)**"}},
+        {"tag": "div", "text": {"tag": "lark_md", "content": sector_block}},
+        {"tag": "hr"},
+        {"tag": "div", "text": {"tag": "lark_md", "content": f"**🎯 早盘玉姐精选复盘 Top {len(picks[:5])}**"}},
+        {"tag": "div", "text": {"tag": "lark_md", "content": pick_block}},
+        {"tag": "hr"},
+        {"tag": "div", "text": {"tag": "lark_md", "content": "**🤖 AI 盘后复盘**"}},
+    ]
+    elements.extend(
+        {"tag": "div", "text": {"tag": "lark_md", "content": chunk}}
+        for chunk in split_card_text(ai_text or "(AI 调用失败)")
+    )
     return {
         "config": {"wide_screen": True},
         "header": {
             "title": {"tag": "plain_text", "content": f"📊 A股盘后复盘 {date_str}"},
             "template": tmpl,
         },
-        "elements": [
-            {
-                "tag": "div",
-                "text": {
-                    "tag": "lark_md",
-                    "content": (
-                        f"**市场情绪: {mood}**\n"
-                        f"总数 {stats.get('total',0)} | 涨 {up} / 跌 {dn} / 平 {stats.get('flat',0)}\n"
-                        f"涨停 {stats.get('limit_up',0)} | 跌停 {stats.get('limit_down',0)} | "
-                        f"成交额 {stats.get('total_amount_yi',0):.0f} 亿"
-                    ),
-                },
-            },
-            {"tag": "hr"},
-            {"tag": "div", "text": {"tag": "lark_md", "content": "**💰 板块资金流(全日)**"}},
-            {"tag": "div", "text": {"tag": "lark_md", "content": sector_block}},
-            {"tag": "hr"},
-            {"tag": "div", "text": {"tag": "lark_md", "content": f"**🎯 早盘玉姐精选复盘 Top {len(picks[:5])}**"}},
-            {"tag": "div", "text": {"tag": "lark_md", "content": pick_block}},
-            {"tag": "hr"},
-            {"tag": "div", "text": {"tag": "lark_md", "content": "**🤖 AI 盘后复盘**"}},
-            {"tag": "div", "text": {"tag": "lark_md", "content": ai_text or "(AI 调用失败)"}},
-        ],
+        "elements": elements,
     }
 
 

@@ -122,9 +122,10 @@ class TestAfterClose:
                   "rank": 1, "pct": 2.5}]
         card = feishu.build_afterclose_card(stats, picks, ["行业Top5: 白酒"], "AI 总结" * 500)
         assert card["header"]["title"]["content"].startswith("📊 A股盘后复盘")
-        # AI 摘要超长截断
+        # AI 摘要超长时应拆成多个 div,不截断
         ai_div = [e for e in card["elements"] if isinstance(e.get("text"), dict)]
-        assert any("..." in d["text"]["content"] for d in ai_div if len(d["text"]["content"]) > 800)
+        joined = "".join(d["text"]["content"] for d in ai_div)
+        assert "AI 总结" * 500 in joined.replace("\n", "")
         assert any("贵州茅台" in d["text"]["content"] for d in ai_div)
 
     def test_save_afterclose_report(self, tmp_path):
