@@ -10,24 +10,20 @@
 """
 
 import argparse
-import json
 import sqlite3
 from datetime import datetime
 from pathlib import Path
 
+import config_store
+
 BASE = Path(__file__).parent
 WATCHLIST_DB = BASE / "agent_watchlist.db"
 PORTFOLIO_DB = BASE / "portfolio.db"
-CONFIG_PATH = BASE / "config.json"
 
 
 def load_group_watchlist() -> list[dict]:
     """读群共享自选池(config.json chat_id 对应的 group key)。"""
-    try:
-        cfg = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-        chat_id = (cfg.get("feishu") or {}).get("chat_id", "")
-    except Exception:
-        chat_id = ""
+    chat_id = config_store.get_section("feishu").get("chat_id", "")
     if not chat_id:
         return []
     group_key = f"group:{chat_id}"
@@ -45,11 +41,7 @@ def load_group_watchlist() -> list[dict]:
 
 def load_chat_positions() -> list[dict]:
     """读本群所有用户的持仓(按 chat_id 前缀匹配)。"""
-    try:
-        cfg = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-        chat_id = (cfg.get("feishu") or {}).get("chat_id", "")
-    except Exception:
-        return []
+    chat_id = config_store.get_section("feishu").get("chat_id", "")
     if not chat_id:
         return []
     try:

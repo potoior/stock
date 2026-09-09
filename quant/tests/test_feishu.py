@@ -4,6 +4,7 @@ import json
 import time
 from unittest.mock import patch
 
+import config_store
 import feishu
 
 
@@ -24,12 +25,15 @@ class FakeResponse:
 def _mock_config(tmp_path, monkeypatch, cfg):
     cfg_path = tmp_path / "config.json"
     cfg_path.write_text(json.dumps({"feishu": cfg}, ensure_ascii=False), encoding="utf-8")
-    monkeypatch.setattr(feishu, "CONFIG_PATH", cfg_path)
+    monkeypatch.setattr(config_store, "CONFIG_PATH", cfg_path)
 
 
 def test_load_feishu_config_missing(tmp_path, monkeypatch):
-    monkeypatch.setattr(feishu, "CONFIG_PATH", tmp_path / "no.json")
-    assert feishu._load_feishu_config() == {}
+    monkeypatch.setattr(config_store, "CONFIG_PATH", tmp_path / "no.json")
+    # config.json 缺失时自动用 config.example.json 初始化(统一行为)
+    cfg = feishu._load_feishu_config()
+    assert "app_id" in cfg
+    assert "chat_id" in cfg
 
 
 def test_load_feishu_config_ok(tmp_path, monkeypatch):

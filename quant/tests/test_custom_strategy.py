@@ -9,6 +9,7 @@
 import pandas as pd
 import pytest
 
+import config_store
 import strategy_engine as se
 
 
@@ -175,8 +176,8 @@ def test_validate_compiled_bad_op():
 def tmp_config(tmp_path, monkeypatch):
     """临时 config.json + 清空配置缓存。"""
     cfg_path = tmp_path / "config.json"
-    monkeypatch.setattr(se, "CONFIG_PATH", cfg_path)
-    monkeypatch.setattr(se, "_config_cache", {"mtime": 0, "data": None})
+    monkeypatch.setattr(config_store, "CONFIG_PATH", cfg_path)
+    monkeypatch.setattr(config_store, "_cache", {"key": None, "data": None})
     se.save_strategies([
         {
             "id": "custom_ai_demo",
@@ -188,7 +189,7 @@ def tmp_config(tmp_path, monkeypatch):
         }
     ])
     yield cfg_path
-    monkeypatch.setattr(se, "_config_cache", {"mtime": 0, "data": None})
+    monkeypatch.setattr(config_store, "_cache", {"key": None, "data": None})
 
 
 def test_compile_success(tmp_config, monkeypatch):

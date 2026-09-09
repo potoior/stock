@@ -34,9 +34,9 @@ import urllib.request
 from datetime import datetime
 from pathlib import Path
 
-log = logging.getLogger("quant")
+import config_store
 
-CONFIG_PATH = Path(__file__).parent / "config.json"
+log = logging.getLogger("quant")
 
 FEISHU_HOST = "https://open.feishu.cn"
 TOKEN_URL = FEISHU_HOST + "/open-apis/auth/v3/tenant_access_token/internal"
@@ -47,13 +47,7 @@ DEFAULT_TIMEOUT = 10
 
 def _load_feishu_config():
     """读 config.json -> feishu,缺失返回空字典。"""
-    if not CONFIG_PATH.exists():
-        return {}
-    try:
-        cfg = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-        return cfg.get("feishu") or {}
-    except Exception:
-        return {}
+    return config_store.get_section("feishu")
 
 
 class FeishuBot:

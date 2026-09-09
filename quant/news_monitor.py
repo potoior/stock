@@ -12,18 +12,17 @@
 
 import argparse
 import hashlib
-import json
 import sqlite3
 import time
 from datetime import datetime
 from pathlib import Path
 
+import config_store
 from news_digest import fetch_stock_news
 
 BASE = Path(__file__).parent
 DB_PATH = BASE / "news_monitor.db"
 WATCHLIST_DB = BASE / "agent_watchlist.db"
-CONFIG_PATH = BASE / "config.json"
 
 # 标题关键词分类
 POSITIVE_KW = ["增持", "回购", "中标", "预增", "扭亏", "突破", "创新高", "涨停", "签约", "订单", "利好"]
@@ -71,11 +70,7 @@ def within_hours(time_str: str, hours: int = MAX_AGE_HOURS) -> bool:
 
 def load_group_watchlist() -> list[dict]:
     """读群共享自选池(config.json chat_id 对应的 group key)。"""
-    try:
-        cfg = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-        chat_id = (cfg.get("feishu") or {}).get("chat_id", "")
-    except Exception:
-        chat_id = ""
+    chat_id = config_store.get_section("feishu").get("chat_id", "")
     if not chat_id:
         return []
     group_key = f"group:{chat_id}"

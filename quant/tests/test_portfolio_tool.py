@@ -5,6 +5,7 @@
 
 import sqlite3
 
+import config_store
 import feishu_bot
 import watchlist_check
 
@@ -145,7 +146,7 @@ def test_check_no_data(tmp_path, monkeypatch):
     """无持仓无自选 → None。"""
     monkeypatch.setattr(watchlist_check, "PORTFOLIO_DB", tmp_path / "p.db")
     monkeypatch.setattr(watchlist_check, "WATCHLIST_DB", tmp_path / "w.db")
-    monkeypatch.setattr(watchlist_check, "CONFIG_PATH", tmp_path / "c.json")
+    monkeypatch.setattr(config_store, "CONFIG_PATH", tmp_path / "c.json")
     assert watchlist_check.build_card([], []) is None
 
 
@@ -181,7 +182,7 @@ def test_check_load_positions(tmp_path, monkeypatch):
     db = tmp_path / "portfolio.db"
     monkeypatch.setattr(watchlist_check, "PORTFOLIO_DB", db)
     monkeypatch.setattr(
-        watchlist_check, "CONFIG_PATH", tmp_path / "config.json",
+        config_store, "CONFIG_PATH", tmp_path / "config.json",
     )
     (tmp_path / "config.json").write_text(
         '{"feishu": {"chat_id": "oc_123"}}', encoding="utf-8"

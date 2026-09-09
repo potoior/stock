@@ -55,7 +55,7 @@ def test_score_stock_score_in_expected_range(mock_data):
 
 def test_get_params_returns_defaults(monkeypatch, tmp_path):
     # CONFIG_PATH 不存在时回退到 DEFAULT_PARAMS
-    monkeypatch.setattr("yujie_scan.CONFIG_PATH", tmp_path / "no_config.json")
+    monkeypatch.setattr("config_store.CONFIG_PATH", tmp_path / "no_config.json")
     p = yujie_scan.get_params()
     assert p == yujie_scan.DEFAULT_PARAMS
 
@@ -63,7 +63,7 @@ def test_get_params_returns_defaults(monkeypatch, tmp_path):
 def test_get_params_merges_saved(monkeypatch, tmp_path):
     cfg_path = tmp_path / "config.json"
     cfg_path.write_text('{"yujie": {"scope": {"min_amount_yi": 1.5}}}', encoding="utf-8")
-    monkeypatch.setattr("yujie_scan.CONFIG_PATH", cfg_path)
+    monkeypatch.setattr("config_store.CONFIG_PATH", cfg_path)
     p = yujie_scan.get_params()
     # 覆盖生效
     assert p["scope"]["min_amount_yi"] == 1.5
@@ -74,7 +74,7 @@ def test_get_params_merges_saved(monkeypatch, tmp_path):
 
 def test_save_params_roundtrip(monkeypatch, tmp_path):
     cfg_path = tmp_path / "config.json"
-    monkeypatch.setattr("yujie_scan.CONFIG_PATH", cfg_path)
+    monkeypatch.setattr("config_store.CONFIG_PATH", cfg_path)
     new_params = yujie_scan.get_params()
     new_params["macd"]["golden_score"] = 5
     yujie_scan.save_params(new_params)

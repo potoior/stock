@@ -11,21 +11,17 @@ import httpx
 import numpy as np
 import pandas as pd
 
+import config_store
 from data_fetcher import fetch_realtime  # re-export: 保持 se.fetch_realtime 向后兼容
 
 log = logging.getLogger("quant")
 
 ENGINE_HOME = Path(__file__).parent
 CACHE_DB = ENGINE_HOME / "stock_cache.db"
-CONFIG_PATH = ENGINE_HOME / "config.json"
 
 # 模块级一次性建表 + WAL,避免每次 connect 都 CREATE TABLE,且 16 线程并发不阻塞
 _daily_table_inited = False
 _daily_table_lock = threading.Lock()
-
-# config.json 进程级缓存（mtime 比较）
-_config_cache = {"mtime": 0, "data": None}
-_config_lock = threading.Lock()
 
 # 线程局部 sqlite 连接复用（避免 1700+ 次 connect/close 开销）
 _tl = threading.local()
@@ -267,39 +263,11 @@ from strategy_indicators import (  # noqa: E402,F401  (re-export 保持兼容)
 
 
 def _load_config():
-    with _config_lock:
-        if CONFIG_PATH.exists():
-            try:
-                mtime = CONFIG_PATH.stat().st_mtime
-                if mtime == _config_cache["mtime"] and _config_cache["data"] is not None:
-                    return _config_cache["data"]
-                data = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-                _config_cache["mtime"] = mtime
-                _config_cache["data"] = data
-                return data
-            except Exception:
-                pass
-        example = ENGINE_HOME / "config.example.json"
-        if example.exists():
-            try:
-                _save_config(json.loads(example.read_text(encoding="utf-8")))
-                # 重新读一次填充缓存
-                data = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-                _config_cache["mtime"] = CONFIG_PATH.stat().st_mtime
-                _config_cache["data"] = data
-                return data
-            except Exception:
-                pass
-    return {}
+    return config_store.load_config()
 
 
 def _save_config(cfg):
-    CONFIG_PATH.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
-    try:
-        _config_cache["mtime"] = CONFIG_PATH.stat().st_mtime
-        _config_cache["data"] = cfg
-    except Exception:
-        pass
+    config_store.save_config(cfg)
 
 
 # ---------------- AI 判定缓存（当日） ----------------

@@ -46,6 +46,8 @@ from lark_oapi.api.im.v1 import (
     P2ImMessageReceiveV1,
 )
 
+import config_store
+
 # 日志: 控制台 + 轮转文件(5MB×3,总上限 15MB)
 _log_dir = Path("/tmp")
 _log_file = _log_dir / "feishu_bot.log"
@@ -60,7 +62,6 @@ logging.basicConfig(
 log = logging.getLogger("feishu_bot")
 
 ENGINE_HOME = Path(__file__).parent
-CONFIG_PATH = ENGINE_HOME / "config.json"
 REPORTS_DIR = ENGINE_HOME / "reports"
 AGENT_DB = ENGINE_HOME / "agent_data.db"
 
@@ -655,9 +656,7 @@ def portfolio_clear(session_id: str) -> str:
 
 
 def load_config():
-    if not CONFIG_PATH.exists():
-        return {}
-    return json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+    return config_store.load_config()
 
 
 # ============ 命令分发 ============

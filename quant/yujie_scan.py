@@ -31,9 +31,9 @@ from pathlib import Path
 
 import pandas as pd
 
+import config_store
 from daily_scan import fetch_market_all, norm_code
 from strategy_engine import (
-    CONFIG_PATH,
     compute_macd,
     compute_mos_lows,
     compute_rsi,
@@ -92,13 +92,7 @@ DEFAULT_PARAMS = {
 
 
 def get_params():
-    cfg = {}
-    if CONFIG_PATH.exists():
-        try:
-            cfg = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-        except Exception:
-            cfg = {}
-    saved = cfg.get("yujie", {}) or {}
+    saved = config_store.get_section("yujie")
 
     def _merge(defaults, saved_sub):
         out = dict(defaults)
@@ -115,14 +109,7 @@ def get_params():
 
 def save_params(new_params):
     """合并保存参数到 config.json -> yujie"""
-    cfg = {}
-    if CONFIG_PATH.exists():
-        try:
-            cfg = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-        except Exception:
-            cfg = {}
-    cfg["yujie"] = new_params
-    CONFIG_PATH.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+    config_store.set_section("yujie", new_params)
 
 
 # ---------------- 打分逻辑 ----------------

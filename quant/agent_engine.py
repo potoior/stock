@@ -10,41 +10,24 @@ AI_DB = ENGINE_HOME / "agent_data_ai.db"
 RULE_DB = ENGINE_HOME / "agent_data_rule.db"
 YUJIE_DB = ENGINE_HOME / "agent_data_yujie.db"
 LOG_DB = ENGINE_HOME / "agent_data.db"
-CONFIG_PATH = ENGINE_HOME / "config.json"
 
+import config_store
 import strategy_engine as se
 from executor import SimExecutor, is_market_open
 
 
 def _load_yujie_agent_config() -> dict:
-    """读 config.json -> yujie_agent，缺省回退默认。"""
+    """读 config.json -> yujie_agent,缺省回退默认。"""
+    saved = config_store.get_section("yujie_agent")
     default = {"min_score": 5, "max_hold_days": 20}
-    try:
-        if CONFIG_PATH.exists():
-            cfg = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-            saved = cfg.get("yujie_agent", {})
-            if isinstance(saved, dict):
-                for k in ("min_score", "max_hold_days"):
-                    if k in saved:
-                        default[k] = saved[k]
-    except Exception:
-        pass
+    for k in ("min_score", "max_hold_days"):
+        if k in saved:
+            default[k] = saved[k]
     return default
 
 
 def _save_yujie_agent_config(updates: dict) -> dict:
-    cfg = {}
-    try:
-        if CONFIG_PATH.exists():
-            cfg = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-    except Exception:
-        cfg = {}
-    cur = cfg.get("yujie_agent", {})
-    if not isinstance(cur, dict):
-        cur = {}
-    cur.update(updates)
-    cfg["yujie_agent"] = cur
-    CONFIG_PATH.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+    config_store.update_section("yujie_agent", updates)
     return _load_yujie_agent_config()
 
 
