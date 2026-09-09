@@ -241,8 +241,40 @@ def split_reasoning(out: str, n_events: int) -> list[str]:
     return [chunks.get(i, "") for i in range(1, n_events + 1)]
 
 
+def digest_news(news: list, decider, skip_titles: set | None = None) -> str:
+    """LLM 把剩余新闻按主题分类成速览清单(广度补充)。"""
+    skip = skip_titles or set()
+    items = [n for n in news if (n.get("summary") or n.get("title", ""))[:30] not in skip]
+    if not items:
+        return ""
+    lines = [
+        f"{i}. [{n.get('time','')}] {n.get('summary') or n.get('title','')}"
+        for i, n in enumerate(items, 1)
+    ]
+    prompt = f"""把下面的新闻按主题分类整理成速览清单(如: 宏观政策/行业动态/公司公告/海外市场/大宗商品等,类别按内容自定)。
+
+要求:
+- 过滤纯市场综述、观点评论、广告、重复内容
+- 每条一行: 时间 + 标题(保留关键信息)
+- 按类别用 ### 标题分组,没有可归类新闻的类别不要出现
+
+新闻列表:
+{chr(10).join(lines)}
+
+直接输出清单,不要思考过程和其他解释。"""
+    try:
+        raw = decider.generate(prompt, timeout=120)
+    except Exception as e:
+        log.warning("digest_news LLM 失败: %s", e)
+        return ""
+    # 剥离推理模型的思考过程
+    return re.split(
+        r"\n\s*(?:Thinking\s*Process|推理过程|好的[，,])", raw.strip(), maxsplit=1
+    )[0].strip()
+
+
 def run(news_limit=100, max_events=5, decider=None):
-    """主流程:新闻 → 事件 → 接地 → 推理。返回 events(含 reasoning)。"""
+    """主流程:新闻 → 事件 → 接地 → 推理。返回 (events, digest)。"""
     from ai_decider import AIDecider
     from news_digest import fetch_news
 
@@ -253,14 +285,14 @@ def run(news_limit=100, max_events=5, decider=None):
     news = fetch_news(news_limit)
     if not news:
         print("未抓到新闻")
-        return []
+        return [], ""
     print(f"新闻 {len(news)} 条")
 
     print("LLM 第一段推理: 筛选事件...")
     events = extract_events(news, decider, max_events=max_events)[:max_events]
     if not events:
         print("无可交易事件")
-        return []
+        return [], ""
     print(f"筛出 {len(events)} 个事件")
 
     print("数据接地: 概念 → 真实成分股...")
@@ -278,11 +310,31 @@ def run(news_limit=100, max_events=5, decider=None):
     reasoning = reason_events(events, decider)
     for ev, chunk in zip(events, split_reasoning(reasoning, len(events)), strict=True):
         ev["reasoning"] = chunk
-    return events
+
+    # 广度补充: 其余新闻按主题分类速览
+    skip = {ev.get("news", {}).get("summary", "")[:30] for ev in events}
+    skip |= {ev.get("news", {}).get("title", "") for ev in events}
+    print("LLM 第三段: 要闻速览分类...")
+    digest = digest_news(news, decider, skip_titles=skip)
+    return events, digest
 
 
-def build_card(events: list, now=None) -> dict:
-    """构造飞书卡片。"""
+def _split_card_content(text: str, size: int = 3000) -> list[str]:
+    """按行切分为多个卡片 div,避免飞书单元素过长展示异常。"""
+    parts, cur = [], ""
+    for line in text.split("\n"):
+        if cur and len(cur) + len(line) + 1 > size:
+            parts.append(cur)
+            cur = line
+        else:
+            cur = f"{cur}\n{line}" if cur else line
+    if cur:
+        parts.append(cur)
+    return parts or [text[:size]]
+
+
+def build_card(events: list, now=None, digest: str = "") -> dict:
+    """构造飞书卡片。digest 为其余新闻的主题速览(可空)。"""
     if now is None:
         now = datetime.now()
     sections = []
@@ -291,6 +343,9 @@ def build_card(events: list, now=None) -> dict:
         sections.append(
             f"**事件{i}: {ev['event']}**({ev['direction']} | 板块: {boards})\n\n{ev.get('reasoning', '')}"
         )
+    if digest:
+        sections.append(f"**📰 其余要闻速览**\n\n{digest}")
+    content = "\n\n---\n\n".join(sections)
     return {
         "config": {"wide_screen": True},
         "header": {
@@ -298,18 +353,22 @@ def build_card(events: list, now=None) -> dict:
             "template": "violet",
         },
         "elements": [
-            {"tag": "div", "text": {"tag": "lark_md", "content": ("\n\n---\n\n".join(sections))[:4000]}},
+            {"tag": "div", "text": {"tag": "lark_md", "content": chunk}}
+            for chunk in _split_card_content(content)
         ],
     }
 
 
-def format_text(events: list) -> str:
+def format_text(events: list, digest: str = "") -> str:
     """Bot 用的纯文本输出。"""
     lines = []
     for i, ev in enumerate(events, 1):
         lines.append(f"### 事件{i}: {ev['event']}({ev['direction']})")
         lines.append(ev.get("reasoning", ""))
         lines.append("")
+    if digest:
+        lines.append("### 📰 其余要闻速览")
+        lines.append(digest)
     return "\n".join(lines)
 
 
@@ -321,10 +380,10 @@ def main():
     ap.add_argument("--dry-run", action="store_true", help="只打印不推送")
     args = ap.parse_args()
 
-    events = run()
+    events, digest = run()
     if not events:
         return
-    print("\n" + format_text(events))
+    print("\n" + format_text(events, digest))
     if args.dry_run:
         print("\n(dry-run, 不推送)")
         return
@@ -334,7 +393,7 @@ def main():
     if not bot.enabled:
         print("feishu 未启用,跳过推送")
         return
-    resp = bot.send_card(build_card(events))
+    resp = bot.send_card(build_card(events, digest=digest))
     print("飞书推送" + ("成功" if resp and resp.get("code") == 0 else f"失败 {resp}"))
 
 

@@ -148,3 +148,46 @@ def test_format_text_no_duplication():
     out = nr.format_text(events)
     assert out.count("推理1") == 1
     assert out.count("推理2") == 1
+
+
+# ---------------- digest_news / build_card / _split_card_content ----------------
+
+
+def test_digest_news_classifies():
+    """digest_news 应把新闻传给 LLM 并返回分类清单。"""
+    news = [
+        {"title": "t1", "summary": "央行降准", "time": "2026-09-07 10:00"},
+        {"title": "t2", "summary": "公司中标", "time": "2026-09-07 11:00"},
+    ]
+    out = nr.digest_news(news, FakeDecider("### 宏观\n- 10:00 央行降准\n"))
+    assert "宏观" in out
+
+
+def test_digest_news_skips_selected():
+    """已深度分析过的新闻不应再出现在速览里。"""
+    news = [
+        {"title": "t1", "summary": "央行降准", "time": "2026-09-07 10:00"},
+        {"title": "t2", "summary": "公司中标", "time": "2026-09-07 11:00"},
+    ]
+    out = nr.digest_news(news, FakeDecider("清单"), skip_titles={"央行降准"})
+    assert "清单" in out  # 正常返回(跳过逻辑不炸)
+
+
+def test_digest_news_empty():
+    assert nr.digest_news([], FakeDecider("x")) == ""
+
+
+def test_build_card_with_digest():
+    events = [{"event": "E1", "direction": "利好", "boards": {}, "reasoning": "r"}]
+    card = nr.build_card(events, digest="### 宏观\n- 10:00 某新闻")
+    content = "".join(el["text"]["content"] for el in card["elements"])
+    assert "其余要闻速览" in content
+    assert "某新闻" in content
+
+
+def test_split_card_content_no_truncate():
+    """内容超 3000 字应切多个 div,不截断丢失。"""
+    text = "行内容\n" * 800  # 3200 字
+    parts = nr._split_card_content(text, size=3000)
+    assert len(parts) > 1
+    assert "".join(p.replace("\n", "") for p in parts).count("行内容") == 800

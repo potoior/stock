@@ -2461,10 +2461,10 @@ def handler_analyze_news_impact() -> str:
         import news_reasoning
         from ai_decider import AIDecider
 
-        events = news_reasoning.run(decider=AIDecider())
+        events, digest = news_reasoning.run(decider=AIDecider())
         if not events:
             return "今日新闻中未发现具有明确驱动逻辑的可交易事件。"
-        return news_reasoning.format_text(events)
+        return news_reasoning.format_text(events, digest)
     except Exception as e:
         log.error("analyze_news_impact 异常: %s\n%s", e, traceback.format_exc())
         return f"❌ 新闻因果推理失败: {e}"
