@@ -30,30 +30,33 @@ def _http_get(url, referer):
 
 
 def fetch_sina_news(num=30):
-    """新浪财经滚动新闻，intime 为 epoch 秒。"""
-    url = f"https://feed.mix.sina.com.cn/api/roll/get?rnd=1&pageid=153&lid=2509&k=&num={num}&page=1"
-    raw = _http_get(url, "https://finance.sina.com.cn/").decode("utf-8", "replace")
-    try:
-        items = json.loads(raw)["result"]["data"]
-    except Exception:
-        return []
+    """新浪财经滚动新闻，intime 为 epoch 秒。单页上限 50,自动翻页凑够 num。"""
     out = []
-    for it in items:
-        ts = it.get("intime")
+    for page in range(1, max(1, (num + 49) // 50) + 1):
+        url = f"https://feed.mix.sina.com.cn/api/roll/get?rnd=1&pageid=153&lid=2509&k=&num=50&page={page}"
         try:
-            dt = datetime.fromtimestamp(int(ts)) if ts else datetime.now()
+            raw = _http_get(url, "https://finance.sina.com.cn/").decode("utf-8", "replace")
+            items = json.loads(raw)["result"]["data"]
         except Exception:
-            dt = datetime.now()
-        out.append(
-            {
-                "title": (it.get("title") or "").strip(),
-                "summary": (it.get("summary") or "").strip()[:120],
-                "time": dt.strftime("%Y-%m-%d %H:%M"),
-                "source": "新浪财经",
-                "url": it.get("url") or "",
-            }
-        )
-    return out
+            break
+        for it in items:
+            ts = it.get("intime")
+            try:
+                dt = datetime.fromtimestamp(int(ts)) if ts else datetime.now()
+            except Exception:
+                dt = datetime.now()
+            out.append(
+                {
+                    "title": (it.get("title") or "").strip(),
+                    "summary": (it.get("summary") or "").strip()[:120],
+                    "time": dt.strftime("%Y-%m-%d %H:%M"),
+                    "source": "新浪财经",
+                    "url": it.get("url") or "",
+                }
+            )
+        if len(items) < 50:
+            break
+    return out[:num]
 
 
 def fetch_em_news(num=30):

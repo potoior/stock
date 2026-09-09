@@ -135,7 +135,7 @@ def _extract_json(text: str):
         return None
 
 
-def extract_events(news: list, decider) -> list[dict]:
+def extract_events(news: list, decider, max_events: int = 5) -> list[dict]:
     """LLM 第一段推理:从新闻中筛选可交易事件。"""
     lines = []
     for i, n in enumerate(news, 1):
@@ -150,7 +150,7 @@ def extract_events(news: list, decider) -> list[dict]:
 - 每个事件给出受益/受损的 A 股概念板块(用东财标准概念名,如: 低空经济、CPO、半导体、军工、粮食概念)
 - significance: 事件对相关板块的影响力 1-10
 
-输出 JSON 数组(按影响力降序,最多 3 个,没有合格事件输出 []):
+输出 JSON 数组(按影响力降序,最多 {max_events} 个,没有合格事件输出 []):
 [{{"idx": 1, "event": "事件一句话", "direction": "利好|利空|中性", "concepts": ["概念名", "概念名"], "significance": 8}}]
 
 只输出 JSON,不要其他文字。"""
@@ -241,7 +241,7 @@ def split_reasoning(out: str, n_events: int) -> list[str]:
     return [chunks.get(i, "") for i in range(1, n_events + 1)]
 
 
-def run(news_limit=30, max_events=3, decider=None):
+def run(news_limit=100, max_events=5, decider=None):
     """主流程:新闻 → 事件 → 接地 → 推理。返回 events(含 reasoning)。"""
     from ai_decider import AIDecider
     from news_digest import fetch_news
@@ -257,7 +257,7 @@ def run(news_limit=30, max_events=3, decider=None):
     print(f"新闻 {len(news)} 条")
 
     print("LLM 第一段推理: 筛选事件...")
-    events = extract_events(news, decider)[:max_events]
+    events = extract_events(news, decider, max_events=max_events)[:max_events]
     if not events:
         print("无可交易事件")
         return []
