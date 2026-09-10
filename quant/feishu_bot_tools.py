@@ -173,6 +173,75 @@ TOOLS = [
             }
         }
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "manage_alerts",
+            "description": "管理到价提醒(盘中自动监控,触发后推送通知,触发一次后失效)。用户说'X跌破Y提醒我'/'X涨到Y提醒我'/'删除提醒'/'我的提醒'时调用。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["add", "remove", "list"],
+                        "description": "add=设置提醒 remove=删除提醒 list=列出所有提醒"
+                    },
+                    "code": {
+                        "type": "string",
+                        "description": "股票代码或名称,如 '600519' 或 '茅台'。list 可省略"
+                    },
+                    "price": {
+                        "type": "number",
+                        "description": "目标价格。add 必填"
+                    },
+                    "op": {
+                        "type": "string",
+                        "enum": ["above", "below"],
+                        "description": "above=涨到 price 时提醒, below=跌破 price 时提醒。省略则按当前价自动推断"
+                    }
+                },
+                "required": ["action"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "journal",
+            "description": "交易日记。用户说'记一笔/帮我记一下:买入X'/'我上次买的什么'/'这周的交易'时调用。记录买卖决策并自动关联后续走势。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["add", "buy", "sell", "note", "list"],
+                        "description": "buy/sell/note=记录对应类型, add=记录(note的别名,按内容判断), list=查询"
+                    },
+                    "code": {
+                        "type": "string",
+                        "description": "股票代码或名称。list 可省略"
+                    },
+                    "price": {
+                        "type": "number",
+                        "description": "成交价格,0=未提供"
+                    },
+                    "qty": {
+                        "type": "number",
+                        "description": "数量(股),0=未提供"
+                    },
+                    "note": {
+                        "type": "string",
+                        "description": "备注,如买入理由"
+                    },
+                    "days": {
+                        "type": "number",
+                        "description": "list 时过滤最近 N 天,0=全部"
+                    }
+                },
+                "required": ["action"]
+            }
+        }
+    },
     # ---------- 策略管理 skill ----------
     {
         "type": "function",

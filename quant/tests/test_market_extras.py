@@ -421,10 +421,10 @@ def test_scan_with_yujie_in_slow_tools():
 
 
 def test_tool_count_32():
-    """工具总数应为 35(34 旧 + 1 策略总管)。"""
+    """工具总数应为 38(36 + 到价提醒 + 交易日记)。"""
     import feishu_bot
-    assert len(feishu_bot.TOOLS) == 36
-    assert len(feishu_bot.TOOL_HANDLERS) == 36
+    assert len(feishu_bot.TOOLS) == 38
+    assert len(feishu_bot.TOOL_HANDLERS) == 38
 
 
 # ---------------- 板块资金流 / 市场情绪 ----------------

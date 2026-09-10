@@ -9,7 +9,7 @@ A 股量化分析系统,集成飞书群聊 Bot(Function Calling ReAct Agent),覆
 - 45 内置策略信号引擎(MACD/KDJ/BOLL/RSI/玉姐 10 条规则 + 操练大全12/14/15/16/17/20章 + 漫画书量能/实战战法等)
 - 玉姐精选全市场扫描(多因子评分排行)
 - 回测 + 参数网格寻优
-- **飞书 Bot Agent(36 个工具,跨轮记忆,自选股,群共享自选股,财务数据,板块分析,历史复盘,策略选股,个股新闻,龙虎榜,北向资金,主力资金流,板块反查,指数行情,板块资金流,市场情绪,多策略组合回测,条件选股)
+- **飞书 Bot Agent(38 个工具,跨轮记忆,自选股,群共享自选股,财务数据,板块分析,历史复盘,策略选股,个股新闻,龙虎榜,北向资金,主力资金流,板块反查,指数行情,板块资金流,市场情绪,多策略组合回测,条件选股)
 - 策略大全(4 来源 73 策略:漫画书 29 + 操练大全 32 + 玉姐 10 + AI 2,已实现 72 个)
 
 ## 目录结构
@@ -17,9 +17,12 @@ A 股量化分析系统,集成飞书群聊 Bot(Function Calling ReAct Agent),覆
 ```
 quant/
 ├── feishu_bot.py          # 飞书长连接 Agent(~1200 行:Agent 循环/WS 客户端/历史/审计)
-├── bot_handlers.py        # 36 个工具 handler + TOOL_HANDLERS 注册表(~2400 行)
+├── bot_handlers.py        # 38 个工具 handler + TOOL_HANDLERS 注册表(~2400 行)
 ├── bot_context.py         # thread-local 会话上下文 + 运行统计(handler 与 agent 共用)
 ├── config_store.py        # config.json 唯一读写入口(原子写 + mtime 缓存)
+├── journal.py             # 交易日记(记录买卖决策,查询附带实时盈亏)
+├── signal_tracker.py      # 策略信号绩效跟踪(落库/评估/周报)
+├── weekly_report.py       # 每周战报(周日 18:00 推送)
 ├── strategy_conditions.py # 自定义策略条件层(指标白名单/确定性评估/编译校验,纯逻辑)
 ├── feishu_image.py        # matplotlib 图表(K 线/玉姐/回测/市场)
 ├── feishu.py              # 飞书 webhook 推送(日报/告警)
@@ -35,6 +38,7 @@ quant/
 ├── watchlist_check.py     # 持仓与自选每日体检(盈亏+卖出信号,15:30 推送)
 ├── strategy_library.json  # 策略大全(4 来源 73 策略)
 ├── data_fetcher.py        # 数据获取(腾讯/新浪)
+├── alerts.py              # 到价提醒(盘中监控,timer 每 5 分钟)
 ├── api.py                 # FastAPI 服务(/api/* 端点)
 ├── dashboard.py           # Gradio 看板
 ├── ai_decider.py          # AI 决策器(本地网关 LLM)
@@ -98,6 +102,8 @@ systemctl --user list-timers daily-afterclose.timer news-monitor.timer
 - **news-monitor**: `news-monitor.timer`(Mon-Fri 11:45/20:30) 群共享自选池新闻监控推送,日志写 `/tmp/news_monitor.log`
 - **news-reasoning**: `news-reasoning.timer`(Mon-Fri 21:30) 新闻掘金·因果推理推送,日志写 `/tmp/news_reasoning.log`
 - **watchlist-check**: `watchlist-check.timer`(Mon-Fri 15:30) 持仓与自选股体检推送,日志写 `/tmp/watchlist_check.log`
+- **price-alert**: `price-alert.timer`(Mon-Fri 每 5 分钟,脚本自判盘中时段) 到价提醒盘中监控,日志写 `/tmp/price_alert.log`
+- **weekly-report**: `weekly-report.timer`(Sun 18:00) 每周战报(指数+自选周涨跌+信号绩效+交易日记),日志写 `/tmp/weekly_report.log`
 - 配置文件 `config.json` 和 `.env` 在 `.gitignore` 中,**不要提交**
 
 ### 测试
@@ -107,12 +113,14 @@ systemctl --user list-timers daily-afterclose.timer news-monitor.timer
 
 ### Agent 设计
 - **Function Calling ReAct**: LLM 自主决策调工具,失败降级到 `route()` 关键词路由
-- **36 个 skill**: 4 数据查询 + 6 策略查询 + 4 策略操作 + 5 回测寻优(含组合回测) + 1 自选股(含群共享/批量分析) + 1 财务 + 3 批量(对比/板块/历史复盘) + 2 新闻 + 7 市场数据(龙虎榜/北向/主力资金流/板块反查/指数/板块资金流/市场情绪) + 3 条件选股(条件筛选 + 一句话选股)
+- **38 个 skill**: 4 数据查询 + 6 策略查询 + 4 策略操作 + 5 回测寻优(含组合回测) + 1 自选股(含群共享/批量分析) + 1 到价提醒 + 1 交易日记 + 1 财务 + 3 批量(对比/板块/历史复盘) + 2 新闻 + 7 市场数据(龙虎榜/北向/主力资金流/板块反查/指数/板块资金流/市场情绪) + 3 条件选股(条件筛选 + 一句话选股)
   - 数据查询: `analyze_stock` / `get_market_status` / `get_yujie_picks` / `get_portfolio`
   - 策略查询: `list_strategies` / `get_strategy_library` / `get_yujie_detail` / `analyze_with_strategy` / `analyze_with_strategies`(策略总管,按需组合) / `analyze_with_yujie`
   - 策略操作: `toggle_strategy` / `compile_strategy`(自定义规则编译,见下) / `set_strategy_params` / `enable_library_strategy`
   - 回测寻优选股: `backtest_strategy` / `grid_search_strategy` / `scan_with_strategy`(全市场策略选股) / `scan_combo`(多策略组合选股,AND共振/OR宽松,耗时约1-3分钟) / `scan_custom`(一句话策略选股,sandbox_scan.py 沙箱 Agent:LLM 写 strategy(df)->bool 代码→样本验证自愈→fork 子进程全市场扫描,任意指标任意参数,结果含生成代码,detail 哈希缓存)
   - 自选股: `watchlist`(add/remove/list)
+  - 到价提醒: `manage_alerts`(add/remove/list,盘中监控触发后推送,一次性)
+  - 交易日记: `journal`(buy/sell/note/list,查询附带实时盈亏)
   - 财务: `get_finance`(单股 PE/PB/市值/ROE/毛利率/净利率/EPS/营收/净利润)
   - 批量: `compare_stocks`(多股对比) / `analyze_sector`(板块成分股) / `query_history_picks`(历史玉姐复盘)
   - 新闻: `get_stock_news`(个股新闻,东财搜索接口,strict 过滤无关列表新闻)

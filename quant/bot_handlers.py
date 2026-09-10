@@ -270,6 +270,13 @@ def handler_analyze(ctx, code: str) -> str:
                 lines.append(f"  • {s.get('name','')}: {s.get('reason','')}")
         if not buys and not sells:
             lines.append("(无明显信号)")
+        # ATR 风控建议: 止损位 + 仓位
+        risk = r.get("risk")
+        if risk:
+            lines.append(
+                f"\n🛡 风控: ATR={risk['atr']} | 止损参考 {risk['stop']} "
+                f"| 10万资金1%风险 ≤{risk['max_qty']}股"
+            )
         if ctx.images:
             lines.append("\n[已附 K 线+指标图]")
         return "\n".join(lines)
@@ -516,6 +523,116 @@ def handler_watchlist(ctx, action: str, codes: list = None) -> str:
     else:
         return (f"❌ 未知 action: {action},应为 "
                 f"add/remove/list/analyze 或 group_add/group_remove/group_list/group_analyze")
+
+
+# ============ 到价提醒 ============
+
+
+def handler_alerts(ctx, action: str = "list", code: str = "", price: float = 0,
+                   op: str = "") -> str:
+    """到价提醒管理: add/remove/list。
+
+    op: 'above'=涨到 / 'below'=跌破;未指定时按当前价自动推断。
+    """
+    import alerts as alerts_mod
+
+    if action == "list":
+        items = alerts_mod.alert_list(ctx.session_id)
+        if not items:
+            return "📭 你没有设置到价提醒。\n用 \"茅台跌破1700提醒我\" 设置。"
+        lines = [f"⏰ 你的到价提醒({len(items)} 条,触发后自动失效)"]
+        for i, it in enumerate(items, 1):
+            op_cn = "涨到" if it["op"] == "above" else "跌破"
+            lines.append(f"{i}. {it['name'] or '-'}({it['code']}) {op_cn} {it['target']:g}")
+        return "\n".join(lines)
+
+    if action == "remove":
+        if not code:
+            return "❌ remove 需要股票代码"
+        try:
+            from stock_names import resolve_code
+        except ImportError:
+            resolve_code = lambda x: x if len(x) == 6 and x.isdigit() else None  # noqa: E731
+        c = resolve_code(code)
+        if not c:
+            return f"❌ 未能识别股票: {code}"
+        return alerts_mod.alert_remove(ctx.session_id, c)
+
+    if action != "add":
+        return "❌ action 应为 add/remove/list"
+
+    if not code or price <= 0:
+        return "❌ add 需要 code 和 price 参数(如 茅台 + 1700)"
+
+    try:
+        from stock_names import resolve_code
+    except ImportError:
+        resolve_code = lambda x: x if len(x) == 6 and x.isdigit() else None  # noqa: E731
+    c = resolve_code(code)
+    if not c:
+        return f"❌ 未能识别股票: {code}"
+    name = "" if code.isdigit() else code
+
+    # 名称缺失时拿实时名 + 现价
+    cur_price = 0.0
+    try:
+        import strategy_engine as se
+        rt = se.fetch_realtime([c])
+        if rt:
+            name = name or rt[0].get("name", "")
+            cur_price = float(rt[0].get("price") or 0)
+    except Exception:
+        pass
+
+    if op not in ("above", "below"):
+        # 未指定方向: 现价高于目标=等跌破, 现价低于目标=等涨到
+        op = "below" if cur_price and cur_price > price else "above"
+    result = alerts_mod.alert_add(ctx.session_id, c, name, op, float(price))
+    # 现价已满足条件: 提醒会在下次检查时立即触发,明确告知
+    if cur_price and ((op == "below" and cur_price <= price) or (op == "above" and cur_price >= price)):
+        op_cn = "低于" if op == "below" else "高于"
+        result += (f"\n⚠️ 现价 {cur_price:.2f} 已{op_cn}目标价 {price:g},"
+                   f"提醒将在下次盘中检查时立即触发")
+    else:
+        extra = f"(现价 {cur_price:.2f})" if cur_price else ""
+        result = f"{result} {extra}".strip()
+    return result
+
+
+# ============ 交易日记 ============
+
+
+def handler_journal(ctx, action: str = "list", code: str = "", price: float = 0,
+                    qty: float = 0, note: str = "", days: int = 0) -> str:
+    """交易日记: add=记一笔(买/卖/笔记), list=查询(附带实时盈亏)。"""
+    import journal as journal_mod
+
+    if action == "list":
+        c = ""
+        if code:
+            try:
+                from stock_names import resolve_code
+            except ImportError:
+                resolve_code = lambda x: x if len(x) == 6 and x.isdigit() else None  # noqa: E731
+            c = resolve_code(code) or ""
+        return journal_mod.journal_list(ctx.session_id, days=days, code=c)
+
+    if action not in ("add", "buy", "sell", "note"):
+        return "❌ action 应为 add/buy/sell/note/list"
+
+    # buy/sell/note 可直接作为 action
+    act = action if action in ("buy", "sell", "note") else "note"
+    if not code:
+        return "❌ 记日记需要股票代码,如 \"记一笔: 买入 茅台 100股\""
+    try:
+        from stock_names import resolve_code
+    except ImportError:
+        resolve_code = lambda x: x if len(x) == 6 and x.isdigit() else None  # noqa: E731
+    c = resolve_code(code)
+    if not c:
+        return f"❌ 未能识别股票: {code}"
+    name = "" if code.isdigit() else code
+    return journal_mod.journal_add(ctx.session_id, act, c, name, price, qty, note)
 
 
 def handler_portfolio(ctx, action: str = "list", code: str = "", qty: float = 0,
@@ -2316,20 +2433,36 @@ TOOL_HANDLERS = {
         args.get("min_score", 0), args.get("hit_rule", "")
     ),
     "get_portfolio": lambda ctx, args: handler_portfolio(
+        ctx,
         args.get("action", "list"),
         code=args.get("code", ""),
         qty=args.get("qty", 0),
         price=args.get("price", 0),
-        session_id=ctx.session_id,
     ),
     "get_finance": lambda ctx, args: handler_finance(args.get("code", "")),
     "compare_stocks": lambda ctx, args: handler_compare_stocks(args.get("codes", [])),
     "analyze_sector": lambda ctx, args: handler_analyze_sector(args.get("sector", "")),
     "query_history_picks": lambda ctx, args: handler_query_history_picks(args.get("date", "")),
     "manage_watchlist": lambda ctx, args: handler_watchlist(
+        ctx,
         args.get("action", "list"),
         args.get("codes", []),
-        session_id=ctx.session_id,
+    ),
+    "manage_alerts": lambda ctx, args: handler_alerts(
+        ctx,
+        args.get("action", "list"),
+        args.get("code", ""),
+        args.get("price", 0),
+        args.get("op", ""),
+    ),
+    "journal": lambda ctx, args: handler_journal(
+        ctx,
+        args.get("action", "list"),
+        args.get("code", ""),
+        args.get("price", 0),
+        args.get("qty", 0),
+        args.get("note", ""),
+        args.get("days", 0),
     ),
     # 策略管理 skill
     "list_strategies": lambda ctx, args: handler_list_strategies(),

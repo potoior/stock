@@ -70,6 +70,13 @@ def analyze_one(code: str) -> dict | None:
         return None
     if "error" in r:
         return None
+    # 信号绩效跟踪: 买卖信号落库(每日一次,同日去重)
+    try:
+        import signal_tracker
+
+        signal_tracker.record_signals(code, r)
+    except Exception:
+        pass
     rt = r.get("realtime") or {}
     return {
         "name": rt.get("name", ""),

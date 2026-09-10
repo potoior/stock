@@ -2459,6 +2459,40 @@ def verdict_from_votes(buy_n: int, sell_n: int, total_n: int) -> tuple:
     return "观望", "⏸"
 
 
+def _risk_info(df, capital: float = 100000.0, risk_pct: float = 0.01) -> dict | None:
+    """ATR(14) 风控: 止损位 + 仓位建议。
+
+    止损 = 现价 - 2×ATR(入场后跌破止损离场);
+    仓位 = 单笔可亏资金(默认 1%)÷ 每股风险。
+    """
+    try:
+        close = df["close"].astype(float)
+        high = df["high"].astype(float)
+        low = df["low"].astype(float)
+        if len(df) < 15:
+            return None
+        prev_close = close.shift(1)
+        tr = (high - low).combine(
+            (high - prev_close).abs(), max
+        ).combine((low - prev_close).abs(), max)
+        atr = tr.rolling(14).mean().iloc[-1]
+        price = float(close.iloc[-1])
+        if not atr or atr <= 0 or price <= 0:
+            return None
+        stop = price - 2 * float(atr)
+        if stop <= 0:
+            return None
+        per_share_risk = price - stop
+        return {
+            "atr": round(float(atr), 2),
+            "price": price,
+            "stop": round(stop, 2),
+            "max_qty": int(capital * risk_pct // per_share_risk),  # 10 万资金 1% 风险
+        }
+    except Exception:
+        return None
+
+
 def analyze(code: str, use_ai: bool = True, strategy_ids: list | None = None) -> dict:
     """分析个股,所有启用策略投票。
 
@@ -2665,6 +2699,7 @@ def analyze(code: str, use_ai: bool = True, strategy_ids: list | None = None) ->
         "sell_reasons": sell_sigs,
         "hold_reasons": hold_sigs,
         "kline": kdf.to_dict("records"),
+        "risk": _risk_info(df),
     }
 
 
