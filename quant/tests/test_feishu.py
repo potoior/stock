@@ -130,6 +130,79 @@ def test_send_text_network_exception_returns_none(tmp_path, monkeypatch):
     assert resp is None
 
 
+def test_broadcast_sends_to_all_chat_ids(tmp_path, monkeypatch):
+    """未指定 chat_id 时,chat_ids 列表中的每个群都发一遍。"""
+    _mock_config(tmp_path, monkeypatch, {
+        "enabled": True, "app_id": "x", "app_secret": "y", "chat_id": "oc_main",
+        "chat_ids": ["oc_main", "oc_second"],
+    })
+    bot = feishu.FeishuBot()
+    assert bot.chat_ids == ["oc_main", "oc_second"]
+    targets = []
+
+    def fake_post(url, body, bearer=None, timeout=10):
+        if "tenant_access_token" in url:
+            return {"code": 0, "tenant_access_token": "tok", "expire": 7200}
+        targets.append(json.loads(body)["receive_id"])
+        return {"code": 0, "data": {"message_id": "m1"}}
+
+    with patch("feishu._post_json", side_effect=fake_post):
+        resp = bot.send_text("hello")
+    assert resp["code"] == 0
+    assert targets == ["oc_main", "oc_second"]
+
+
+def test_broadcast_partial_failure_returns_success(tmp_path, monkeypatch):
+    """一个群失败不影响另一个群,返回成功响应。"""
+    _mock_config(tmp_path, monkeypatch, {
+        "enabled": True, "app_id": "x", "app_secret": "y", "chat_id": "oc_main",
+        "chat_ids": ["oc_main", "oc_second"],
+    })
+    bot = feishu.FeishuBot()
+
+    def fake_post(url, body, bearer=None, timeout=10):
+        if "tenant_access_token" in url:
+            return {"code": 0, "tenant_access_token": "tok", "expire": 7200}
+        target = json.loads(body)["receive_id"]
+        if target == "oc_main":
+            return {"code": 230002, "msg": "error"}
+        return {"code": 0, "data": {"message_id": "m1"}}
+
+    with patch("feishu._post_json", side_effect=fake_post):
+        resp = bot.send_text("hello")
+    assert resp["code"] == 0
+
+
+def test_explicit_chat_id_overrides_broadcast(tmp_path, monkeypatch):
+    """显式指定 chat_id 时不广播,只发单目标。"""
+    _mock_config(tmp_path, monkeypatch, {
+        "enabled": True, "app_id": "x", "app_secret": "y", "chat_id": "oc_main",
+        "chat_ids": ["oc_main", "oc_second"],
+    })
+    bot = feishu.FeishuBot()
+    targets = []
+
+    def fake_post(url, body, bearer=None, timeout=10):
+        if "tenant_access_token" in url:
+            return {"code": 0, "tenant_access_token": "tok", "expire": 7200}
+        targets.append(json.loads(body)["receive_id"])
+        return {"code": 0, "data": {"message_id": "m1"}}
+
+    with patch("feishu._post_json", side_effect=fake_post):
+        resp = bot.send_text("hello", chat_id="oc_direct")
+    assert resp["code"] == 0
+    assert targets == ["oc_direct"]
+
+
+def test_chat_ids_falls_back_to_chat_id(tmp_path, monkeypatch):
+    """未配置 chat_ids 时回落到单 chat_id(向后兼容)。"""
+    _mock_config(tmp_path, monkeypatch, {
+        "enabled": True, "app_id": "x", "app_secret": "y", "chat_id": "oc_only"
+    })
+    bot = feishu.FeishuBot()
+    assert bot.chat_ids == ["oc_only"]
+
+
 # -------- 卡片构造 --------
 
 

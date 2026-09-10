@@ -60,6 +60,13 @@ class FeishuBot:
         self.chat_id = chat_id or cfg.get("chat_id", "")
         self.enabled = bool(cfg.get("enabled", False)) if not app_id else True
         self.timeout = timeout
+        # 推送目标列表: 未显式指定 chat_id 时,chat_ids(列表)优先,回落到 [chat_id]
+        cfg_ids = cfg.get("chat_ids") if not chat_id else None
+        if isinstance(cfg_ids, str):
+            cfg_ids = [cfg_ids]
+        self.chat_ids = [str(x).strip() for x in (cfg_ids or []) if str(x).strip()]
+        if not self.chat_ids and self.chat_id:
+            self.chat_ids = [self.chat_id]
         # token 缓存: (token, expire_at)
         self._token = None
         self._token_expire_at = 0.0
@@ -99,14 +106,17 @@ class FeishuBot:
         return (data.get("bot") or {}).get("open_id")
 
     def send_text(self, text, chat_id=None):
-        """发送文本消息,返回响应 dict 或 None(失败/未启用)。"""
-        return self._send("text", json.dumps({"text": text}), chat_id)
+        """发送文本消息,返回响应 dict 或 None(失败/未启用)。
+
+        未指定 chat_id 时发到所有 chat_ids(多群广播)。
+        """
+        return self._broadcast("text", json.dumps({"text": text}), chat_id)
 
     def send_card(self, card, chat_id=None):
         """发送 interactive 卡片,card 是 dict 或 JSON 字符串。"""
         if isinstance(card, dict):
             card = json.dumps(card, ensure_ascii=False)
-        return self._send("interactive", card, chat_id)
+        return self._broadcast("interactive", card, chat_id)
 
     def send_image(self, png_bytes, chat_id=None):
         """发送图片消息。png_bytes 是 PNG 二进制数据。
@@ -117,8 +127,7 @@ class FeishuBot:
         if not self.enabled:
             log.info("feishu 未启用,跳过图片推送")
             return None
-        target = chat_id or self.chat_id
-        if not target:
+        if not (chat_id or self.chat_ids):
             log.warning("feishu chat_id 未配置,跳过图片推送")
             return None
         try:
@@ -127,10 +136,25 @@ class FeishuBot:
             if not image_key:
                 return None
             content = json.dumps({"image_key": image_key})
-            return self._send("image", content, target)
+            return self._broadcast("image", content, chat_id)
         except Exception as e:
             log.error("feishu 推送图片异常: %s", e)
             return None
+
+    def _broadcast(self, msg_type, content_str, chat_id=None):
+        """单目标直发;未指定目标时发到所有 chat_ids。
+
+        全部目标都尝试发送,返回首个成功响应(无成功时返回最后失败响应)。
+        """
+        targets = [chat_id] if chat_id else self.chat_ids
+        resp = None
+        for cid in targets:
+            cur = self._send(msg_type, content_str, cid)
+            if cur is None:
+                continue
+            if resp is None or (resp.get("code") != 0 and cur.get("code") == 0):
+                resp = cur
+        return resp
 
     def _upload_image(self, png_bytes, token):
         """上传图片到飞书,返回 image_key。"""
